@@ -17,8 +17,20 @@ struct RomModule
 {
 	const char *name;	/* name of the file to load */
 	int offset;			/* offset to load it to */
-	int size;			/* length of the file */
+	int length;			/* length of the file */
 };
+
+/* there are some special cases for the above. name, offset and size all set to 0 */
+/* mark the end of the aray. If name is 0 and the others aren't, that means "continue */
+/* reading the previous from from this address". If length is 0 and offset is not 0, */
+/* that marks the start of a new memory region. Confused? Well, don't worry, just use */
+/* the macros below. */
+
+#define ROM_START(name) static struct RomModule name[] = {	/* start of table */
+#define ROM_REGION(length) { 0, length, 0 },	/* start of memory region */
+#define ROM_LOAD(name,offset,length) { name, offset, length },	/* ROM to load */
+#define ROM_CONTINUE(offset,length) { 0, offset, length },	/* continue loading the previous ROM */
+#define ROM_END { 0, 0, 0 }	}; /* end of table */
 
 
 struct GfxLayout
@@ -26,7 +38,7 @@ struct GfxLayout
 	int width,height;	/* width and height of chars/sprites */
 	int total;	/* total numer of chars/sprites in the rom */
 	int planes;	/* number of bitplanes */
-	int planeincrement;	/* distance (in bits) between two adjacent bitplanes */
+	int planeoffset[8];	/* start of every bitplane */
 	int xoffset[32];	/* coordinates of the bit corresponding to the pixel */
 	int yoffset[32];	/* of the given coordinates */
 	int charincrement;	/* distance between two consecutive characters/sprites */
@@ -58,22 +70,9 @@ struct rectangle
 
 
 
-/* dipswitch setting definition */
-struct DSW
-{
-	int num;	/* dispswitch pack affected */
-				/* -1 terminates the array */
-	int mask;	/* bits affected */
-	const char *name;	/* name of the setting */
-	const char *values[16];/* null terminated array of names for the values */
-									/* the setting can have */
-	int reverse; 	/* set to 1 to display values in reverse order */
-};
-
-
 struct DisplayText
 {
-	const unsigned char *text;	/* 0 marks the end of the array */
+	const char *text;	/* 0 marks the end of the array */
 	int color;
 	int x;
 	int y;
@@ -83,14 +82,18 @@ struct DisplayText
 #define TRANSPARENCY_PEN 1
 #define TRANSPARENCY_COLOR 2
 
-int readroms(unsigned char *dest,const struct RomModule *romp,const char *basename);
+int readroms(const struct RomModule *romp,const char *basename);
 struct GfxElement *decodegfx(const unsigned char *src,const struct GfxLayout *gl);
 void freegfx(struct GfxElement *gfx);
 void drawgfx(struct osd_bitmap *dest,const struct GfxElement *gfx,
 		unsigned int code,unsigned int color,int flipx,int flipy,int sx,int sy,
-		struct rectangle *clip,int transparency,int transparent_color);
-void setdipswitches(int *dsw,const struct DSW *dswsettings);
+		const struct rectangle *clip,int transparency,int transparent_color);
+void copybitmap(struct osd_bitmap *dest,struct osd_bitmap *src,int flipx,int flipy,int sx,int sy,
+		const struct rectangle *clip,int transparency,int transparent_color);
+void clearbitmap(struct osd_bitmap *bitmap);
+int setdipswitches(void);
 void displaytext(const struct DisplayText *dt,int erase);
+int showcharset(void);
 
 
 #endif

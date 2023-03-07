@@ -11,21 +11,28 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
+#include "driver.h"
 #include "osdepend.h"
 
 #include "SDL.h"
+
+// whether sound is wanted or not (command line argument "-nosound")
+int play_sound;
+
+// joystick state (not implemented)
+int osd_joy_up, osd_joy_down, osd_joy_left, osd_joy_right;
+int osd_joy_b1, osd_joy_b2,   osd_joy_b3,   osd_joy_b4;
 
 #define MAX_PENS 256
 #define NKEYS    OSD_KEY_F12+1
 
 static int displayScale;
 
-int play_sound;
-
-// joystick state (not implemented)
-int osd_joy_up, osd_joy_down, osd_joy_left, osd_joy_right;
-int osd_joy_b1, osd_joy_b2,   osd_joy_b3,   osd_joy_b4;
+#define NS_PER_SECOND 1000000000
+#define KEEP_ALIVE_DISPLAY_TIME ((uint64_t) (0.5*NS_PER_SECOND)) // refresh every half a second
+static uint64_t last_display_update_time;
 
 // audio
 #define NUM_AUDIO_CHANNELS 4
@@ -49,9 +56,14 @@ void audioCallback(void *userdata, Uint8 *stream, int len)
     AudioChannel *audioChannel = (AudioChannel *) userdata;
     char *s = (char *) stream; // convert to signed!
     for( int i=0; i<len; i++) {
-        s[i] = audioChannel->data[((int)audioChannel->time) % audioChannel->len];
-        s[i] *= (float) audioChannel->volume / (float) 512;
-        audioChannel->time += (double) audioChannel->freq / (double) SAMPLE_RATE;
+        if( audioChannel->len < 1 ) {
+            s[i] = 0;
+        }
+        else {
+            s[i] = audioChannel->data[((int)audioChannel->time) % audioChannel->len];
+            s[i] *= (float) audioChannel->volume / (float) 512;
+            audioChannel->time += (double) audioChannel->freq / (double) SAMPLE_RATE;
+        }
     }
 }
 
@@ -63,8 +75,8 @@ static struct osd_bitmap *displayBitmap;
 
 static int first_free_pen;
 
-static unsigned char *pixelsMappedTo332;
-static unsigned char paletteMapping[MAX_PENS];
+static uint32_t *pixelsMappedToARGB8888;
+static uint32_t paletteMapping[MAX_PENS];
 
 static int keys[NKEYS];
 
@@ -131,7 +143,7 @@ void init_keymap()
     map_sdl_scancode_to_osd_key[SDL_SCANCODE_2           ] = OSD_KEY_2;
     map_sdl_scancode_to_osd_key[SDL_SCANCODE_3           ] = OSD_KEY_3;
     map_sdl_scancode_to_osd_key[SDL_SCANCODE_4           ] = OSD_KEY_4;
-    map_sdl_scancode_to_osd_key[SDL_SCANCODE_5           ] = OSD_KEY_5;
+    map_sdl_scancode_to_osd_key[SDL_SCANCODE_5           ] = OSD_KEY_3; //TOMCXXX KLUDGE to map coin in from modern mame (5 instead of 3)
     map_sdl_scancode_to_osd_key[SDL_SCANCODE_6           ] = OSD_KEY_6;
     map_sdl_scancode_to_osd_key[SDL_SCANCODE_7           ] = OSD_KEY_7;
     map_sdl_scancode_to_osd_key[SDL_SCANCODE_8           ] = OSD_KEY_8;
@@ -186,7 +198,7 @@ int osd_init(int argc,char **argv)
     displayWindow     = (SDL_Window *) 0;
     displayRenderer   = (SDL_Renderer *) 0;
     displayBitmap     = (struct osd_bitmap *) 0;
-    pixelsMappedTo332 = (unsigned char *) 0;
+    pixelsMappedToARGB8888 = (uint32_t *) 0;
     first_free_pen    = 0;
     frame_count       = 0;
     play_sound        = 1;
@@ -228,13 +240,18 @@ int osd_init(int argc,char **argv)
     return 0;
 }
 
-void osd_exit(void)
+void stop_all_sound()
 {
     if( play_sound ) {
         for( int channel=0; channel<NUM_AUDIO_CHANNELS; channel++ ) {
             osd_stop_sample(channel);
         }
     }
+}
+
+void osd_exit(void)
+{
+    stop_all_sound();
     SDL_Quit();
 }
 
@@ -242,19 +259,19 @@ struct osd_bitmap *osd_create_display(int width,int height)
 {
     SDLCHK(displayWindow   = SDL_CreateWindow( "origmame", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width*displayScale, height*displayScale, SDL_WINDOW_RESIZABLE ));
     SDLCHK(displayRenderer = SDL_CreateRenderer( displayWindow, -1, 0 ));
-    SDLCHK(displayTexture  = SDL_CreateTexture(displayRenderer, SDL_PIXELFORMAT_RGB332, SDL_TEXTUREACCESS_STREAMING, width, height));
+    SDLCHK(displayTexture  = SDL_CreateTexture(displayRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height));
 
     displayBitmap = osd_create_bitmap(width,height);
-    pixelsMappedTo332 = malloc(width * height);
+    pixelsMappedToARGB8888 = (uint32_t *) debug_malloc(width * height * sizeof(uint32_t));
 
     return displayBitmap;
 }
 
 void osd_close_display(void)
 {
-    if( pixelsMappedTo332 ) {
-        free(pixelsMappedTo332);
-        pixelsMappedTo332 = (unsigned char *) 0;
+    if( pixelsMappedToARGB8888 ) {
+        debug_free(pixelsMappedToARGB8888);
+        pixelsMappedToARGB8888 = (uint32_t *) 0;
     }
     if( displayBitmap ) {
         osd_free_bitmap(displayBitmap);
@@ -283,9 +300,7 @@ void poll_events()
 
             // hack - turn sound off when paused or dipswitch
             if( osd_key == OSD_KEY_P || osd_key == OSD_KEY_TAB ) {
-                for( int i=0; i<NUM_AUDIO_CHANNELS; i++ ) {
-                    osd_stop_sample(i);
-                }
+                stop_all_sound();
             }
 
             keys[osd_key] = 1;
@@ -301,30 +316,55 @@ void poll_events()
     }
 }
 
+uint64_t now()
+{
+    struct timespec ts;
+    uint64_t now;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    now = ts.tv_sec * NS_PER_SECOND + ts.tv_nsec;
+    return now;
+}
+
+void do_update_display()
+{
+    int npixels = displayBitmap->width * displayBitmap->height;
+    unsigned char *pixels = (unsigned char *) displayBitmap->private;
+    for( int i=0; i<npixels; i++ ) {
+        pixelsMappedToARGB8888[i] = paletteMapping[pixels[i]];
+    }
+
+    SDL_UpdateTexture(displayTexture, NULL, pixelsMappedToARGB8888, displayBitmap->width*sizeof(uint32_t));
+    SDL_RenderCopy(displayRenderer, displayTexture, NULL, NULL);
+    SDL_RenderPresent(displayRenderer);
+
+    last_display_update_time = now();
+}
+
 void osd_update_display(void)
 {
     frame_count++;
 
-    // don't know how to do palette stuff in SDL for textures.
-    // so we just do our own crude mapping here (per frame).
-    int npixels = displayBitmap->width * displayBitmap->height;
-    unsigned char *pixels = (unsigned char *) displayBitmap->private;
-    for( int i=0; i<npixels; i++ ) {
-        pixelsMappedTo332[i] = paletteMapping[pixels[i]];
-    }
-
-    SDL_UpdateTexture(displayTexture, NULL, pixelsMappedTo332, displayBitmap->width);
-    SDL_RenderCopy(displayRenderer, displayTexture, NULL, NULL);
-    SDL_RenderPresent(displayRenderer);
+    do_update_display();
 
     poll_events();
+}
+
+void keep_alive(void)
+{
+    // to be called in tight loops.
+    // ensures that SDL events continue to be polled
+    poll_events();
+
+    // also, periodically refresh the display
+    if( now() - last_display_update_time > KEEP_ALIVE_DISPLAY_TIME ) {
+        do_update_display();
+    }
 }
 
 int osd_obtain_pen(unsigned char red, unsigned char green, unsigned char blue)
 {
     int pen = first_free_pen;
-	// we use SDL's built-in 332 palette
-    paletteMapping[pen] = (red & 0xe0) | ((green >> 3) & 0x1c) | (blue & 0x3);
+    paletteMapping[pen] = 0xff000000 | (red << 16) | (green <<  8) | (blue << 0);
     first_free_pen++;
     if(first_free_pen > MAX_PENS) {
         first_free_pen = 0;
@@ -357,6 +397,8 @@ struct osd_bitmap *osd_create_bitmap(int width,int height)
         }
 
         bitmap->private = bm; // tuck away array pointer
+
+        clearbitmap(bitmap); // whatsnew.txt for 0.9 said this must be here.
     }
 
     return bitmap;
@@ -372,7 +414,7 @@ void osd_free_bitmap(struct osd_bitmap *bitmap)
 
 void osd_update_audio(void)
 {
-	// not sure what needs to happen here
+    // not sure what needs to happen here
 }
 
 void osd_play_sample(int channel,unsigned char *data,int len,int freq,int volume,int loop)
@@ -417,9 +459,7 @@ void osd_stop_sample(int channel)
 int osd_key_pressed(int keycode)
 {
     int pressed = 0;
-
-    poll_events(); // this is important.  several places in code: while(osd_keypressed(key));
-
+    keep_alive(); // this is important.  several places in code: while(osd_keypressed(key));
     if( keycode >= 0 && keycode <= OSD_KEY_F12 ) {
         pressed = keys[keycode];
     }
@@ -431,7 +471,7 @@ int osd_read_key(void)
 {
     last_key_pressed = -1;
     while(1) {
-        poll_events(); // important
+        keep_alive(); // important
         if( last_key_pressed >= 0 ) {
             break;
         }
@@ -442,5 +482,10 @@ int osd_read_key(void)
 
 void osd_poll_joystick(void)
 {
-	// leaving joystick unimplemented for now
+    // leaving joystick unimplemented for now
+}
+
+int osd_joy_pressed(int joycode)
+{
+    return 0;
 }

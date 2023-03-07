@@ -3,17 +3,10 @@
   common.c
 
   Generic functions used in different emulators.
-  There's not much for now, but it could grow in the future... ;-)
 
 ***************************************************************************/
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include "driver.h"
-#include "machine.h"
-#include "common.h"
-#include "osdepend.h"
 
 
 /***************************************************************************
@@ -21,9 +14,6 @@
   Read ROMs into memory.
 
   Arguments:
-  unsigned char *dest - Pointer to the start of the memory region
-                        where the ROMs will be loaded.
-
   const struct RomModule *romp - pointer to an array of Rommodule structures,
                                  as defined in common.h.
 
@@ -35,35 +25,96 @@
 						 will be loaded.
 
 ***************************************************************************/
-int readroms(unsigned char *dest,const struct RomModule *romp,const char *basename)
+int readroms(const struct RomModule *romp,const char *basename)
 {
-	FILE *f;
-	char buf[1024+1];
-	char name[1024+1024+1];
+	int region;
 
 
-	while (romp->name)
+	for (region = 0;region < MAX_MEMORY_REGIONS;region++)
+		Machine->memory_region[region] = 0;
+
+	region = 0;
+
+	while (romp->name || romp->offset || romp->length)
 	{
-		sprintf(buf,romp->name,basename);
-		sprintf(name,"roms/%s/%s",basename,buf);
+		int region_size,i;
 
-		if ((f = fopen(name,"rb")) == 0)
+
+		if (romp->name || romp->length)
 		{
-			printf("Unable to open file %s\n",name);
-			return 1;
+			printf("Error in RomModule definition: expecting ROM_REGION\n");
+			goto getout;
 		}
-		if (fread(dest + romp->offset,1,romp->size,f) != romp->size)
+
+		region_size = romp->offset;
+		if ((Machine->memory_region[region] = malloc(region_size)) == 0)
 		{
-			printf("Unable to read file %s\n",name);
-			fclose(f);
-			return 1;
+			printf("Unable to allocate %d bytes of RAM\n",region_size);
+			goto getout;
 		}
-		fclose(f);
+
+		/* fill the newly allocated memory with random data - simulate turning */
+		/* on the original machine! ;-) */
+		for (i = 0;i < region_size;i++) Machine->memory_region[region][i] = rand();
 
 		romp++;
+
+		while (romp->length)
+		{
+			FILE *f;
+			char buf[100];
+			char name[100];
+
+
+			if (romp->name == 0)
+			{
+				printf("Error in RomModule definition: ROM_CONTINUE not preceded by ROM_LOAD\n");
+				goto getout;
+			}
+
+			sprintf(buf,romp->name,basename);
+			sprintf(name,"roms/%s/%s",basename,buf);
+
+			if ((f = fopen(name,"rb")) == 0)
+			{
+				printf("Unable to open file %s\n",name);
+				goto getout;
+			}
+
+			do
+			{
+				if (romp->offset + romp->length > region_size)
+				{
+					printf("Error in RomModule definition: %s out of memory region space\n",name);
+					fclose(f);
+					goto getout;
+				}
+
+				if (fread(Machine->memory_region[region] + romp->offset,1,romp->length,f) != romp->length)
+				{
+					printf("Unable to read file %s\n",name);
+					fclose(f);
+					goto getout;
+				}
+
+				romp++;
+			} while (romp->length && romp->name == 0);
+
+			fclose(f);
+		}
+
+		region++;
 	}
 
 	return 0;
+
+getout:
+	for (region = 0;region < MAX_MEMORY_REGIONS;region++)
+	{
+		free(Machine->memory_region[region]);
+		Machine->memory_region[region] = 0;
+	}
+	return 1;
 }
 
 
@@ -162,7 +213,7 @@ struct GfxElement *decodegfx(const unsigned char *src,const struct GfxLayout *gl
 	{
 		for (plane = 0;plane < gl->planes;plane++)
 		{
-			offs = c * gl->charincrement + plane * gl->planeincrement;
+			offs = c * gl->charincrement + gl->planeoffset[plane];
 			for (y = 0;y < gl->height;y++)
 			{
 				for (x = 0;x < gl->width;x++)
@@ -210,13 +261,15 @@ void freegfx(struct GfxElement *gfx)
 ***************************************************************************/
 void drawgfx(struct osd_bitmap *dest,const struct GfxElement *gfx,
 		unsigned int code,unsigned int color,int flipx,int flipy,int sx,int sy,
-		struct rectangle *clip,int transparency,int transparent_color)
+		const struct rectangle *clip,int transparency,int transparent_color)
 {
 	int ox,oy,ex,ey,x,y,start;
 	const unsigned char *sd;
 	unsigned char *bm;
 	int col;
 
+
+	if (!gfx) return;
 
 	/* check bounds */
 	ox = sx;
@@ -460,7 +513,6 @@ void drawgfx(struct osd_bitmap *dest,const struct GfxElement *gfx,
 						{
 							bm = dest->line[y] + sx;
 							sd = gfx->gfxdata->line[start + gfx->height-1 - (y-oy)] + (sx-ox);
-							for (x = sx;x <= ex;x++)
 							memcpy(bm,sd,ex-sx+1);
 						}
 					}
@@ -478,64 +530,128 @@ void drawgfx(struct osd_bitmap *dest,const struct GfxElement *gfx,
 
 			case TRANSPARENCY_PEN:
 			case TRANSPARENCY_COLOR:
-				if (flipx)
 				{
-					if (flipy)	/* XY flip */
+					int *sd4,x1;
+					int trans4;
+
+
+					trans4 = transparent_color * 0x01010101;
+
+					if (flipx)
 					{
-						for (y = sy;y <= ey;y++)
+						if (flipy)	/* XY flip */
 						{
-							bm = dest->line[y] + sx;
-							sd = gfx->gfxdata->line[start + gfx->height-1 - (y-oy)] + gfx->width-1 - (sx-ox);
-							for (x = sx;x <= ex;x++)
+							for (y = sy;y <= ey;y++)
 							{
-								col = *(sd--);
-								if (col != transparent_color) *bm = col;
-								bm++;
+								bm = dest->line[y] + sx;
+								sd4 = (int *)(gfx->gfxdata->line[start + gfx->height-1 - (y-oy)] + gfx->width-1 - (sx-ox) - 3);
+								for (x = sx;x <= ex;x+=4)
+								{
+		/* WARNING: if the width of the area to copy is not a multiple of sizeof(int), this */
+		/* might access memory outside it. The copy will be execute dcorrectly, though. */
+									if (*sd4 == trans4)
+									{
+										bm += 4;
+									}
+									else
+									{
+										sd = ((unsigned char *)sd4) + 3;
+										for (x1 = 4;x1 > 0;x1--)
+										{
+											col = *(sd--);
+											if (col != transparent_color) *bm = col;
+											bm++;
+										}
+									}
+									sd4--;
+								}
+							}
+						}
+						else 	/* X flip */
+						{
+							for (y = sy;y <= ey;y++)
+							{
+								bm = dest->line[y] + sx;
+								sd4 = (int *)(gfx->gfxdata->line[start + (y-oy)] + gfx->width-1 - (sx-ox) - 3);
+								for (x = sx;x <= ex;x+=4)
+								{
+		/* WARNING: if the width of the area to copy is not a multiple of sizeof(int), this */
+		/* might access memory outside it. The copy will be execute dcorrectly, though. */
+									if (*sd4 == trans4)
+									{
+										bm += 4;
+									}
+									else
+									{
+										sd = ((unsigned char *)sd4) + 3;
+										for (x1 = 4;x1 > 0;x1--)
+										{
+											col = *(sd--);
+											if (col != transparent_color) *bm = col;
+											bm++;
+										}
+									}
+									sd4--;
+								}
 							}
 						}
 					}
-					else 	/* X flip */
+					else
 					{
-						for (y = sy;y <= ey;y++)
+						if (flipy)	/* Y flip */
 						{
-							bm = dest->line[y] + sx;
-							sd = gfx->gfxdata->line[start + (y-oy)] + gfx->width-1 - (sx-ox);
-							for (x = sx;x <= ex;x++)
+							for (y = sy;y <= ey;y++)
 							{
-								col = *(sd--);
-								if (col != transparent_color) *bm = col;
-								bm++;
+								bm = dest->line[y] + sx;
+								sd4 = (int *)(gfx->gfxdata->line[start + gfx->height-1 - (y-oy)] + (sx-ox));
+								for (x = sx;x <= ex;x+=4)
+								{
+		/* WARNING: if the width of the area to copy is not a multiple of sizeof(int), this */
+		/* might access memory outside it. The copy will be execute dcorrectly, though. */
+									if (*sd4 == trans4)
+									{
+										bm += 4;
+									}
+									else
+									{
+										sd = (unsigned char *)sd4;
+										for (x1 = 4;x1 > 0;x1--)
+										{
+											col = *(sd++);
+											if (col != transparent_color) *bm = col;
+											bm++;
+										}
+									}
+									sd4++;
+								}
 							}
 						}
-					}
-				}
-				else
-				{
-					if (flipy)	/* Y flip */
-					{
-						for (y = sy;y <= ey;y++)
+						else		/* normal */
 						{
-							bm = dest->line[y] + sx;
-							sd = gfx->gfxdata->line[start + gfx->height-1 - (y-oy)] + (sx-ox);
-							for (x = sx;x <= ex;x++)
+							for (y = sy;y <= ey;y++)
 							{
-								col = *(sd++);
-								if (col != transparent_color) *bm = col;
-								bm++;
-							}
-						}
-					}
-					else		/* normal */
-					{
-						for (y = sy;y <= ey;y++)
-						{
-							bm = dest->line[y] + sx;
-							sd = gfx->gfxdata->line[start + (y-oy)] + (sx-ox);
-							for (x = sx;x <= ex;x++)
-							{
-								col = *(sd++);
-								if (col != transparent_color) *bm = col;
-								bm++;
+								bm = dest->line[y] + sx;
+								sd4 = (int *)(gfx->gfxdata->line[start + (y-oy)] + (sx-ox));
+								for (x = sx;x <= ex;x+=4)
+								{
+		/* WARNING: if the width of the area to copy is not a multiple of sizeof(int), this */
+		/* might access memory outside it. The copy will be execute dcorrectly, though. */
+									if (*sd4 == trans4)
+									{
+										bm += 4;
+									}
+									else
+									{
+										sd = (unsigned char *)sd4;
+										for (x1 = 4;x1 > 0;x1--)
+										{
+											col = *(sd++);
+											if (col != transparent_color) *bm = col;
+											bm++;
+										}
+									}
+									sd4++;
+								}
 							}
 						}
 					}
@@ -547,13 +663,50 @@ void drawgfx(struct osd_bitmap *dest,const struct GfxElement *gfx,
 
 
 
-void setdipswitches(int *dsw,const struct DSW *dswsettings)
+/***************************************************************************
+
+  Use drawgfx() to copy a bitmap onto another at the given position.
+  This function will very likely change in the future.
+
+***************************************************************************/
+void copybitmap(struct osd_bitmap *dest,struct osd_bitmap *src,int flipx,int flipy,int sx,int sy,
+		const struct rectangle *clip,int transparency,int transparent_color)
+{
+	static struct GfxElement mygfx =
+	{
+		0,0,0,	/* filled in later */
+		1,1,0,1
+	};
+
+	mygfx.width = src->width;
+	mygfx.height = src->height;
+	mygfx.gfxdata = src;
+	drawgfx(dest,&mygfx,0,0,flipx,flipy,sx,sy,clip,transparency,transparent_color);
+}
+
+
+
+void clearbitmap(struct osd_bitmap *bitmap)
+{
+	int i;
+
+
+	for (i = 0;i < bitmap->height;i++)
+		memset(bitmap->line[i],Machine->background_pen,bitmap->width);
+}
+
+
+
+int setdipswitches(void)
 {
 	struct DisplayText dt[40];
 	int settings[20];
 	int i,s,key;
 	int total;
+	const struct DSW *dswsettings;
 
+
+	dswsettings = Machine->drv->dswsettings;
 
 	total = 0;
 	while (dswsettings[total].num != -1)
@@ -562,8 +715,8 @@ void setdipswitches(int *dsw,const struct DSW *dswsettings)
 
 
 		msk = dswsettings[total].mask;
-		if (msk == 0) return;	/* error in DSW definition, quit */
-		val = dsw[dswsettings[total].num];
+		if (msk == 0) return 0;	/* error in DSW definition, quit */
+		val = Machine->drv->input_ports[dswsettings[total].num].default_value;
 		while ((msk & 1) == 0)
 		{
 			val >>= 1;
@@ -580,12 +733,12 @@ void setdipswitches(int *dsw,const struct DSW *dswsettings)
 		for (i = 0;i < total;i++)
 		{
 			dt[2 * i].color = (i == s) ? Machine->drv->yellow_text : Machine->drv->white_text;
-			dt[2 * i].text = (unsigned char *) dswsettings[i].name;
+			dt[2 * i].text = dswsettings[i].name;
 			dt[2 * i].x = 2*8;
 			dt[2 * i].y = 2*8 * i + (Machine->drv->screen_height - 2*8 * (total - 1)) / 2;
 			dt[2 * i + 1].color = (i == s) ? Machine->drv->yellow_text : Machine->drv->white_text;
-			dt[2 * i + 1].text = (unsigned char *) dswsettings[i].values[settings[i]];
-			dt[2 * i + 1].x = Machine->drv->screen_width - 2*8 - 8*strlen((char *) dt[2 * i + 1].text);
+			dt[2 * i + 1].text = dswsettings[i].values[settings[i]];
+			dt[2 * i + 1].x = Machine->drv->screen_width - 2*8 - 8*strlen(dt[2 * i + 1].text);
 			dt[2 * i + 1].y = dt[2 * i].y;
 		}
 		dt[2 * i].text = 0;	/* terminate array */
@@ -630,8 +783,6 @@ void setdipswitches(int *dsw,const struct DSW *dswsettings)
 
 	while (osd_key_pressed(key));	/* wait for key release */
 
-	if (key == OSD_KEY_ESC) Z80_Running = 0;
-
 	while (--total >= 0)
 	{
 		int msk;
@@ -644,12 +795,16 @@ void setdipswitches(int *dsw,const struct DSW *dswsettings)
 			msk >>= 1;
 		}
 
-		dsw[dswsettings[total].num] = (dsw[dswsettings[total].num] & ~dswsettings[total].mask) | settings[total];
+		Machine->drv->input_ports[dswsettings[total].num].default_value =
+				(Machine->drv->input_ports[dswsettings[total].num].default_value
+				& ~dswsettings[total].mask) | settings[total];
 	}
 
 	/* clear the screen before returning */
-	for (i = 0;i < Machine->scrbitmap->height;i++)
-		memset(Machine->scrbitmap->line[i],Machine->background_pen,Machine->scrbitmap->width);
+	clearbitmap(Machine->scrbitmap);
+
+	if (key == OSD_KEY_ESC) return 1;
+	else return 0;
 }
 
 
@@ -665,33 +820,61 @@ void setdipswitches(int *dsw,const struct DSW *dswsettings)
 ***************************************************************************/
 void displaytext(const struct DisplayText *dt,int erase)
 {
-	if (erase)
-	{
-		int i;
-
-
-		for (i = 0;i < Machine->scrbitmap->height;i++)
-			memset(Machine->scrbitmap->line[i],Machine->background_pen,Machine->scrbitmap->width);
-	}
+	if (erase) clearbitmap(Machine->scrbitmap);
 
 	while (dt->text)
 	{
-		int x;
-		const unsigned char *c;
+		int x,y;
+		const char *c;
 
 
 		x = dt->x;
+		y = dt->y;
 		c = dt->text;
 
 		while (*c)
 		{
-			if (*c != ' ')
+			if (*c == '\n')
+			{
+				x = dt->x;
+				y += Machine->gfx[0]->height + 1;
+			}
+			else if (*c == ' ')
+			{
+				/* don't try to word wrap at the beginning of a line (this would cause */
+				/* an endless loop if a word is longer than a line) */
+				if (x == dt->x)
+					x += Machine->gfx[0]->width;
+				else
+				{
+					int nextlen;
+					const char *nc;
+
+
+					x += Machine->gfx[0]->width;
+					nc = c+1;
+					while (*nc && *nc != ' ' && *nc != '\n')
+						nc++;
+
+					nextlen = nc - c - 1;
+
+					/* word wrap */
+					if (x + nextlen * Machine->gfx[0]->width >= Machine->drv->screen_width)
+					{
+						x = dt->x;
+						y += Machine->gfx[0]->height + 1;
+					}
+				}
+			}
+			else
 			{
 				if (*c >= '0' && *c <= '9')
-					drawgfx(Machine->scrbitmap,Machine->gfx[0],*c - '0' + Machine->drv->numbers_start,dt->color,0,0,x,dt->y,0,TRANSPARENCY_NONE,0);
-				else drawgfx(Machine->scrbitmap,Machine->gfx[0],*c - 'A' + Machine->drv->letters_start,dt->color,0,0,x,dt->y,0,TRANSPARENCY_NONE,0);
+					drawgfx(Machine->scrbitmap,Machine->gfx[0],*c - '0' + Machine->drv->numbers_start,dt->color,0,0,x,y,0,TRANSPARENCY_NONE,0);
+				else drawgfx(Machine->scrbitmap,Machine->gfx[0],*c - 'A' + Machine->drv->letters_start,dt->color,0,0,x,y,0,TRANSPARENCY_NONE,0);
+
+				x += Machine->gfx[0]->width;
 			}
-			x += 8;
+
 			c++;
 		}
 
@@ -699,4 +882,74 @@ void displaytext(const struct DisplayText *dt,int erase)
 	}
 
 	osd_update_display();
+}
+
+
+
+int showcharset(void)
+{
+	int i,key,cpl;
+	struct DisplayText dt[2];
+	char buf[80];
+	int bank,color;
+
+
+	bank = 0;
+	color = 0;
+
+	do
+	{
+		clearbitmap(Machine->scrbitmap);
+
+		cpl = Machine->scrbitmap->width / Machine->gfx[bank]->width;
+
+		for (i = 0;i < Machine->drv->gfxdecodeinfo[bank].gfxlayout->total;i++)
+		{
+			drawgfx(Machine->scrbitmap,Machine->gfx[bank],
+					i,color,
+					0,0,
+					(i % cpl) * Machine->gfx[bank]->width,
+					Machine->gfx[0]->height+1 + (i / cpl) * Machine->gfx[bank]->height,
+					0,TRANSPARENCY_NONE,0);
+		}
+
+		sprintf(buf,"GFXSET %d  COLOR %d",bank,color);
+		dt[0].text = buf;
+		dt[0].color = Machine->drv->paused_color;
+		dt[0].x = 0;
+		dt[0].y = 0;
+		dt[1].text = 0;
+		displaytext(dt,0);
+
+
+		key = osd_read_key();
+
+		switch (key)
+		{
+			case OSD_KEY_RIGHT:
+				if (Machine->gfx[bank + 1]) bank++;
+				break;
+
+			case OSD_KEY_LEFT:
+				if (bank > 0) bank--;
+				break;
+
+			case OSD_KEY_UP:
+				if (color < Machine->drv->gfxdecodeinfo[bank].total_color_codes - 1)
+					color++;
+				break;
+
+			case OSD_KEY_DOWN:
+				if (color > 0) color--;
+				break;
+		}
+	} while (key != OSD_KEY_F4 && key != OSD_KEY_ESC);
+
+	while (osd_key_pressed(key));	/* wait for key release */
+
+	/* clear the screen before returning */
+	clearbitmap(Machine->scrbitmap);
+
+	if (key == OSD_KEY_ESC) return 1;
+	else return 0;
 }

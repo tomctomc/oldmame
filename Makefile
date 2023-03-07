@@ -11,13 +11,35 @@ STRIP_OR_NOT=
 
 #-DX86_ASM
 
-CFLAGS = ${DEBUG_OR_OPTIMIZE} -Isrc -Isrc/Z80 -I/usr/include/SDL2 -Wall -Werror
+CFLAGS = ${DEBUG_OR_OPTIMIZE} -DUNIX -Isrc -Isrc/Z80 -I/usr/include/SDL2 -Wall #-Werror
 LIBS   = -lSDL2 -lSDL2_mixer
-OBJS   = obj/mame.o obj/common.o obj/machine.o obj/driver.o obj/osdepend.o \
-         obj/pacman/machine.o \
-		 obj/pacman/driver.o obj/crush/machine.o obj/crush/driver.o \
-         obj/pengo/machine.o obj/pengo/vidhrdw.o obj/pengo/sndhrdw.o obj/pengo/driver.o \
-         obj/ladybug/machine.o obj/ladybug/vidhrdw.o obj/ladybug/sndhrdw.o obj/ladybug/driver.o \
+OBJS   = obj/mame.o obj/common.o obj/driver.o obj/osdepend.o \
+         obj/machine/pacman.o obj/vidhrdw/pacman.o obj/drivers/pacman.o \
+				 obj/drivers/crush.o \
+         obj/vidhrdw/pengo.o obj/sndhrdw/pengo.o obj/drivers/pengo.o \
+         obj/machine/ladybug.o obj/vidhrdw/ladybug.o obj/sndhrdw/ladybug.o obj/drivers/ladybug.o \
+         obj/machine/mrdo.o obj/vidhrdw/mrdo.o obj/drivers/mrdo.o \
+         obj/vidhrdw/cclimber.o obj/sndhrdw/cclimber.o obj/drivers/cclimber.o \
+         obj/vidhrdw/ckong.o obj/drivers/ckong.o \
+         obj/vidhrdw/dkong.o obj/drivers/dkong.o \
+         obj/machine/bagman.o obj/vidhrdw/bagman.o obj/drivers/bagman.o \
+         obj/vidhrdw/wow.o obj/drivers/wow.o \
+         obj/drivers/galaxian.o \
+         obj/vidhrdw/mooncrst.o obj/sndhrdw/mooncrst.o obj/drivers/mooncrst.o \
+         obj/vidhrdw/moonqsr.o obj/drivers/moonqsr.o \
+         obj/drivers/theend.o \
+         obj/vidhrdw/frogger.o obj/drivers/frogger.o \
+         obj/machine/scramble.o obj/vidhrdw/scramble.o obj/drivers/scramble.o \
+         obj/drivers/scobra.o \
+         obj/vidhrdw/amidar.o obj/drivers/amidar.o \
+         obj/vidhrdw/rallyx.o obj/drivers/rallyx.o \
+         obj/vidhrdw/pooyan.o obj/drivers/pooyan.o \
+         obj/machine/phoenix.o obj/vidhrdw/phoenix.o obj/drivers/phoenix.o \
+         obj/machine/carnival.o obj/vidhrdw/carnival.o obj/drivers/carnival.o \
+         obj/machine/invaders.o obj/vidhrdw/invaders.o obj/drivers/invaders.o \
+         obj/vidhrdw/mario.o obj/drivers/mario.o \
+         obj/machine/zaxxon.o obj/vidhrdw/zaxxon.o obj/drivers/zaxxon.o \
+         obj/vidhrdw/bombjack.o obj/drivers/bombjack.o \
          obj/Z80/Z80.o
 
 VPATH = src src/Z80
@@ -26,23 +48,13 @@ all: mame
 
 obj:
 	mkdir -p $@
+	mkdir -p $@/drivers
+	mkdir -p $@/machine
+	mkdir -p $@/vidhrdw
+	mkdir -p $@/sndhrdw
+	mkdir -p $@/Z80
 
-obj/pacman:
-	mkdir -p $@
-
-obj/crush:
-	mkdir -p $@
-
-obj/pengo:
-	mkdir -p $@
-
-obj/ladybug:
-	mkdir -p $@
-
-obj/Z80:
-	mkdir -p $@
-
-mame: obj obj/pacman obj/crush obj/pengo obj/ladybug obj/Z80 $(OBJS)
+mame: obj $(OBJS)
 	$(LD) ${DEBUG_OR_OPTIMIZE} ${STRIP_OR_NOT} -o $@ $(OBJS) $(LIBS)
 
 obj/osdepend.o: src/sdl/sdl.c
