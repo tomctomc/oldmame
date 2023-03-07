@@ -7,60 +7,106 @@
 ***************************************************************************/
 
 #include "driver.h"
-
-
-#define VIDEO_RAM_SIZE 0x400
-
-
-unsigned char *mario_videoram;
-unsigned char *mario_spriteram;
-static unsigned char dirtybuffer[VIDEO_RAM_SIZE];	/* keep track of modified portions of the screen */
-											/* to speed up video refresh */
-static struct osd_bitmap *tmpbitmap;
-
-static int gfx_bank;
+#include "vidhrdw/generic.h"
 
 
 
-int mario_vh_start(void)
-{
-	gfx_bank = 0;
-
-	if ((tmpbitmap = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
-		return 1;
-
-	return 0;
-}
+static int gfx_bank,palette_bank;
 
 
 
 /***************************************************************************
 
-  Stop the video hardware emulation.
+  Convert the color PROMs into a more useable format.
+
+  Mario Bros. has a 512x8 palette PROM; interstingly, bytes 0-255 contain an
+  inverted palette, as other Nintendo games like Donkey Kong, while bytes
+  256-511 contain a non inverted palette. This was probably done to allow
+  connection to both the special Nintendo and a standard monitor.
+  The palette PROM is connected to the RGB output this way:
+
+  bit 7 -- 220 ohm resistor -- inverter  -- RED
+        -- 470 ohm resistor -- inverter  -- RED
+        -- 1  kohm resistor -- inverter  -- RED
+        -- 220 ohm resistor -- inverter  -- GREEN
+        -- 470 ohm resistor -- inverter  -- GREEN
+        -- 1  kohm resistor -- inverter  -- GREEN
+        -- 220 ohm resistor -- inverter  -- BLUE
+  bit 0 -- 470 ohm resistor -- inverter  -- BLUE
 
 ***************************************************************************/
-void mario_vh_stop(void)
+void mario_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
 {
-	osd_free_bitmap(tmpbitmap);
-}
+	int i;
+	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
+	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
 
 
-
-void mario_videoram_w(int offset,int data)
-{
-	if (mario_videoram[offset] != data)
+	for (i = 0;i < Machine->drv->total_colors;i++)
 	{
-		dirtybuffer[offset] = 1;
+		int bit0,bit1,bit2;
 
-		mario_videoram[offset] = data;
+
+		/* red component */
+		bit0 = (*color_prom >> 5) & 1;
+		bit1 = (*color_prom >> 6) & 1;
+		bit2 = (*color_prom >> 7) & 1;
+		*(palette++) = 255 - (0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2);
+		/* green component */
+		bit0 = (*color_prom >> 2) & 1;
+		bit1 = (*color_prom >> 3) & 1;
+		bit2 = (*color_prom >> 4) & 1;
+		*(palette++) = 255 - (0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2);
+		/* blue component */
+		bit0 = (*color_prom >> 0) & 1;
+		bit1 = (*color_prom >> 1) & 1;
+		*(palette++) = 255 - (0x55 * bit0 + 0xaa * bit1);
+
+		color_prom++;
 	}
+
+	/* characters use the same palette as sprites, however characters */
+	/* use only colors 64-127 and 192-255. */
+	for (i = 0;i < 8;i++)
+	{
+		COLOR(0,4*i) = 8*i + 64;
+		COLOR(0,4*i+1) = 8*i+1 + 64;
+		COLOR(0,4*i+2) = 8*i+2 + 64;
+		COLOR(0,4*i+3) = 8*i+3 + 64;
+	}
+	for (i = 0;i < 8;i++)
+	{
+		COLOR(0,4*i+8*4) = 8*i + 192;
+		COLOR(0,4*i+8*4+1) = 8*i+1 + 192;
+		COLOR(0,4*i+8*4+2) = 8*i+2 + 192;
+		COLOR(0,4*i+8*4+3) = 8*i+3 + 192;
+	}
+
+	/* sprites */
+	for (i = 0;i < TOTAL_COLORS(1);i++)
+		COLOR(1,i) = i;
 }
 
 
 
 void mario_gfxbank_w(int offset,int data)
 {
-	gfx_bank = data;
+	if (gfx_bank != (data & 1))
+	{
+		memset(dirtybuffer,1,videoram_size);
+		gfx_bank = data & 1;
+	}
+}
+
+
+
+void mario_palettebank_w(int offset,int data)
+{
+	if (palette_bank != (data & 1))
+	{
+		memset(dirtybuffer,1,videoram_size);
+		palette_bank = data & 1;
+	}
 }
 
 
@@ -74,30 +120,28 @@ void mario_gfxbank_w(int offset,int data)
 ***************************************************************************/
 void mario_vh_screenrefresh(struct osd_bitmap *bitmap)
 {
-	int i,offs;
+	int offs;
 
 
 	/* for every character in the Video RAM, check if it has been modified */
 	/* since last time and update it accordingly. */
-	for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
+	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
 		if (dirtybuffer[offs])
 		{
 			int sx,sy;
-			int charcode;
 
 
 			dirtybuffer[offs] = 0;
 
-			sx = 8 * (31 - offs % 32);
-			sy = 8 * (31 - offs / 32);
-
-			charcode = mario_videoram[offs] + 256 * gfx_bank;
+			sx = 31 - offs % 32;
+			sy = 31 - offs / 32;
 
 			drawgfx(tmpbitmap,Machine->gfx[0],
-					charcode,charcode >> 4,
+					videoram[offs] + 256 * gfx_bank,
+					(videoram[offs] >> 5) + 8 * palette_bank,
 					0,0,
-					sx,sy,
+					8*sx,8*sy,
 					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
@@ -108,14 +152,15 @@ void mario_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 
 	/* Draw the sprites. */
-	for (i = 0;i < 4*96;i += 4)
+	for (offs = 0;offs < spriteram_size;offs += 4)
 	{
-		if (mario_spriteram[i])
+		if (spriteram[offs])
 		{
 			drawgfx(bitmap,Machine->gfx[1],
-					mario_spriteram[i+2],mario_spriteram[i+1] & 0x3f,
-					mario_spriteram[i+1] & 0x80,mario_spriteram[i+1] & 0x40,
-					32*8-mario_spriteram[i+3] - 8,mario_spriteram[i] - 8,
+					spriteram[offs + 2],
+					(spriteram[offs + 1] & 0x0f) + 0x10 * palette_bank,
+					spriteram[offs + 1] & 0x80,spriteram[offs + 1] & 0x40,
+					248 - spriteram[offs + 3],spriteram[offs] - 8,
 					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
 		}
 	}

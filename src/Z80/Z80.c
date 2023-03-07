@@ -12,8 +12,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "osd_dbg.h"
 
 #include "Z80.h"
+typedef signed char offset;
 
 #define M_RDMEM(A)      Z80_RDMEM(A)
 #define M_WRMEM(A,V)    Z80_WRMEM(A,V)
@@ -22,7 +24,16 @@
 #define M_RDSTACK(A)    Z80_RDSTACK(A)
 #define M_WRSTACK(A,V)  Z80_WRSTACK(A,V)
 
-static void Interrupt(int j);
+#define DoIn(lo,hi)     Z80_In((lo)+(((unsigned)(hi))<<8))
+#define DoOut(lo,hi,v)  Z80_Out((lo)+(((unsigned)(hi))<<8),v)
+
+#ifdef Z80_DAISYCHAIN
+#define NMI_IRQ 0x02
+#define INT_IRQ 0x01
+
+#endif
+
+static void Interrupt(void/*int j*/);	/* NS 970904 */
 static void ei(void);
 
 #define S_FLAG          0x80
@@ -39,7 +50,7 @@ static void ei(void);
 
 static Z80_Regs R;
 int Z80_Running=1;
-int Z80_IPeriod=50000;
+/*int Z80_IPeriod=50000;*/  /* NS 970904 */
 int Z80_ICount=50000;
 #ifdef DEBUG
 int Z80_Trace=0;
@@ -326,22 +337,8 @@ static void cpd(void)
 
 static void cpdr(void)
 {
- byte i,j;
- R.R-=2;
- do
- {
-  R.R+=2;
-  i=M_RDMEM(R.HL.D);
-  j=R.AF.B.h-i;
-  --R.HL.W.l;
-  --R.BC.W.l;
-  Z80_ICount-=21;
- }
- while (R.BC.D && j && Z80_ICount>0);
- R.AF.B.l=(R.AF.B.l&C_FLAG)|ZSTable[j]|
-          ((R.AF.B.h^i^j)&H_FLAG)|(R.BC.D? V_FLAG:0)|N_FLAG;
- if (R.BC.D && j) R.PC.W.l-=2;
- else Z80_ICount+=5;
+ cpd ();
+ if (R.BC.D && !(R.AF.B.l&Z_FLAG)) { Z80_ICount-=5; R.PC.W.l-=2; }
 }
 
 static void cpi(void)
@@ -357,22 +354,8 @@ static void cpi(void)
 
 static void cpir(void)
 {
- byte i,j;
- R.R-=2;
- do
- {
-  R.R+=2;
-  i=M_RDMEM(R.HL.D);
-  j=R.AF.B.h-i;
-  ++R.HL.W.l;
-  --R.BC.W.l;
-  Z80_ICount-=21;
- }
- while (R.BC.D && j && Z80_ICount>0);
- R.AF.B.l=(R.AF.B.l&C_FLAG)|ZSTable[j]|
-          ((R.AF.B.h^i^j)&H_FLAG)|(R.BC.D? V_FLAG:0)|N_FLAG;
- if (R.BC.D && j) R.PC.W.l-=2;
- else Z80_ICount+=5;
+ cpi ();
+ if (R.BC.D && !(R.AF.B.l&Z_FLAG)) { Z80_ICount-=5; R.PC.W.l-=2; }
 }
 
 static void cpl(void) { R.AF.B.h^=0xFF; R.AF.B.l|=(H_FLAG|N_FLAG); }
@@ -385,7 +368,7 @@ static void daa(void)
  if (R.AF.B.l&H_FLAG) i|=512;
  if (R.AF.B.l&N_FLAG) i|=1024;
  R.AF.W.l=DAATable[i];
-};
+}
 
 static void dec_xhl(void)
 {
@@ -509,7 +492,11 @@ static void in_h_c(void) { M_IN(R.HL.B.h); }
 static void in_l_c(void) { M_IN(R.HL.B.l); }
 static void in_0_c(void) { byte i; M_IN(i); }
 
-static void in_a_byte(void) { byte i=M_RDMEM_OPCODE(); R.AF.B.h=Z80_In(i); }
+static void in_a_byte(void)
+{
+ byte i=M_RDMEM_OPCODE();
+ R.AF.B.h=DoIn(i,R.AF.B.h);
+}
 
 static void inc_xhl(void)
 {
@@ -557,58 +544,55 @@ static void inc_sp(void) { ++R.SP.W.l; }
 
 static void ind(void)
 {
- M_WRMEM(R.HL.D,Z80_In(R.BC.B.l));
- --R.HL.W.l;
  --R.BC.B.h;
+ M_WRMEM(R.HL.D,DoIn(R.BC.B.l,R.BC.B.h));
+ --R.HL.W.l;
  R.AF.B.l=(R.BC.B.h)? N_FLAG:(N_FLAG|Z_FLAG);
 }
 
 static void indr(void)
 {
- R.R-=2;
- do
- {
-  R.R+=2;
-  M_WRMEM(R.HL.D,Z80_In(R.BC.B.l));
-  --R.HL.W.l;
-  --R.BC.B.h;
-  Z80_ICount-=21;
- }
- while (R.BC.B.h && Z80_ICount>0);
- R.AF.B.l=(R.BC.B.h)? N_FLAG:(N_FLAG|Z_FLAG);
- if (R.BC.B.h) R.PC.W.l-=2;
- else Z80_ICount+=5;
+ ind ();
+ if (R.BC.B.h) { Z80_ICount-=5; R.PC.W.l-=2; }
 }
 
 static void ini(void)
 {
- M_WRMEM(R.HL.D,Z80_In(R.BC.B.l));
- ++R.HL.W.l;
  --R.BC.B.h;
+ M_WRMEM(R.HL.D,DoIn(R.BC.B.l,R.BC.B.h));
+ ++R.HL.W.l;
  R.AF.B.l=(R.BC.B.h)? N_FLAG:(N_FLAG|Z_FLAG);
 }
 
 static void inir(void)
 {
- R.R-=2;
- do
- {
-  R.R+=2;
-  M_WRMEM(R.HL.D,Z80_In(R.BC.B.l));
-  ++R.HL.W.l;
-  --R.BC.B.h;
-  Z80_ICount-=21;
- }
- while (R.BC.B.h && Z80_ICount>0);
- R.AF.B.l=(R.BC.B.h)? N_FLAG:(N_FLAG|Z_FLAG);
- if (R.BC.B.h) R.PC.W.l-=2;
- else Z80_ICount+=5;
+ ini ();
+ if (R.BC.B.h) { Z80_ICount-=5; R.PC.W.l-=2; }
 }
 
-static void jp(void) { M_JP; }
-static void jp_hl(void) { R.PC.D=R.HL.D; }
-static void jp_ix(void) { R.PC.D=R.IX.D; }
-static void jp_iy(void) { R.PC.D=R.IY.D; }
+/*static void jp(void) { M_JP; }	-NS- changed to speed up busy loops */
+static void jp(void)
+{
+  dword oldpc,newpc;
+
+  oldpc = R.PC.D-1;
+  M_JP;
+  newpc = R.PC.D;
+  if (newpc == oldpc) { if (Z80_ICount > 0) Z80_ICount = 0; } /* speed up busy loop */
+  else if (newpc == oldpc-1 && M_RDOP(newpc) == 0x00)	/* NOP - JP */
+  		{ if (Z80_ICount > 0) Z80_ICount = 0; }
+  else if (newpc == oldpc-3 && M_RDOP(newpc) == 0x31)	/* LD SP,#xxxx - Galaga */
+		{ if (Z80_ICount > 10) Z80_ICount = 10; }
+#ifdef Z80_DAISYCHAIN
+  else if (newpc == oldpc-1 && M_RDOP(newpc) == 0xfb && R.pending_irq == 0)	/* EI - JP */
+#else
+  else if (newpc == oldpc-1 && M_RDOP(newpc) == 0xfb && R.pending_irq == Z80_IGNORE_INT)	/* EI - JP */
+#endif
+	  { if (Z80_ICount > 4) Z80_ICount = 4; }
+}
+static void jp_hl(void) { R.PC.D=R.HL.D;change_pc(R.PC.D); }	/* TS 971002 */
+static void jp_ix(void) { R.PC.D=R.IX.D;change_pc(R.PC.D); }	/* TS 971002 */
+static void jp_iy(void) { R.PC.D=R.IY.D;change_pc(R.PC.D); }	/* TS 971002 */
 static void jp_c(void) { if (M_C) { M_JP; } else { M_SKIP_JP; } }
 static void jp_m(void) { if (M_M) { M_JP; } else { M_SKIP_JP; } }
 static void jp_nc(void) { if (M_NC) { M_JP; } else { M_SKIP_JP; } }
@@ -618,7 +602,22 @@ static void jp_pe(void) { if (M_PE) { M_JP; } else { M_SKIP_JP; } }
 static void jp_po(void) { if (M_PO) { M_JP; } else { M_SKIP_JP; } }
 static void jp_z(void) { if (M_Z) { M_JP; } else { M_SKIP_JP; } }
 
-static void jr(void) { M_JR; }
+/*static void jr(void) { M_JR; }	-NS- changed to speed up busy loops */
+static void jr(void)
+{
+  dword oldpc,newpc;
+
+  oldpc = R.PC.D-1;
+  M_JR;
+  newpc = R.PC.D;
+  if (newpc == oldpc) { if (Z80_ICount > 0) Z80_ICount = 0; } /* speed up busy loop */
+#ifdef Z80_DAISYCHAIN
+  else if (newpc == oldpc-1 && M_RDOP(newpc) == 0xfb && R.pending_irq == 0)	/* EI - 1942 */
+#else
+  else if (newpc == oldpc-1 && M_RDOP(newpc) == 0xfb && R.pending_irq == Z80_IGNORE_INT)	/* EI - 1942 */
+#endif
+	  { if (Z80_ICount > 4) Z80_ICount = 4; }
+}
 static void jr_c(void) { if (M_C) { M_JR; } else { M_SKIP_JR; } }
 static void jr_nc(void) { if (M_NC) { M_JR; } else { M_SKIP_JR; } }
 static void jr_nz(void) { if (M_NZ) { M_JR; } else { M_SKIP_JR; } }
@@ -782,29 +781,29 @@ static void ld_ixh_b(void) { R.IX.B.h=R.BC.B.h; }
 static void ld_ixh_c(void) { R.IX.B.h=R.BC.B.l; }
 static void ld_ixh_d(void) { R.IX.B.h=R.DE.B.h; }
 static void ld_ixh_e(void) { R.IX.B.h=R.DE.B.l; }
-static void ld_ixh_h(void) { R.IX.B.h=R.HL.B.h; }
-static void ld_ixh_l(void) { R.IX.B.h=R.HL.B.l; }
+static void ld_ixh_ixh(void) { }
+static void ld_ixh_ixl(void) { R.IX.B.h=R.IX.B.l; }
 static void ld_ixl_a(void) { R.IX.B.l=R.AF.B.h; }
 static void ld_ixl_b(void) { R.IX.B.l=R.BC.B.h; }
 static void ld_ixl_c(void) { R.IX.B.l=R.BC.B.l; }
 static void ld_ixl_d(void) { R.IX.B.l=R.DE.B.h; }
 static void ld_ixl_e(void) { R.IX.B.l=R.DE.B.l; }
-static void ld_ixl_h(void) { R.IX.B.l=R.HL.B.h; }
-static void ld_ixl_l(void) { R.IX.B.l=R.HL.B.l; }
+static void ld_ixl_ixh(void) { R.IX.B.l=R.IX.B.h; }
+static void ld_ixl_ixl(void) { }
 static void ld_iyh_a(void) { R.IY.B.h=R.AF.B.h; }
 static void ld_iyh_b(void) { R.IY.B.h=R.BC.B.h; }
 static void ld_iyh_c(void) { R.IY.B.h=R.BC.B.l; }
 static void ld_iyh_d(void) { R.IY.B.h=R.DE.B.h; }
 static void ld_iyh_e(void) { R.IY.B.h=R.DE.B.l; }
-static void ld_iyh_h(void) { R.IY.B.h=R.HL.B.h; }
-static void ld_iyh_l(void) { R.IY.B.h=R.HL.B.l; }
+static void ld_iyh_iyh(void) { }
+static void ld_iyh_iyl(void) { R.IY.B.h=R.IY.B.l; }
 static void ld_iyl_a(void) { R.IY.B.l=R.AF.B.h; }
 static void ld_iyl_b(void) { R.IY.B.l=R.BC.B.h; }
 static void ld_iyl_c(void) { R.IY.B.l=R.BC.B.l; }
 static void ld_iyl_d(void) { R.IY.B.l=R.DE.B.h; }
 static void ld_iyl_e(void) { R.IY.B.l=R.DE.B.l; }
-static void ld_iyl_h(void) { R.IY.B.l=R.HL.B.h; }
-static void ld_iyl_l(void) { R.IY.B.l=R.HL.B.l; }
+static void ld_iyl_iyh(void) { R.IY.B.l=R.IY.B.h; }
+static void ld_iyl_iyl(void) { }
 static void ld_bc_xword(void) { R.BC.D=M_RDMEM_WORD(M_RDMEM_OPCODE_WORD()); }
 static void ld_bc_word(void) { R.BC.D=M_RDMEM_OPCODE_WORD(); }
 static void ld_de_xword(void) { R.DE.D=M_RDMEM_WORD(M_RDMEM_OPCODE_WORD()); }
@@ -843,20 +842,8 @@ static void ldd(void)
 }
 static void lddr(void)
 {
- R.R-=2;
- do
- {
-  R.R+=2;
-  M_WRMEM(R.DE.D,M_RDMEM(R.HL.D));
-  --R.DE.W.l;
-  --R.HL.W.l;
-  --R.BC.W.l;
-  Z80_ICount-=21;
- }
- while (R.BC.D && Z80_ICount>0);
- R.AF.B.l=(R.AF.B.l&0xE9)|(R.BC.D? V_FLAG:0);
- if (R.BC.D) R.PC.W.l-=2;
- else Z80_ICount+=5;
+ ldd ();
+ if (R.BC.D) { Z80_ICount-=5; R.PC.W.l-=2; }
 }
 static void ldi(void)
 {
@@ -868,20 +855,8 @@ static void ldi(void)
 }
 static void ldir(void)
 {
- R.R-=2;
- do
- {
-  R.R+=2;
-  M_WRMEM(R.DE.D,M_RDMEM(R.HL.D));
-  ++R.DE.W.l;
-  ++R.HL.W.l;
-  --R.BC.W.l;
-  Z80_ICount-=21;
- }
- while (R.BC.D && Z80_ICount>0);
- R.AF.B.l=(R.AF.B.l&0xE9)|(R.BC.D? V_FLAG:0);
- if (R.BC.D) R.PC.W.l-=2;
- else Z80_ICount+=5;
+ ldi ();
+ if (R.BC.D) { Z80_ICount-=5; R.PC.W.l-=2; }
 }
 
 static void neg(void)
@@ -892,7 +867,7 @@ static void neg(void)
  M_SUB(i);
 }
 
-static void nop(void) { };
+static void nop(void) { }
 
 static void or_xhl(void) { byte i=M_RD_XHL; M_OR(i); }
 static void or_xix(void) { byte i=M_RD_XIX(); M_OR(i); }
@@ -912,60 +887,42 @@ static void or_byte(void) { byte i=M_RDMEM_OPCODE(); M_OR(i); }
 
 static void outd(void)
 {
- Z80_Out (R.BC.B.l,M_RDMEM(R.HL.D));
- --R.HL.W.l;
  --R.BC.B.h;
+ DoOut (R.BC.B.l,R.BC.B.h,M_RDMEM(R.HL.D));
+ --R.HL.W.l;
  R.AF.B.l=(R.BC.B.h)? N_FLAG:(Z_FLAG|N_FLAG);
 }
 static void otdr(void)
 {
- R.R-=2;
- do
- {
-  R.R+=2;
-  Z80_Out (R.BC.B.l,M_RDMEM(R.HL.D));
-  --R.HL.W.l;
-  --R.BC.B.h;
-  Z80_ICount-=21;
- }
- while (R.BC.B.h && Z80_ICount>0);
- R.AF.B.l=(R.BC.B.h)? N_FLAG:(Z_FLAG|N_FLAG);
- if (R.BC.B.h) R.PC.W.l-=2;
- else Z80_ICount+=5;
+ outd ();
+ if (R.BC.B.h) { Z80_ICount-=5; R.PC.W.l-=2; }
 }
 static void outi(void)
 {
- Z80_Out (R.BC.B.l,M_RDMEM(R.HL.D));
- ++R.HL.W.l;
  --R.BC.B.h;
+ DoOut (R.BC.B.l,R.BC.B.h,M_RDMEM(R.HL.D));
+ ++R.HL.W.l;
  R.AF.B.l=(R.BC.B.h)? N_FLAG:(Z_FLAG|N_FLAG);
 }
 static void otir(void)
 {
- R.R-=2;
- do
- {
-  R.R+=2;
-  Z80_Out (R.BC.B.l,M_RDMEM(R.HL.D));
-  ++R.HL.W.l;
-  --R.BC.B.h;
-  Z80_ICount-=21;
- }
- while (R.BC.B.h && Z80_ICount>0);
- R.AF.B.l=(R.BC.B.h)? N_FLAG:(Z_FLAG|N_FLAG);
- if (R.BC.B.h) R.PC.W.l-=2;
- else Z80_ICount+=5;
+ outi ();
+ if (R.BC.B.h) { Z80_ICount-=5; R.PC.W.l-=2; }
 }
 
-static void out_c_a(void) { Z80_Out(R.BC.B.l,R.AF.B.h); }
-static void out_c_b(void) { Z80_Out(R.BC.B.l,R.BC.B.h); }
-static void out_c_c(void) { Z80_Out(R.BC.B.l,R.BC.B.l); }
-static void out_c_d(void) { Z80_Out(R.BC.B.l,R.DE.B.h); }
-static void out_c_e(void) { Z80_Out(R.BC.B.l,R.DE.B.l); }
-static void out_c_h(void) { Z80_Out(R.BC.B.l,R.HL.B.h); }
-static void out_c_l(void) { Z80_Out(R.BC.B.l,R.HL.B.l); }
-static void out_c_0(void) { Z80_Out(R.BC.B.l,0); }
-static void out_byte_a(void) { byte i=M_RDMEM_OPCODE(); Z80_Out(i,R.AF.B.h); }
+static void out_c_a(void) { DoOut(R.BC.B.l,R.BC.B.h,R.AF.B.h); }
+static void out_c_b(void) { DoOut(R.BC.B.l,R.BC.B.h,R.BC.B.h); }
+static void out_c_c(void) { DoOut(R.BC.B.l,R.BC.B.h,R.BC.B.l); }
+static void out_c_d(void) { DoOut(R.BC.B.l,R.BC.B.h,R.DE.B.h); }
+static void out_c_e(void) { DoOut(R.BC.B.l,R.BC.B.h,R.DE.B.l); }
+static void out_c_h(void) { DoOut(R.BC.B.l,R.BC.B.h,R.HL.B.h); }
+static void out_c_l(void) { DoOut(R.BC.B.l,R.BC.B.h,R.HL.B.l); }
+static void out_c_0(void) { DoOut(R.BC.B.l,R.BC.B.h,0); }
+static void out_byte_a(void)
+{
+ byte i=M_RDMEM_OPCODE();
+ DoOut(i,R.AF.B.h,R.AF.B.h);
+}
 
 static void pop_af(void) { M_POP(AF); }
 static void pop_bc(void) { M_POP(BC); }
@@ -987,7 +944,7 @@ static void res_0_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_RES(0,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void res_0_xix(void)
 {
  byte i;
@@ -996,7 +953,7 @@ static void res_0_xix(void)
  i=M_RDMEM(j);
  M_RES(0,i);
  M_WRMEM(j,i);
-};
+}
 static void res_0_xiy(void)
 {
  byte i;
@@ -1005,14 +962,14 @@ static void res_0_xiy(void)
  i=M_RDMEM(j);
  M_RES(0,i);
  M_WRMEM(j,i);
-};
-static void res_0_a(void) { M_RES(0,R.AF.B.h); };
-static void res_0_b(void) { M_RES(0,R.BC.B.h); };
-static void res_0_c(void) { M_RES(0,R.BC.B.l); };
-static void res_0_d(void) { M_RES(0,R.DE.B.h); };
-static void res_0_e(void) { M_RES(0,R.DE.B.l); };
-static void res_0_h(void) { M_RES(0,R.HL.B.h); };
-static void res_0_l(void) { M_RES(0,R.HL.B.l); };
+}
+static void res_0_a(void) { M_RES(0,R.AF.B.h); }
+static void res_0_b(void) { M_RES(0,R.BC.B.h); }
+static void res_0_c(void) { M_RES(0,R.BC.B.l); }
+static void res_0_d(void) { M_RES(0,R.DE.B.h); }
+static void res_0_e(void) { M_RES(0,R.DE.B.l); }
+static void res_0_h(void) { M_RES(0,R.HL.B.h); }
+static void res_0_l(void) { M_RES(0,R.HL.B.l); }
 
 static void res_1_xhl(void)
 {
@@ -1020,7 +977,7 @@ static void res_1_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_RES(1,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void res_1_xix(void)
 {
  byte i;
@@ -1029,7 +986,7 @@ static void res_1_xix(void)
  i=M_RDMEM(j);
  M_RES(1,i);
  M_WRMEM(j,i);
-};
+}
 static void res_1_xiy(void)
 {
  byte i;
@@ -1038,14 +995,14 @@ static void res_1_xiy(void)
  i=M_RDMEM(j);
  M_RES(1,i);
  M_WRMEM(j,i);
-};
-static void res_1_a(void) { M_RES(1,R.AF.B.h); };
-static void res_1_b(void) { M_RES(1,R.BC.B.h); };
-static void res_1_c(void) { M_RES(1,R.BC.B.l); };
-static void res_1_d(void) { M_RES(1,R.DE.B.h); };
-static void res_1_e(void) { M_RES(1,R.DE.B.l); };
-static void res_1_h(void) { M_RES(1,R.HL.B.h); };
-static void res_1_l(void) { M_RES(1,R.HL.B.l); };
+}
+static void res_1_a(void) { M_RES(1,R.AF.B.h); }
+static void res_1_b(void) { M_RES(1,R.BC.B.h); }
+static void res_1_c(void) { M_RES(1,R.BC.B.l); }
+static void res_1_d(void) { M_RES(1,R.DE.B.h); }
+static void res_1_e(void) { M_RES(1,R.DE.B.l); }
+static void res_1_h(void) { M_RES(1,R.HL.B.h); }
+static void res_1_l(void) { M_RES(1,R.HL.B.l); }
 
 static void res_2_xhl(void)
 {
@@ -1053,7 +1010,7 @@ static void res_2_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_RES(2,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void res_2_xix(void)
 {
  byte i;
@@ -1062,7 +1019,7 @@ static void res_2_xix(void)
  i=M_RDMEM(j);
  M_RES(2,i);
  M_WRMEM(j,i);
-};
+}
 static void res_2_xiy(void)
 {
  byte i;
@@ -1071,14 +1028,14 @@ static void res_2_xiy(void)
  i=M_RDMEM(j);
  M_RES(2,i);
  M_WRMEM(j,i);
-};
-static void res_2_a(void) { M_RES(2,R.AF.B.h); };
-static void res_2_b(void) { M_RES(2,R.BC.B.h); };
-static void res_2_c(void) { M_RES(2,R.BC.B.l); };
-static void res_2_d(void) { M_RES(2,R.DE.B.h); };
-static void res_2_e(void) { M_RES(2,R.DE.B.l); };
-static void res_2_h(void) { M_RES(2,R.HL.B.h); };
-static void res_2_l(void) { M_RES(2,R.HL.B.l); };
+}
+static void res_2_a(void) { M_RES(2,R.AF.B.h); }
+static void res_2_b(void) { M_RES(2,R.BC.B.h); }
+static void res_2_c(void) { M_RES(2,R.BC.B.l); }
+static void res_2_d(void) { M_RES(2,R.DE.B.h); }
+static void res_2_e(void) { M_RES(2,R.DE.B.l); }
+static void res_2_h(void) { M_RES(2,R.HL.B.h); }
+static void res_2_l(void) { M_RES(2,R.HL.B.l); }
 
 static void res_3_xhl(void)
 {
@@ -1086,7 +1043,7 @@ static void res_3_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_RES(3,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void res_3_xix(void)
 {
  byte i;
@@ -1095,7 +1052,7 @@ static void res_3_xix(void)
  i=M_RDMEM(j);
  M_RES(3,i);
  M_WRMEM(j,i);
-};
+}
 static void res_3_xiy(void)
 {
  byte i;
@@ -1104,14 +1061,14 @@ static void res_3_xiy(void)
  i=M_RDMEM(j);
  M_RES(3,i);
  M_WRMEM(j,i);
-};
-static void res_3_a(void) { M_RES(3,R.AF.B.h); };
-static void res_3_b(void) { M_RES(3,R.BC.B.h); };
-static void res_3_c(void) { M_RES(3,R.BC.B.l); };
-static void res_3_d(void) { M_RES(3,R.DE.B.h); };
-static void res_3_e(void) { M_RES(3,R.DE.B.l); };
-static void res_3_h(void) { M_RES(3,R.HL.B.h); };
-static void res_3_l(void) { M_RES(3,R.HL.B.l); };
+}
+static void res_3_a(void) { M_RES(3,R.AF.B.h); }
+static void res_3_b(void) { M_RES(3,R.BC.B.h); }
+static void res_3_c(void) { M_RES(3,R.BC.B.l); }
+static void res_3_d(void) { M_RES(3,R.DE.B.h); }
+static void res_3_e(void) { M_RES(3,R.DE.B.l); }
+static void res_3_h(void) { M_RES(3,R.HL.B.h); }
+static void res_3_l(void) { M_RES(3,R.HL.B.l); }
 
 static void res_4_xhl(void)
 {
@@ -1119,7 +1076,7 @@ static void res_4_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_RES(4,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void res_4_xix(void)
 {
  byte i;
@@ -1128,7 +1085,7 @@ static void res_4_xix(void)
  i=M_RDMEM(j);
  M_RES(4,i);
  M_WRMEM(j,i);
-};
+}
 static void res_4_xiy(void)
 {
  byte i;
@@ -1137,14 +1094,14 @@ static void res_4_xiy(void)
  i=M_RDMEM(j);
  M_RES(4,i);
  M_WRMEM(j,i);
-};
-static void res_4_a(void) { M_RES(4,R.AF.B.h); };
-static void res_4_b(void) { M_RES(4,R.BC.B.h); };
-static void res_4_c(void) { M_RES(4,R.BC.B.l); };
-static void res_4_d(void) { M_RES(4,R.DE.B.h); };
-static void res_4_e(void) { M_RES(4,R.DE.B.l); };
-static void res_4_h(void) { M_RES(4,R.HL.B.h); };
-static void res_4_l(void) { M_RES(4,R.HL.B.l); };
+}
+static void res_4_a(void) { M_RES(4,R.AF.B.h); }
+static void res_4_b(void) { M_RES(4,R.BC.B.h); }
+static void res_4_c(void) { M_RES(4,R.BC.B.l); }
+static void res_4_d(void) { M_RES(4,R.DE.B.h); }
+static void res_4_e(void) { M_RES(4,R.DE.B.l); }
+static void res_4_h(void) { M_RES(4,R.HL.B.h); }
+static void res_4_l(void) { M_RES(4,R.HL.B.l); }
 
 static void res_5_xhl(void)
 {
@@ -1152,7 +1109,7 @@ static void res_5_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_RES(5,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void res_5_xix(void)
 {
  byte i;
@@ -1161,7 +1118,7 @@ static void res_5_xix(void)
  i=M_RDMEM(j);
  M_RES(5,i);
  M_WRMEM(j,i);
-};
+}
 static void res_5_xiy(void)
 {
  byte i;
@@ -1170,14 +1127,14 @@ static void res_5_xiy(void)
  i=M_RDMEM(j);
  M_RES(5,i);
  M_WRMEM(j,i);
-};
-static void res_5_a(void) { M_RES(5,R.AF.B.h); };
-static void res_5_b(void) { M_RES(5,R.BC.B.h); };
-static void res_5_c(void) { M_RES(5,R.BC.B.l); };
-static void res_5_d(void) { M_RES(5,R.DE.B.h); };
-static void res_5_e(void) { M_RES(5,R.DE.B.l); };
-static void res_5_h(void) { M_RES(5,R.HL.B.h); };
-static void res_5_l(void) { M_RES(5,R.HL.B.l); };
+}
+static void res_5_a(void) { M_RES(5,R.AF.B.h); }
+static void res_5_b(void) { M_RES(5,R.BC.B.h); }
+static void res_5_c(void) { M_RES(5,R.BC.B.l); }
+static void res_5_d(void) { M_RES(5,R.DE.B.h); }
+static void res_5_e(void) { M_RES(5,R.DE.B.l); }
+static void res_5_h(void) { M_RES(5,R.HL.B.h); }
+static void res_5_l(void) { M_RES(5,R.HL.B.l); }
 
 static void res_6_xhl(void)
 {
@@ -1185,7 +1142,7 @@ static void res_6_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_RES(6,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void res_6_xix(void)
 {
  byte i;
@@ -1194,7 +1151,7 @@ static void res_6_xix(void)
  i=M_RDMEM(j);
  M_RES(6,i);
  M_WRMEM(j,i);
-};
+}
 static void res_6_xiy(void)
 {
  byte i;
@@ -1203,14 +1160,14 @@ static void res_6_xiy(void)
  i=M_RDMEM(j);
  M_RES(6,i);
  M_WRMEM(j,i);
-};
-static void res_6_a(void) { M_RES(6,R.AF.B.h); };
-static void res_6_b(void) { M_RES(6,R.BC.B.h); };
-static void res_6_c(void) { M_RES(6,R.BC.B.l); };
-static void res_6_d(void) { M_RES(6,R.DE.B.h); };
-static void res_6_e(void) { M_RES(6,R.DE.B.l); };
-static void res_6_h(void) { M_RES(6,R.HL.B.h); };
-static void res_6_l(void) { M_RES(6,R.HL.B.l); };
+}
+static void res_6_a(void) { M_RES(6,R.AF.B.h); }
+static void res_6_b(void) { M_RES(6,R.BC.B.h); }
+static void res_6_c(void) { M_RES(6,R.BC.B.l); }
+static void res_6_d(void) { M_RES(6,R.DE.B.h); }
+static void res_6_e(void) { M_RES(6,R.DE.B.l); }
+static void res_6_h(void) { M_RES(6,R.HL.B.h); }
+static void res_6_l(void) { M_RES(6,R.HL.B.l); }
 
 static void res_7_xhl(void)
 {
@@ -1218,7 +1175,7 @@ static void res_7_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_RES(7,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void res_7_xix(void)
 {
  byte i;
@@ -1227,7 +1184,7 @@ static void res_7_xix(void)
  i=M_RDMEM(j);
  M_RES(7,i);
  M_WRMEM(j,i);
-};
+}
 static void res_7_xiy(void)
 {
  byte i;
@@ -1236,14 +1193,14 @@ static void res_7_xiy(void)
  i=M_RDMEM(j);
  M_RES(7,i);
  M_WRMEM(j,i);
-};
-static void res_7_a(void) { M_RES(7,R.AF.B.h); };
-static void res_7_b(void) { M_RES(7,R.BC.B.h); };
-static void res_7_c(void) { M_RES(7,R.BC.B.l); };
-static void res_7_d(void) { M_RES(7,R.DE.B.h); };
-static void res_7_e(void) { M_RES(7,R.DE.B.l); };
-static void res_7_h(void) { M_RES(7,R.HL.B.h); };
-static void res_7_l(void) { M_RES(7,R.HL.B.l); };
+}
+static void res_7_a(void) { M_RES(7,R.AF.B.h); }
+static void res_7_b(void) { M_RES(7,R.BC.B.h); }
+static void res_7_c(void) { M_RES(7,R.BC.B.l); }
+static void res_7_d(void) { M_RES(7,R.DE.B.h); }
+static void res_7_e(void) { M_RES(7,R.DE.B.l); }
+static void res_7_h(void) { M_RES(7,R.HL.B.h); }
+static void res_7_l(void) { M_RES(7,R.HL.B.l); }
 
 static void ret(void) { M_RET; }
 static void ret_c(void) { if (M_C) { M_RET; } else { M_SKIP_RET; } }
@@ -1255,7 +1212,52 @@ static void ret_pe(void) { if (M_PE) { M_RET; } else { M_SKIP_RET; } }
 static void ret_po(void) { if (M_PO) { M_RET; } else { M_SKIP_RET; } }
 static void ret_z(void) { if (M_Z) { M_RET; } else { M_SKIP_RET; } }
 
+#ifdef Z80_DAISYCHAIN
+
+/* search highest interrupt request device (next interrupt device) */
+/*    and highest interrupt service device (next reti      device) */
+static inline void check_daisy_chain( void )
+{
+	int device;
+
+	R.request_irq = R.service_irq = -1;
+
+	/* search higher IRQ or IEO */
+	for( device = 0 ; device < R.irq_max ; device ++ )
+	{
+		/* IEO = disable ? */
+		if( R.int_state[device] & Z80_INT_IEO )
+		{
+			/* if IEO is disable , masking lower IRQ */
+			R.request_irq = -1;
+			/* set highest interrupt service device */
+			R.service_irq = device;
+		}
+		/* IRQ = ON ? */
+		if( R.int_state[device] & Z80_INT_REQ )
+			R.request_irq = device;
+	}
+	/* set interrupt pending flag */
+	if( R.request_irq >= 0 ) R.pending_irq |=  INT_IRQ;
+	else                     R.pending_irq &= ~INT_IRQ;
+}
+
+static void reti(void)
+{
+	int device = R.service_irq;
+
+	/* daisy-chain interrupt is handled ? */
+	if( device >= 0 )
+	{
+		/* callback reti handling */
+		R.irq[device].interrupt_reti(R.irq[device].irq_param);
+	}
+    Z80_Reti();
+    M_RET;
+}
+#else
 static void reti(void) { Z80_Reti(); M_RET; }
+#endif
 static void retn(void) { R.IFF1=R.IFF2; Z80_Retn(); M_RET; }
 
 static void rl_xhl(void)
@@ -1450,7 +1452,7 @@ static void set_0_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_SET(0,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void set_0_xix(void)
 {
  byte i;
@@ -1459,7 +1461,7 @@ static void set_0_xix(void)
  i=M_RDMEM(j);
  M_SET(0,i);
  M_WRMEM(j,i);
-};
+}
 static void set_0_xiy(void)
 {
  byte i;
@@ -1468,14 +1470,14 @@ static void set_0_xiy(void)
  i=M_RDMEM(j);
  M_SET(0,i);
  M_WRMEM(j,i);
-};
-static void set_0_a(void) { M_SET(0,R.AF.B.h); };
-static void set_0_b(void) { M_SET(0,R.BC.B.h); };
-static void set_0_c(void) { M_SET(0,R.BC.B.l); };
-static void set_0_d(void) { M_SET(0,R.DE.B.h); };
-static void set_0_e(void) { M_SET(0,R.DE.B.l); };
-static void set_0_h(void) { M_SET(0,R.HL.B.h); };
-static void set_0_l(void) { M_SET(0,R.HL.B.l); };
+}
+static void set_0_a(void) { M_SET(0,R.AF.B.h); }
+static void set_0_b(void) { M_SET(0,R.BC.B.h); }
+static void set_0_c(void) { M_SET(0,R.BC.B.l); }
+static void set_0_d(void) { M_SET(0,R.DE.B.h); }
+static void set_0_e(void) { M_SET(0,R.DE.B.l); }
+static void set_0_h(void) { M_SET(0,R.HL.B.h); }
+static void set_0_l(void) { M_SET(0,R.HL.B.l); }
 
 static void set_1_xhl(void)
 {
@@ -1483,7 +1485,7 @@ static void set_1_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_SET(1,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void set_1_xix(void)
 {
  byte i;
@@ -1492,7 +1494,7 @@ static void set_1_xix(void)
  i=M_RDMEM(j);
  M_SET(1,i);
  M_WRMEM(j,i);
-};
+}
 static void set_1_xiy(void)
 {
  byte i;
@@ -1501,14 +1503,14 @@ static void set_1_xiy(void)
  i=M_RDMEM(j);
  M_SET(1,i);
  M_WRMEM(j,i);
-};
-static void set_1_a(void) { M_SET(1,R.AF.B.h); };
-static void set_1_b(void) { M_SET(1,R.BC.B.h); };
-static void set_1_c(void) { M_SET(1,R.BC.B.l); };
-static void set_1_d(void) { M_SET(1,R.DE.B.h); };
-static void set_1_e(void) { M_SET(1,R.DE.B.l); };
-static void set_1_h(void) { M_SET(1,R.HL.B.h); };
-static void set_1_l(void) { M_SET(1,R.HL.B.l); };
+}
+static void set_1_a(void) { M_SET(1,R.AF.B.h); }
+static void set_1_b(void) { M_SET(1,R.BC.B.h); }
+static void set_1_c(void) { M_SET(1,R.BC.B.l); }
+static void set_1_d(void) { M_SET(1,R.DE.B.h); }
+static void set_1_e(void) { M_SET(1,R.DE.B.l); }
+static void set_1_h(void) { M_SET(1,R.HL.B.h); }
+static void set_1_l(void) { M_SET(1,R.HL.B.l); }
 
 static void set_2_xhl(void)
 {
@@ -1516,7 +1518,7 @@ static void set_2_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_SET(2,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void set_2_xix(void)
 {
  byte i;
@@ -1525,7 +1527,7 @@ static void set_2_xix(void)
  i=M_RDMEM(j);
  M_SET(2,i);
  M_WRMEM(j,i);
-};
+}
 static void set_2_xiy(void)
 {
  byte i;
@@ -1534,14 +1536,14 @@ static void set_2_xiy(void)
  i=M_RDMEM(j);
  M_SET(2,i);
  M_WRMEM(j,i);
-};
-static void set_2_a(void) { M_SET(2,R.AF.B.h); };
-static void set_2_b(void) { M_SET(2,R.BC.B.h); };
-static void set_2_c(void) { M_SET(2,R.BC.B.l); };
-static void set_2_d(void) { M_SET(2,R.DE.B.h); };
-static void set_2_e(void) { M_SET(2,R.DE.B.l); };
-static void set_2_h(void) { M_SET(2,R.HL.B.h); };
-static void set_2_l(void) { M_SET(2,R.HL.B.l); };
+}
+static void set_2_a(void) { M_SET(2,R.AF.B.h); }
+static void set_2_b(void) { M_SET(2,R.BC.B.h); }
+static void set_2_c(void) { M_SET(2,R.BC.B.l); }
+static void set_2_d(void) { M_SET(2,R.DE.B.h); }
+static void set_2_e(void) { M_SET(2,R.DE.B.l); }
+static void set_2_h(void) { M_SET(2,R.HL.B.h); }
+static void set_2_l(void) { M_SET(2,R.HL.B.l); }
 
 static void set_3_xhl(void)
 {
@@ -1549,7 +1551,7 @@ static void set_3_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_SET(3,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void set_3_xix(void)
 {
  byte i;
@@ -1558,7 +1560,7 @@ static void set_3_xix(void)
  i=M_RDMEM(j);
  M_SET(3,i);
  M_WRMEM(j,i);
-};
+}
 static void set_3_xiy(void)
 {
  byte i;
@@ -1567,14 +1569,14 @@ static void set_3_xiy(void)
  i=M_RDMEM(j);
  M_SET(3,i);
  M_WRMEM(j,i);
-};
-static void set_3_a(void) { M_SET(3,R.AF.B.h); };
-static void set_3_b(void) { M_SET(3,R.BC.B.h); };
-static void set_3_c(void) { M_SET(3,R.BC.B.l); };
-static void set_3_d(void) { M_SET(3,R.DE.B.h); };
-static void set_3_e(void) { M_SET(3,R.DE.B.l); };
-static void set_3_h(void) { M_SET(3,R.HL.B.h); };
-static void set_3_l(void) { M_SET(3,R.HL.B.l); };
+}
+static void set_3_a(void) { M_SET(3,R.AF.B.h); }
+static void set_3_b(void) { M_SET(3,R.BC.B.h); }
+static void set_3_c(void) { M_SET(3,R.BC.B.l); }
+static void set_3_d(void) { M_SET(3,R.DE.B.h); }
+static void set_3_e(void) { M_SET(3,R.DE.B.l); }
+static void set_3_h(void) { M_SET(3,R.HL.B.h); }
+static void set_3_l(void) { M_SET(3,R.HL.B.l); }
 
 static void set_4_xhl(void)
 {
@@ -1582,7 +1584,7 @@ static void set_4_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_SET(4,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void set_4_xix(void)
 {
  byte i;
@@ -1591,7 +1593,7 @@ static void set_4_xix(void)
  i=M_RDMEM(j);
  M_SET(4,i);
  M_WRMEM(j,i);
-};
+}
 static void set_4_xiy(void)
 {
  byte i;
@@ -1600,14 +1602,14 @@ static void set_4_xiy(void)
  i=M_RDMEM(j);
  M_SET(4,i);
  M_WRMEM(j,i);
-};
-static void set_4_a(void) { M_SET(4,R.AF.B.h); };
-static void set_4_b(void) { M_SET(4,R.BC.B.h); };
-static void set_4_c(void) { M_SET(4,R.BC.B.l); };
-static void set_4_d(void) { M_SET(4,R.DE.B.h); };
-static void set_4_e(void) { M_SET(4,R.DE.B.l); };
-static void set_4_h(void) { M_SET(4,R.HL.B.h); };
-static void set_4_l(void) { M_SET(4,R.HL.B.l); };
+}
+static void set_4_a(void) { M_SET(4,R.AF.B.h); }
+static void set_4_b(void) { M_SET(4,R.BC.B.h); }
+static void set_4_c(void) { M_SET(4,R.BC.B.l); }
+static void set_4_d(void) { M_SET(4,R.DE.B.h); }
+static void set_4_e(void) { M_SET(4,R.DE.B.l); }
+static void set_4_h(void) { M_SET(4,R.HL.B.h); }
+static void set_4_l(void) { M_SET(4,R.HL.B.l); }
 
 static void set_5_xhl(void)
 {
@@ -1615,7 +1617,7 @@ static void set_5_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_SET(5,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void set_5_xix(void)
 {
  byte i;
@@ -1624,7 +1626,7 @@ static void set_5_xix(void)
  i=M_RDMEM(j);
  M_SET(5,i);
  M_WRMEM(j,i);
-};
+}
 static void set_5_xiy(void)
 {
  byte i;
@@ -1633,14 +1635,14 @@ static void set_5_xiy(void)
  i=M_RDMEM(j);
  M_SET(5,i);
  M_WRMEM(j,i);
-};
-static void set_5_a(void) { M_SET(5,R.AF.B.h); };
-static void set_5_b(void) { M_SET(5,R.BC.B.h); };
-static void set_5_c(void) { M_SET(5,R.BC.B.l); };
-static void set_5_d(void) { M_SET(5,R.DE.B.h); };
-static void set_5_e(void) { M_SET(5,R.DE.B.l); };
-static void set_5_h(void) { M_SET(5,R.HL.B.h); };
-static void set_5_l(void) { M_SET(5,R.HL.B.l); };
+}
+static void set_5_a(void) { M_SET(5,R.AF.B.h); }
+static void set_5_b(void) { M_SET(5,R.BC.B.h); }
+static void set_5_c(void) { M_SET(5,R.BC.B.l); }
+static void set_5_d(void) { M_SET(5,R.DE.B.h); }
+static void set_5_e(void) { M_SET(5,R.DE.B.l); }
+static void set_5_h(void) { M_SET(5,R.HL.B.h); }
+static void set_5_l(void) { M_SET(5,R.HL.B.l); }
 
 static void set_6_xhl(void)
 {
@@ -1648,7 +1650,7 @@ static void set_6_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_SET(6,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void set_6_xix(void)
 {
  byte i;
@@ -1657,7 +1659,7 @@ static void set_6_xix(void)
  i=M_RDMEM(j);
  M_SET(6,i);
  M_WRMEM(j,i);
-};
+}
 static void set_6_xiy(void)
 {
  byte i;
@@ -1666,14 +1668,14 @@ static void set_6_xiy(void)
  i=M_RDMEM(j);
  M_SET(6,i);
  M_WRMEM(j,i);
-};
-static void set_6_a(void) { M_SET(6,R.AF.B.h); };
-static void set_6_b(void) { M_SET(6,R.BC.B.h); };
-static void set_6_c(void) { M_SET(6,R.BC.B.l); };
-static void set_6_d(void) { M_SET(6,R.DE.B.h); };
-static void set_6_e(void) { M_SET(6,R.DE.B.l); };
-static void set_6_h(void) { M_SET(6,R.HL.B.h); };
-static void set_6_l(void) { M_SET(6,R.HL.B.l); };
+}
+static void set_6_a(void) { M_SET(6,R.AF.B.h); }
+static void set_6_b(void) { M_SET(6,R.BC.B.h); }
+static void set_6_c(void) { M_SET(6,R.BC.B.l); }
+static void set_6_d(void) { M_SET(6,R.DE.B.h); }
+static void set_6_e(void) { M_SET(6,R.DE.B.l); }
+static void set_6_h(void) { M_SET(6,R.HL.B.h); }
+static void set_6_l(void) { M_SET(6,R.HL.B.l); }
 
 static void set_7_xhl(void)
 {
@@ -1681,7 +1683,7 @@ static void set_7_xhl(void)
  i=M_RDMEM(R.HL.D);
  M_SET(7,i);
  M_WRMEM(R.HL.D,i);
-};
+}
 static void set_7_xix(void)
 {
  byte i;
@@ -1690,7 +1692,7 @@ static void set_7_xix(void)
  i=M_RDMEM(j);
  M_SET(7,i);
  M_WRMEM(j,i);
-};
+}
 static void set_7_xiy(void)
 {
  byte i;
@@ -1699,14 +1701,14 @@ static void set_7_xiy(void)
  i=M_RDMEM(j);
  M_SET(7,i);
  M_WRMEM(j,i);
-};
-static void set_7_a(void) { M_SET(7,R.AF.B.h); };
-static void set_7_b(void) { M_SET(7,R.BC.B.h); };
-static void set_7_c(void) { M_SET(7,R.BC.B.l); };
-static void set_7_d(void) { M_SET(7,R.DE.B.h); };
-static void set_7_e(void) { M_SET(7,R.DE.B.l); };
-static void set_7_h(void) { M_SET(7,R.HL.B.h); };
-static void set_7_l(void) { M_SET(7,R.HL.B.l); };
+}
+static void set_7_a(void) { M_SET(7,R.AF.B.h); }
+static void set_7_b(void) { M_SET(7,R.BC.B.h); }
+static void set_7_c(void) { M_SET(7,R.BC.B.l); }
+static void set_7_d(void) { M_SET(7,R.DE.B.h); }
+static void set_7_e(void) { M_SET(7,R.DE.B.l); }
+static void set_7_h(void) { M_SET(7,R.HL.B.h); }
+static void set_7_l(void) { M_SET(7,R.HL.B.l); }
 
 static void sla_xhl(void)
 {
@@ -1999,8 +2001,8 @@ static unsigned cycles_xx[256]=
   0,0,0,0,9,9,19,0,
   0,0,0,0,9,9,19,0,
   0,0,0,0,9,9,19,0,
-  9,9,9,9,9,9,9,9,
-  9,9,9,9,9,9,9,9,
+  9,9,9,9,9,9,19,9,	/* ASG 220997 */
+  9,9,9,9,9,9,19,9,	/* ASG 220997 */
   19,19,19,19,19,19,19,19,
   0,0,0,0,9,9,19,0,
   0,0,0,0,9,9,19,0,
@@ -2044,8 +2046,8 @@ static unsigned cycles_ed[256]=
   0,0,0,0,0,0,0,0,
   16,16,16,16,0,0,0,0,
   16,16,16,16,0,0,0,0,
-  0,0,0,0,0,0,0,0,
-  0,0,0,0,0,0,0,0,
+  16,16,16,16,0,0,0,0,  /* ASG 220997 */
+  16,16,16,16,0,0,0,0,	/* ASG 220997 */
   0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,
@@ -2138,7 +2140,7 @@ static void dd_cb(void)
  Z80_ICount-=cycles_xx_cb[opcode];
  (*(opcode_dd_cb[opcode]))();
  ++R.PC.W.l;
-};
+}
 static void fd_cb(void)
 {
  unsigned opcode;
@@ -2146,7 +2148,7 @@ static void fd_cb(void)
  Z80_ICount-=cycles_xx_cb[opcode];
  (*(opcode_fd_cb[opcode]))();
  ++R.PC.W.l;
-};
+}
 
 static opcode_fn opcode_cb[256]=
 {
@@ -2186,38 +2188,38 @@ static opcode_fn opcode_cb[256]=
 
 static opcode_fn opcode_dd[256]=
 {
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,add_ix_bc ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,add_ix_de ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,ld_ix_word,ld_xword_ix,inc_ix   ,inc_ixh  ,dec_ixh  ,ld_ixh_byte,no_op   ,
-  no_op   ,add_ix_ix ,ld_ix_xword,dec_ix   ,inc_ixl  ,dec_ixl  ,ld_ixl_byte,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,inc_xix  ,dec_xix  ,ld_xix_byte,no_op   ,
-  no_op   ,add_ix_sp ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_b_ixh ,ld_b_ixl ,ld_b_xix   ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_c_ixh ,ld_c_ixl ,ld_c_xix   ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_d_ixh ,ld_d_ixl ,ld_d_xix   ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_e_ixh ,ld_e_ixl ,ld_e_xix   ,no_op   ,
-  ld_ixh_b,ld_ixh_c  ,ld_ixh_d   ,ld_ixh_e ,ld_ixh_h ,ld_ixh_l ,ld_h_xix   ,ld_ixh_a,
-  ld_ixl_b,ld_ixl_c  ,ld_ixl_d   ,ld_ixl_e ,ld_ixl_h ,ld_ixl_l ,ld_l_xix   ,ld_ixl_a,
-  ld_xix_b,ld_xix_c  ,ld_xix_d   ,ld_xix_e ,ld_xix_h ,ld_xix_l ,no_op      ,ld_xix_a,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_a_ixh ,ld_a_ixl ,ld_a_xix   ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,add_a_ixh,add_a_ixl,add_a_xix  ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,adc_a_ixh,adc_a_ixl,adc_a_xix  ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,sub_ixh  ,sub_ixl  ,sub_xix    ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,sbc_a_ixh,sbc_a_ixl,sbc_a_xix  ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,and_ixh  ,and_ixl  ,and_xix    ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,xor_ixh  ,xor_ixl  ,xor_xix    ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,or_ixh   ,or_ixl   ,or_xix     ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,cp_ixh   ,cp_ixl   ,cp_xix     ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,dd_cb    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,pop_ix    ,no_op      ,ex_xsp_ix,no_op    ,push_ix  ,no_op      ,no_op   ,
-  no_op   ,jp_ix     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,ld_sp_ix  ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,add_ix_bc ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,add_ix_de ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,ld_ix_word,ld_xword_ix,inc_ix   ,inc_ixh    ,dec_ixh    ,ld_ixh_byte,no_op   ,
+  no_op   ,add_ix_ix ,ld_ix_xword,dec_ix   ,inc_ixl    ,dec_ixl    ,ld_ixl_byte,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,inc_xix    ,dec_xix    ,ld_xix_byte,no_op   ,
+  no_op   ,add_ix_sp ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_b_ixh   ,ld_b_ixl   ,ld_b_xix   ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_c_ixh   ,ld_c_ixl   ,ld_c_xix   ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_d_ixh   ,ld_d_ixl   ,ld_d_xix   ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_e_ixh   ,ld_e_ixl   ,ld_e_xix   ,no_op   ,
+  ld_ixh_b,ld_ixh_c  ,ld_ixh_d   ,ld_ixh_e ,ld_ixh_ixh ,ld_ixh_ixl ,ld_h_xix   ,ld_ixh_a,
+  ld_ixl_b,ld_ixl_c  ,ld_ixl_d   ,ld_ixl_e ,ld_ixl_ixh ,ld_ixl_ixl ,ld_l_xix   ,ld_ixl_a,
+  ld_xix_b,ld_xix_c  ,ld_xix_d   ,ld_xix_e ,ld_xix_h   ,ld_xix_l   ,no_op      ,ld_xix_a,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_a_ixh   ,ld_a_ixl   ,ld_a_xix   ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,add_a_ixh  ,add_a_ixl  ,add_a_xix  ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,adc_a_ixh  ,adc_a_ixl  ,adc_a_xix  ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,sub_ixh    ,sub_ixl    ,sub_xix    ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,sbc_a_ixh  ,sbc_a_ixl  ,sbc_a_xix  ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,and_ixh    ,and_ixl    ,and_xix    ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,xor_ixh    ,xor_ixl    ,xor_xix    ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,or_ixh     ,or_ixl     ,or_xix     ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,cp_ixh     ,cp_ixl     ,cp_xix     ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,dd_cb    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,pop_ix    ,no_op      ,ex_xsp_ix,no_op      ,push_ix    ,no_op      ,no_op   ,
+  no_op   ,jp_ix     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,ld_sp_ix  ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op
 };
 
 static opcode_fn opcode_ed[256]=
@@ -2258,38 +2260,38 @@ static opcode_fn opcode_ed[256]=
 
 static opcode_fn opcode_fd[256]=
 {
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,add_iy_bc ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,add_iy_de ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,ld_iy_word,ld_xword_iy,inc_iy   ,inc_iyh  ,dec_iyh  ,ld_iyh_byte,no_op   ,
-  no_op   ,add_iy_iy ,ld_iy_xword,dec_iy   ,inc_iyl  ,dec_iyl  ,ld_iyl_byte,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,inc_xiy  ,dec_xiy  ,ld_xiy_byte,no_op   ,
-  no_op   ,add_iy_sp ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_b_iyh ,ld_b_iyl ,ld_b_xiy   ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_c_iyh ,ld_c_iyl ,ld_c_xiy   ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_d_iyh ,ld_d_iyl ,ld_d_xiy   ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_e_iyh ,ld_e_iyl ,ld_e_xiy   ,no_op   ,
-  ld_iyh_b,ld_iyh_c  ,ld_iyh_d   ,ld_iyh_e ,ld_iyh_h ,ld_iyh_l ,ld_h_xiy   ,ld_iyh_a,
-  ld_iyl_b,ld_iyl_c  ,ld_iyl_d   ,ld_iyl_e ,ld_iyl_h ,ld_iyl_l ,ld_l_xiy   ,ld_iyl_a,
-  ld_xiy_b,ld_xiy_c  ,ld_xiy_d   ,ld_xiy_e ,ld_xiy_h ,ld_xiy_l ,no_op      ,ld_xiy_a,
-  no_op   ,no_op     ,no_op      ,no_op    ,ld_a_iyh ,ld_a_iyl ,ld_a_xiy   ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,add_a_iyh,add_a_iyl,add_a_xiy  ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,adc_a_iyh,adc_a_iyl,adc_a_xiy  ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,sub_iyh  ,sub_iyl  ,sub_xiy    ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,sbc_a_iyh,sbc_a_iyl,sbc_a_xiy  ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,and_iyh  ,and_iyl  ,and_xiy    ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,xor_iyh  ,xor_iyl  ,xor_xiy    ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,or_iyh   ,or_iyl   ,or_xiy     ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,cp_iyh   ,cp_iyl   ,cp_xiy     ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,fd_cb    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,pop_iy    ,no_op      ,ex_xsp_iy,no_op    ,push_iy  ,no_op      ,no_op   ,
-  no_op   ,jp_iy     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,no_op     ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op   ,
-  no_op   ,ld_sp_iy  ,no_op      ,no_op    ,no_op    ,no_op    ,no_op      ,no_op
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,add_iy_bc ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,add_iy_de ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,ld_iy_word,ld_xword_iy,inc_iy   ,inc_iyh    ,dec_iyh    ,ld_iyh_byte,no_op   ,
+  no_op   ,add_iy_iy ,ld_iy_xword,dec_iy   ,inc_iyl    ,dec_iyl    ,ld_iyl_byte,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,inc_xiy    ,dec_xiy    ,ld_xiy_byte,no_op   ,
+  no_op   ,add_iy_sp ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_b_iyh   ,ld_b_iyl   ,ld_b_xiy   ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_c_iyh   ,ld_c_iyl   ,ld_c_xiy   ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_d_iyh   ,ld_d_iyl   ,ld_d_xiy   ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_e_iyh   ,ld_e_iyl   ,ld_e_xiy   ,no_op   ,
+  ld_iyh_b,ld_iyh_c  ,ld_iyh_d   ,ld_iyh_e ,ld_iyh_iyh ,ld_iyh_iyl ,ld_h_xiy   ,ld_iyh_a,
+  ld_iyl_b,ld_iyl_c  ,ld_iyl_d   ,ld_iyl_e ,ld_iyl_iyh ,ld_iyl_iyl ,ld_l_xiy   ,ld_iyl_a,
+  ld_xiy_b,ld_xiy_c  ,ld_xiy_d   ,ld_xiy_e ,ld_xiy_h   ,ld_xiy_l   ,no_op      ,ld_xiy_a,
+  no_op   ,no_op     ,no_op      ,no_op    ,ld_a_iyh   ,ld_a_iyl   ,ld_a_xiy   ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,add_a_iyh  ,add_a_iyl  ,add_a_xiy  ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,adc_a_iyh  ,adc_a_iyl  ,adc_a_xiy  ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,sub_iyh    ,sub_iyl    ,sub_xiy    ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,sbc_a_iyh  ,sbc_a_iyl  ,sbc_a_xiy  ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,and_iyh    ,and_iyl    ,and_xiy    ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,xor_iyh    ,xor_iyl    ,xor_xiy    ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,or_iyh     ,or_iyl     ,or_xiy     ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,cp_iyh     ,cp_iyl     ,cp_xiy     ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,fd_cb    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,pop_iy    ,no_op      ,ex_xsp_iy,no_op      ,push_iy    ,no_op      ,no_op   ,
+  no_op   ,jp_iy     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,no_op     ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op   ,
+  no_op   ,ld_sp_iy  ,no_op      ,no_op    ,no_op      ,no_op      ,no_op      ,no_op
 };
 
 static void cb(void)
@@ -2372,13 +2374,25 @@ static void ei(void)
  /* IRQ line. If not, simply set interrupt flip-flop 2                      */
  if (!R.IFF1)
  {
+#ifdef DEBUG
+  if (R.PC.D==Z80_Trap) Z80_Trace=1;
+  if (Z80_Trace) Z80_Debug(&R);
+#endif
   R.IFF1=R.IFF2=1;
   ++R.R;
   opcode=M_RDOP(R.PC.D);
+{	/* NS 971024 */
+	extern int previouspc;
+	previouspc = R.PC.D;
+}
   R.PC.W.l++;
   Z80_ICount-=cycles_main[opcode];
   (*(opcode_main[opcode]))();
-  Interrupt(Z80_IRQ);
+#ifdef Z80_DAISYCHAIN
+  /* interrupt is checked before op-code fetch in main loop */
+#else
+  Interrupt(/*Z80_IRQ*/);	/* NS 970904 */
+#endif
  }
  else
   R.IFF2=1;
@@ -2387,12 +2401,38 @@ static void ei(void)
 /****************************************************************************/
 /* Reset registers to their initial values                                  */
 /****************************************************************************/
+#ifdef Z80_DAISYCHAIN
+void Z80_Reset (Z80_DaisyChain *daisy_chain )
+#else
 void Z80_Reset (void)
+#endif
 {
  memset (&R,0,sizeof(Z80_Regs));
+ change_pc(R.PC.D);	/* TS 971002 */
  R.SP.D=0xF000;
  R.R=rand();
- Z80_ICount=Z80_IPeriod;
+/* Z80_ICount=Z80_IPeriod;*/  /* NS 970904 */
+Z80_Clear_Pending_Interrupts();	/* NS 970904 */
+#ifdef Z80_DAISYCHAIN
+ R.irq_max = 0;
+ if( daisy_chain )
+ {  /* daisy-chain mode */
+	while( daisy_chain->irq_param != -1 && R.irq_max < Z80_MAXDAISY )
+	{
+		/* set callbackhandler after reti */
+		R.irq[R.irq_max] = * daisy_chain;
+		/* device reset */
+		if( R.irq[R.irq_max].reset )
+			R.irq[R.irq_max].reset(R.irq[R.irq_max].irq_param);
+
+		R.irq_max++;
+		daisy_chain++;
+
+	}
+
+
+ }
+#endif
 }
 
 /****************************************************************************/
@@ -2436,11 +2476,23 @@ static void InitTables (void)
 /****************************************************************************/
 /* Issue an interrupt if necessary                                          */
 /****************************************************************************/
-static void Interrupt (int j)
+static void Interrupt (void/*int j*/)	/* NS 970904 */
 {
- if (j==Z80_IGNORE_INT) return;
- if (j==Z80_NMI_INT || R.IFF1)
+/* if (j==Z80_IGNORE_INT) return; */ /* NS 970904*/
+/* if (j==Z80_NMI_INT || R.IFF1) */
+
+#ifdef Z80_DAISYCHAIN
+	if ( (R.pending_irq & NMI_IRQ) || R.IFF1)
+#else
+ 	if (R.pending_irq == Z80_IGNORE_INT && R.pending_nmi == 0) return;	/* NS 970904 */
+	if (R.pending_nmi != 0 || R.IFF1)	/* NS 970904 */
+#endif
  {
+{	/* NS 971024 */
+	extern int previouspc;
+	previouspc = -1;	/* there isn't a valid previouspc */
+}
+
   /* Clear interrupt flip-flop 1 */
   R.IFF1=0;
   /* Check if processor was halted */
@@ -2449,13 +2501,45 @@ static void Interrupt (int j)
    ++R.PC.W.l;
    R.HALT=0;
   }
-  if (j==Z80_NMI_INT)
+#ifdef Z80_DAISYCHAIN
+	if (R.pending_irq & NMI_IRQ)
+	{	/* NMI */
+		M_PUSH (PC);
+		R.PC.D=0x0066;
+		/* reset nmi interrupt request */
+		R.pending_irq &= ~NMI_IRQ;
+	}
+	else
+	{
+		int j;
+
+		if ( R.irq_max )
+		{	/* DaisyChain */
+			/* get interrupt vector and enter interrupt service */
+			/* interrupt_entry handler shoud be call Z80_Cause_Interrupt */
+			/* with new interrupt status                                 */
+			j = R.irq[R.request_irq].interrupt_entry(R.irq[R.request_irq].irq_param);
+		}
+		else
+		{	/* SINGLE INT */
+			j = R.vector;
+			R.pending_irq &= ~INT_IRQ;
+		}
+#else
+/*  if (j==Z80_NMI_INT)*/
+	if (R.pending_nmi != 0)	/* NS 970904 */
   {
+	R.pending_nmi = 0;	/* NS 970904 */
    M_PUSH (PC);
    R.PC.D=0x0066;
   }
   else
   {
+	  int j;
+	j = R.pending_irq;	/* NS 970904 */
+	R.pending_irq = Z80_IGNORE_INT;	/* NS 970904 */
+#endif
+
    /* Interrupt mode 2. Call [R.I:databyte] */
    if (R.IM==2)
    {
@@ -2476,9 +2560,9 @@ static void Interrupt (int j)
     {
      switch (j&0xFF0000)
      {
-      case 0xCD:
+      case 0xCD0000:	/* bugfix NS 970904 */
        M_PUSH(PC);
-      case 0xC3:
+      case 0xC30000:	/* bugfix NS 970904 */
        R.PC.D=j&0xFFFF;
        break;
       default:
@@ -2490,6 +2574,7 @@ static void Interrupt (int j)
     }
   }
  }
+ change_pc(R.PC.D);	/* TS 971002 */
 }
 
 /****************************************************************************/
@@ -2498,6 +2583,7 @@ static void Interrupt (int j)
 void Z80_SetRegs (Z80_Regs *Regs)
 {
  R=*Regs;
+ change_pc(R.PC.D);	/* TS 971002 */
 }
 
 /****************************************************************************/
@@ -2519,13 +2605,22 @@ unsigned Z80_GetPC (void)
 /****************************************************************************/
 /* Execute IPeriod T-States. Return 0 if emulation should be stopped        */
 /****************************************************************************/
-int Z80_Execute (void)
+int Z80_Execute(int cycles)	/* NS 970904 */
 {
  unsigned opcode;
  Z80_Running=1;
  InitTables ();
+
+ Z80_ICount=cycles;	/* NS 970904 */
+
  do
  {
+#ifdef Z80_DAISYCHAIN
+	if (R.pending_irq) Interrupt();
+#else
+  if (R.pending_nmi != 0 || R.pending_irq != Z80_IGNORE_INT) Interrupt();	/* NS 970901 */
+#endif
+
 #ifdef TRACE
   pc_trace[pc_count]=R.PC.D;
   pc_count=(pc_count+1)&255;
@@ -2535,13 +2630,30 @@ int Z80_Execute (void)
   if (Z80_Trace) Z80_Debug(&R);
   if (!Z80_Running) break;
 #endif
+#ifdef MAME_DEBUG
+{
+  extern int mame_debug;
+  if (mame_debug) MAME_Debug();
+}
+#endif
   ++R.R;
   opcode=M_RDOP(R.PC.D);
+
+{	/* NS 971024 */
+	extern int previouspc;
+	previouspc = R.PC.D;
+}
+
   R.PC.W.l++;
   Z80_ICount-=cycles_main[opcode];
   (*(opcode_main[opcode]))();
  }
  while (Z80_ICount>0);
+
+ return cycles - Z80_ICount;	/* NS 970904 */
+}
+
+#if 0	/* NS 970904 */
  Z80_ICount+=Z80_IPeriod;
  Interrupt (Z80_Interrupt());
  return Z80_Running;
@@ -2555,6 +2667,7 @@ word Z80 (void)
  while (Z80_Execute());
  return(R.PC.W.l);
 }
+#endif
 
 /****************************************************************************/
 /* Dump register contents and (optionally) a PC trace to stdout             */
@@ -2573,5 +2686,83 @@ void Z80_RegisterDump (void)
 #ifdef TRACE
  puts ("PC TRACE:");
  for (i=1;i<=256;++i) printf ("%04X\n",pc_trace[(pc_count-i)&255]);
+#endif
+}
+
+/****************************************************************************/
+/* Set number of memory refresh wait states (i.e. extra cycles inserted     */
+/* when the refresh register is being incremented)                          */
+/****************************************************************************/
+void Z80_SetWaitStates (int n)
+{
+ int i;
+ for (i=0;i<256;++i)
+ {
+  cycles_main[i]+=n;
+  cycles_cb[i]+=n;
+  cycles_ed[i]+=n;
+  cycles_xx[i]+=n;
+ }
+}
+
+void Z80_Cause_Interrupt(int type)	/* NS 970904 */
+{
+#ifdef Z80_DAISYCHAIN
+/* type value :                                                          */
+/*  Z80_NMI_INT                      -> NMI request                      */
+/*  Z80_IGNORE_INT                   -> no request                       */
+/*  vector(0x00-0xff)                -> SINGLE interrupt request         */
+/*  Z80_VECTOR(device,status)        -> DaisyChain change interrupt status */
+/*      device : device number of daisy-chain link                       */
+/*      status : Z80_INT_REQ  -> interrupt request                       */
+/*               Z80_INT_IEO  -> interrupt disable output                */
+
+	if (type == Z80_NMI_INT)
+	{
+		R.pending_irq |= NMI_IRQ;
+	}
+	else if (type != Z80_IGNORE_INT)
+	{
+		if( R.irq_max )
+		{	/* daisy chain mode */
+			int device = type >> 8;
+			int state  = type & 0xff;
+
+			if( R.int_state[device] != state )
+			{
+				/* set new interrupt status */
+				R.int_state[device] = state;
+				/* check interrupt status */
+				check_daisy_chain();
+			}
+		}
+		else
+		{	/* single int mode */
+			R.vector = type & 0xff;
+			R.pending_irq |= INT_IRQ;
+		}
+	}
+#else
+	if (type == Z80_NMI_INT)
+		R.pending_nmi = 1;
+	else if (type != Z80_IGNORE_INT)
+		R.pending_irq = type;
+#endif
+}
+void Z80_Clear_Pending_Interrupts(void)	/* NS 970904 */
+{
+#ifdef Z80_DAISYCHAIN
+	int i;
+	/* clear irq for all device */
+	for( i = 0 ; i < Z80_MAXDAISY ; i++ )
+	{
+		/* !!!!! shoud be clear interrupt status for daisy-chain devices !!!!! */
+		R.int_state[i]  = 0;
+	}
+	R.pending_irq  = 0;
+	R.request_irq  = R.service_irq  = -1;
+#else
+	R.pending_irq = Z80_IGNORE_INT;
+	R.pending_nmi = 0;
 #endif
 }

@@ -7,66 +7,108 @@
 ***************************************************************************/
 
 #include "driver.h"
-
-
-#define VIDEO_RAM_SIZE 0x400
-
-unsigned char *amidar_videoram;
-unsigned char *amidar_attributesram;
-unsigned char *amidar_spriteram;
-static unsigned char dirtybuffer[VIDEO_RAM_SIZE];	/* keep track of modified portions of the screen */
-											/* to speed up video refresh */
-
-static struct osd_bitmap *tmpbitmap;
+#include "vidhrdw/generic.h"
 
 
 
-int amidar_vh_start(void)
+static struct rectangle spritevisiblearea =
 {
-	if ((tmpbitmap = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
-		return 1;
-
-	return 0;
-}
+	2*8+1, 32*8-1,
+	2*8, 30*8-1
+};
+static struct rectangle spritevisibleareaflipx =
+{
+	0*8, 30*8-2,
+	2*8, 30*8-1
+};
 
 
 
 /***************************************************************************
 
-  Stop the video hardware emulation.
+  Convert the color PROMs into a more useable format.
+
+  Amidar has one 32 bytes palette PROM, connected to the RGB output this
+  way:
+
+  bit 7 -- 220 ohm resistor  -- BLUE
+        -- 470 ohm resistor  -- BLUE
+        -- 220 ohm resistor  -- GREEN
+        -- 470 ohm resistor  -- GREEN
+        -- 1  kohm resistor  -- GREEN
+        -- 220 ohm resistor  -- RED
+        -- 470 ohm resistor  -- RED
+  bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void amidar_vh_stop(void)
+void amidar_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
 {
-	osd_free_bitmap(tmpbitmap);
-}
+	int i;
+	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
+	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
 
 
-
-void amidar_videoram_w(int offset,int data)
-{
-	if (amidar_videoram[offset] != data)
+	for (i = 0;i < Machine->drv->total_colors;i++)
 	{
-		dirtybuffer[offset] = 1;
+		int bit0,bit1,bit2;
 
-		amidar_videoram[offset] = data;
+
+		/* red component */
+		bit0 = (*color_prom >> 0) & 0x01;
+		bit1 = (*color_prom >> 1) & 0x01;
+		bit2 = (*color_prom >> 2) & 0x01;
+		*(palette++) = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+		/* green component */
+		bit0 = (*color_prom >> 3) & 0x01;
+		bit1 = (*color_prom >> 4) & 0x01;
+		bit2 = (*color_prom >> 5) & 0x01;
+		*(palette++) = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+		/* blue component */
+		bit0 = 0;
+		bit1 = (*color_prom >> 6) & 0x01;
+		bit2 = (*color_prom >> 7) & 0x01;
+		*(palette++) = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+
+		color_prom++;
+	}
+
+
+	/* characters and sprites use the same palette */
+	for (i = 0;i < TOTAL_COLORS(0);i++)
+	{
+		if (i & 3) COLOR(0,i) = i;
+		else COLOR(0,i) = 0;	/* 00 is always black, regardless of the contents of the PROM */
 	}
 }
 
 
 
-void amidar_attributes_w(int offset,int data)
+static void updatetile(int x,int y)
 {
-	if ((offset & 1) && amidar_attributesram[offset] != data)
+	set_tile_attributes(0,			/* layer number */
+		x + y * 32, 				/* x/y position */
+		0,videoram00[32*y+x],		/* tile bank, code */
+		videoram01[2*x + 1] & 0x07,	/* color */
+		0,0,						/* flip x/y */
+		TILE_TRANSPARENCY_OPAQUE);	/* transparency */
+}
+
+void amidar_updatehook00(int offset)
+{
+	updatetile(offset % 32,offset / 32);
+}
+
+void amidar_updatehook01(int offset)
+{
+	if (offset & 1)
 	{
-		int i;
+		int x,y;
 
 
-		for (i = offset / 2;i < VIDEO_RAM_SIZE;i += 32)
-			dirtybuffer[i] = 1;
+		x = offset / 2;
+		for (y = 0;y < 32;y++)
+			updatetile(x,y);
 	}
-
-	amidar_attributesram[offset] = data;
 }
 
 
@@ -83,42 +125,50 @@ void amidar_vh_screenrefresh(struct osd_bitmap *bitmap)
 	int offs;
 
 
-	/* for every character in the Video RAM, check if it has been modified */
-	/* since last time and update it accordingly. */
-	for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
-	{
-		if (dirtybuffer[offs])
-		{
-			int sx,sy;
-
-
-			dirtybuffer[offs] = 0;
-
-			sx = (31 - offs / 32);
-			sy = (offs % 32);
-
-			drawgfx(tmpbitmap,Machine->gfx[0],
-					amidar_videoram[offs],
-					amidar_attributesram[2 * sy + 1],
-					0,0,8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
-		}
-	}
-
-
-	/* copy the temporary bitmap to the screen */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	set_tile_layer_attributes(0,bitmap,				/* layer number, bitmap */
+			0,0,									/* scroll x/y */
+			*flip_screen_x & 1,*flip_screen_y & 1,	/* flip x/y */
+			0,0);									/* global attributes */
+	update_tile_layer(0,bitmap);
 
 
 	/* Draw the sprites. Note that it is important to draw them exactly in this */
 	/* order, to have the correct priorities. */
-	for (offs = 4*7;offs >= 0;offs -= 4)
+	for (offs = spriteram_size - 4;offs >= 0;offs -= 4)
 	{
-		drawgfx(bitmap,Machine->gfx[1],
-				amidar_spriteram[offs + 1] & 0x3f,
-				amidar_spriteram[offs + 2],
-				amidar_spriteram[offs + 1] & 0x80,amidar_spriteram[offs + 1] & 0x40,
-				amidar_spriteram[offs],amidar_spriteram[offs + 3],
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+		int flipx,flipy,sx,sy;
+
+
+		sx = (spriteram[offs + 3] + 1) & 0xff;	/* ??? */
+		sy = 240 - spriteram[offs];
+		flipx = spriteram[offs + 1] & 0x40;
+		flipy = spriteram[offs + 1] & 0x80;
+
+		if (*flip_screen_x & 1)
+		{
+			sx = 241 - sx;	/* note: 241, not 240 */
+			flipx = !flipx;
+		}
+		if (*flip_screen_y & 1)
+		{
+			sy = 240 - sy;
+			flipy = !flipy;
+		}
+
+		/* Sprites #0, #1 and #2 need to be offset one pixel to be correctly */
+		/* centered on the ladders in Turtles (we move them down, but since this */
+		/* is a rotated game, we actually move them left). */
+		/* Note that the adjustement must be done AFTER handling flipscreen, thus */
+		/* proving that this is a hardware related "feature" */
+		if (offs <= 2*4) sy++;
+
+		drawgfx(bitmap,Machine->gfx[0],
+				spriteram[offs + 1] & 0x3f,
+				spriteram[offs + 2] & 0x07,
+				flipx,flipy,
+				sx,sy,
+				*flip_screen_x & 1 ? &spritevisibleareaflipx : &spritevisiblearea,TRANSPARENCY_PEN,0);
+
+layer_mark_rectangle_dirty(Machine->layer[0],sx,sx+15,sy,sy+15);
 	}
 }

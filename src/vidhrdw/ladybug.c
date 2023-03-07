@@ -7,19 +7,11 @@
 ***************************************************************************/
 
 #include "driver.h"
+#include "vidhrdw/generic.h"
 
 
-#define VIDEO_RAM_SIZE 0x400
 
-
-unsigned char *ladybug_videoram;
-unsigned char *ladybug_colorram;
-unsigned char *ladybug_spriteram;
-static unsigned char dirtybuffer[VIDEO_RAM_SIZE];	/* keep track of modified portions of the screen */
-											/* to speed up video refresh */
-
-static struct osd_bitmap *tmpbitmap;
-
+static int flipscreen;
 
 
 
@@ -95,47 +87,12 @@ void ladybug_vh_convert_color_prom(unsigned char *palette, unsigned char *colort
 
 
 
-int ladybug_vh_start(void)
+void ladybug_flipscreen_w(int offset,int data)
 {
-	if ((tmpbitmap = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
-		return 1;
-
-	return 0;
-}
-
-
-
-/***************************************************************************
-
-  Stop the video hardware emulation.
-
-***************************************************************************/
-void ladybug_vh_stop(void)
-{
-	osd_free_bitmap(tmpbitmap);
-}
-
-
-
-void ladybug_videoram_w(int offset,int data)
-{
-	if (ladybug_videoram[offset] != data)
+	if (flipscreen != (data & 1))
 	{
-		dirtybuffer[offset] = 1;
-
-		ladybug_videoram[offset] = data;
-	}
-}
-
-
-
-void ladybug_colorram_w(int offset,int data)
-{
-	if (ladybug_colorram[offset] != data)
-	{
-		dirtybuffer[offset] = 1;
-
-		ladybug_colorram[offset] = data;
+		flipscreen = data & 1;
+		memset(dirtybuffer,1,videoram_size);
 	}
 }
 
@@ -155,7 +112,7 @@ void ladybug_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 	/* for every character in the Video RAM, check if it has been modified */
 	/* since last time and update it accordingly. */
-	for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
+	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
 		if (dirtybuffer[offs])
 		{
@@ -164,55 +121,91 @@ void ladybug_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 			dirtybuffer[offs] = 0;
 
-			sx = 8 * (offs / 32);
-			sy = 8 * (31 - offs % 32);
+			sx = offs % 32;
+			sy = offs / 32;
+
+			if (flipscreen)
+			{
+				sx = 31 - sx;
+				sy = 31 - sy;
+			}
 
 			drawgfx(tmpbitmap,Machine->gfx[0],
-					ladybug_videoram[offs] + 32 * (ladybug_colorram[offs] & 8),
-					ladybug_colorram[offs],
-					0,0,sx,sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					videoram[offs] + 32 * (colorram[offs] & 8),
+					colorram[offs],
+					flipscreen,flipscreen,
+					8*sx,8*sy,
+					0,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
-	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	/* copy the temporary bitmap to the screen */
+	{
+		int scroll[32];
+		int sx,sy;
+
+
+		for (offs = 0;offs < 32;offs++)
+		{
+			sx = offs % 4;
+			sy = offs / 4;
+
+			if (flipscreen)
+				scroll[31-offs] = -videoram[32 * sx + sy];
+			else
+				scroll[offs] = -videoram[32 * sx + sy];
+		}
+
+		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	}
 
 
 	/* Draw the sprites. Note that it is important to draw them exactly in this */
 	/* order, to have the correct priorities. */
 	/* sprites in the columns 15, 1 and 0 are outside of the visible area */
-	for (offs = 14 * 0x40;offs >= 2;offs -= 0x40)
+	for (offs = spriteram_size - 2*0x40;offs >= 2*0x40;offs -= 0x40)
 	{
 		i = 0;
-		while (i < 0x40 && ladybug_spriteram[offs + i] != 0)
+		while (i < 0x40 && spriteram[offs + i] != 0)
 			i += 4;
 
 		while (i > 0)
 		{
 /*
- aabbcccc ddddddee fffghhhh iiiiiiii
+ abccdddd eeeeeeee fffghhhh iiiiiiii
 
- aa unknown
- bb flip
- cccc x offset
- dddddd sprite code
- ee unknown
+ a enable?
+ b size (0 = 8x8, 1 = 16x16)
+ cc flip
+ dddd y offset
+ eeeeeeee sprite code (shift right 2 bits for 16x16 sprites)
  fff unknown
  g sprite bank
  hhhh color
- iiiiiiii y position
+ iiiiiiii x position
 */
 			i -= 4;
 
-			drawgfx(bitmap,Machine->gfx[1],
-					(ladybug_spriteram[offs + i + 1] >> 2) + 4 * (ladybug_spriteram[offs + i + 2] & 0x10),
-					ladybug_spriteram[offs + i + 2] & 0x0f,
-					ladybug_spriteram[offs + i] & 0x10,ladybug_spriteram[offs + i] & 0x20,
-					offs / 4 - 8 + (ladybug_spriteram[offs + i] & 0x0f),
-					240 - ladybug_spriteram[offs + i + 3],
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+			if (spriteram[offs + i] & 0x80)
+			{
+				if (spriteram[offs + i] & 0x40)	/* 16x16 */
+					drawgfx(bitmap,Machine->gfx[1],
+							(spriteram[offs + i + 1] >> 2) + 4 * (spriteram[offs + i + 2] & 0x10),
+							spriteram[offs + i + 2] & 0x0f,
+							spriteram[offs + i] & 0x20,spriteram[offs + i] & 0x10,
+							spriteram[offs + i + 3],
+							offs / 4 - 8 + (spriteram[offs + i] & 0x0f),
+							&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				else	/* 8x8 */
+					drawgfx(bitmap,Machine->gfx[2],
+							spriteram[offs + i + 1] + 4 * (spriteram[offs + i + 2] & 0x10),
+							spriteram[offs + i + 2] & 0x0f,
+							spriteram[offs + i] & 0x20,spriteram[offs + i] & 0x10,
+							spriteram[offs + i + 3],
+							offs / 4 + (spriteram[offs + i] & 0x0f),
+							&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+			}
 		}
 	}
 }

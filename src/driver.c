@@ -1,1224 +1,1061 @@
 #include "driver.h"
 
-extern struct MachineDriver pacman_driver;
-extern struct MachineDriver mspacman_driver;
-extern struct MachineDriver crush_driver;
-extern struct MachineDriver pengo_driver;
-extern struct MachineDriver ladybug_driver;
-extern struct MachineDriver mrdo_driver;
-extern struct MachineDriver cclimber_driver;
-extern struct MachineDriver ckong_driver;
-extern struct MachineDriver dkong_driver;
-extern struct MachineDriver dkongjr_driver;
-extern struct MachineDriver bagman_driver;
-extern struct MachineDriver wow_driver;
-extern struct MachineDriver galaxian_driver;
-extern struct MachineDriver pisces_driver;
-extern struct MachineDriver japirem_driver;
-extern struct MachineDriver warofbug_driver;
-extern struct MachineDriver mooncrst_driver;
-extern struct MachineDriver moonqsr_driver;
-extern struct MachineDriver theend_driver;
-extern struct MachineDriver frogger_driver;
-extern struct MachineDriver scramble_driver;
-extern struct MachineDriver atlantis_driver;
-extern struct MachineDriver scobra_driver;
-extern struct MachineDriver amidar_driver;
-extern struct MachineDriver turtles_driver;
-extern struct MachineDriver rallyx_driver;
-extern struct MachineDriver pooyan_driver;
-extern struct MachineDriver phoenix_driver;
-extern struct MachineDriver carnival_driver;
-extern struct MachineDriver invaders_driver;
-extern struct MachineDriver mario_driver;
-extern struct MachineDriver zaxxon_driver;
-extern struct MachineDriver bombjack_driver;
+
+/* "Pacman hardware" games */
+extern struct GameDriver pacman_driver;		/* (c) 1980 Midway */
+extern struct GameDriver pacplus_driver;	/* hack */
+extern struct GameDriver jrpacman_driver;	/* (c) 1983 Midway */
+extern struct GameDriver pacmod_driver;		/* (c) 1981 Midway */
+extern struct GameDriver namcopac_driver;	/* (c) 1980 Namco */
+extern struct GameDriver pacmanjp_driver;	/* (c) 1980 Namco */
+extern struct GameDriver hangly_driver;		/* hack */
+extern struct GameDriver puckman_driver;	/* hack */
+extern struct GameDriver piranha_driver;	/* hack */
+extern struct GameDriver mspacman_driver;	/* (c) 1981 Midway (but it's a bootleg) */
+extern struct GameDriver mspacatk_driver;	/* hack */
+extern struct GameDriver crush_driver;		/* bootleg Make Trax */
+extern struct GameDriver maketrax_driver;	/* (c) 1981 Williams */
+extern struct GameDriver pengo_driver;		/* (c) 1982 Sega */
+extern struct GameDriver pengoa_driver;		/* (c) 1982 Sega */
+extern struct GameDriver penta_driver;		/* bootleg */
+/* "Galaxian hardware" games */
+extern struct GameDriver galaxian_driver;	/* (c) Namco */
+extern struct GameDriver galmidw_driver;	/* (c) Midway */
+extern struct GameDriver galnamco_driver;	/* hack */
+extern struct GameDriver superg_driver;		/* hack */
+extern struct GameDriver galapx_driver;		/* hack */
+extern struct GameDriver galap1_driver;		/* hack */
+extern struct GameDriver galap4_driver;		/* hack */
+extern struct GameDriver galturbo_driver;	/* hack */
+extern struct GameDriver pisces_driver;		/* ? */
+extern struct GameDriver japirem_driver;	/* (c) Irem */
+extern struct GameDriver uniwars_driver;	/* (c) Karateco (bootleg?) */
+extern struct GameDriver warofbug_driver;	/* (c) 1981 Armenia */
+extern struct GameDriver redufo_driver;		/* ? */
+extern struct GameDriver pacmanbl_driver;	/* bootleg */
+extern struct GameDriver mooncrst_driver;	/* (c) 1980 Nihon Bussan */
+extern struct GameDriver mooncrsg_driver;	/* (c) 1980 Gremlin */
+extern struct GameDriver mooncrsb_driver;	/* bootleg */
+extern struct GameDriver fantazia_driver;	/* bootleg */
+extern struct GameDriver eagle_driver;		/* (c) Centuri */
+extern struct GameDriver moonqsr_driver;	/* (c) 1980 Nichibutsu */
+extern struct GameDriver checkman_driver;	/* (c) 1982 Zilec-Zenitone */
+/* "Scramble hardware" (and variations) games */
+extern struct GameDriver scramble_driver;	/* GX387 (c) 1981 Stern */
+extern struct GameDriver atlantis_driver;	/* (c) 1981 Comsoft */
+extern struct GameDriver theend_driver;		/* (c) 1980 Stern */
+extern struct GameDriver ckongs_driver;		/* bootleg */
+extern struct GameDriver froggers_driver;	/* bootleg */
+extern struct GameDriver amidars_driver;	/* (c) 1982 Konami */
+extern struct GameDriver triplep_driver;	/* (c) 1982 KKI */
+extern struct GameDriver scobra_driver;		/* GX316 (c) 1981 Stern */
+extern struct GameDriver scobrak_driver;	/* GX316 (c) 1981 Konami */
+extern struct GameDriver scobrab_driver;	/* GX316 (c) 1981 Karateco (bootleg?) */
+extern struct GameDriver losttomb_driver;	/* (c) 1982 Stern */
+extern struct GameDriver rescue_driver;		/* (c) 1982 Stern */
+extern struct GameDriver minefld_driver;	/* (c) 1983 Stern */
+extern struct GameDriver anteater_driver;	/* (c) 1982 Tago */
+extern struct GameDriver armorcar_driver;	/* (c) 1981 Stern */
+extern struct GameDriver tazmania_driver;	/* (c) 1982 Stern */
+extern struct GameDriver stratgyx_driver;	/* (c) 1981 Stern */
+extern struct GameDriver stratgyb_driver;	/* bootleg (of the Konami version?) */
+extern struct GameDriver darkplnt_driver;	/* (c) 1982 Stern */
+extern struct GameDriver hustler_driver;	/* GX343 (c) 1981 Konami */
+extern struct GameDriver pool_driver;
+extern struct GameDriver frogger_driver;	/* GX392 (c) 1981 Sega */
+extern struct GameDriver frogsega_driver;	/* GX392 (c) 1981 Sega */
+extern struct GameDriver frogger2_driver;	/* GX392 (c) 1981 Sega */
+extern struct GameDriver amidar_driver;		/* GX337 (c) 1982 Konami + Stern license */
+extern struct GameDriver amidarjp_driver;	/* GX337 (c) 1981 Konami */
+extern struct GameDriver amigo_driver;		/* bootleg */
+extern struct GameDriver turtles_driver;	/* GX353 (c) 1981 Stern */
+extern struct GameDriver turpin_driver;		/* GX353 (c) 1981 Sega */
+extern struct GameDriver jumpbug_driver;	/* (c) 1981 Rock-ola */
+extern struct GameDriver jbugsega_driver;	/* (c) 1981 Sega */
+extern struct GameDriver jumpcoas_driver;	/* (c) 1983 Kaneko */
+/* "Crazy Climber hardware" games */
+extern struct GameDriver cclimber_driver;	/* (c) 1980 Nihon Bussan */
+extern struct GameDriver ccjap_driver;		/* (c) 1980 Nihon Bussan */
+extern struct GameDriver ccboot_driver;		/* bootleg */
+extern struct GameDriver ckong_driver;		/* (c) 1981 Falcon */
+extern struct GameDriver ckonga_driver;		/* (c) 1981 Falcon */
+extern struct GameDriver ckongjeu_driver;	/* bootleg */
+extern struct GameDriver ckongalc_driver;	/* bootleg */
+extern struct GameDriver monkeyd_driver;	/* bootleg */
+extern struct GameDriver swimmer_driver;	/* (c) 1982 Tehkan */
+extern struct GameDriver swimmera_driver;	/* (c) 1982 Tehkan */
+extern struct GameDriver guzzler_driver;	/* (c) 1983 Tehkan */
+extern struct GameDriver seicross_driver;	/* (c) 1984 Nichibutsu + Alice */
+extern struct GameDriver friskyt_driver;
+/* "Phoenix hardware" (and variations) games */
+extern struct GameDriver phoenix_driver;	/* (c) 1980 Amstar */
+extern struct GameDriver phoenixt_driver;	/* (c) 1980 Taito */
+extern struct GameDriver phoenix3_driver;	/* T.P.N. */
+extern struct GameDriver pleiads_driver;	/* (c) 1981 Centuri + Tehkan */
+extern struct GameDriver pleitek_driver;	/* (c) 1981 Tehkan */
+extern struct GameDriver naughtyb_driver;	/* (c) 1982 Jaleco + Cinematronics */
+extern struct GameDriver popflame_driver;	/* (c) 1982 Jaleco */
+/* "Space Invaders hardware " games */
+extern struct GameDriver invaders_driver;
+extern struct GameDriver earthinv_driver;
+extern struct GameDriver spaceatt_driver;
+extern struct GameDriver invrvnge_driver;
+extern struct GameDriver invdelux_driver;
+extern struct GameDriver galxwars_driver;
+extern struct GameDriver lrescue_driver;
+extern struct GameDriver desterth_driver;
+extern struct GameDriver invadpt2_driver;
+extern struct GameDriver cosmicmo_driver;
+extern struct GameDriver spaceph_driver;
+extern struct GameDriver rollingc_driver;
+extern struct GameDriver boothill_driver;
+extern struct GameDriver bandido_driver;
+extern struct GameDriver astinvad_driver;
+extern struct GameDriver schaser_driver;
+extern struct GameDriver zzzap_driver;
+extern struct GameDriver tornbase_driver;
+extern struct GameDriver kamikaze_driver;
+extern struct GameDriver maze_driver;
+/* Namco games */
+extern struct GameDriver rallyx_driver;		/* (c) 1980 Midway */
+extern struct GameDriver nrallyx_driver;	/* (c) 1981 Namco */
+extern struct GameDriver locomotn_driver;	/* GX359 (c) 1982 Centuri + Konami license */
+extern struct GameDriver jungler_driver;	/* GX327 (c) 1981 Konami */
+extern struct GameDriver commsega_driver;	/* (c) 1983 Sega */
+	/* the following ones all have a custom I/O chip */
+extern struct GameDriver bosco_driver;		/* (c) 1981 Midway */
+extern struct GameDriver bosconm_driver;	/* (c) 1981 */
+extern struct GameDriver galaga_driver;		/* (c) 1981 Midway */
+extern struct GameDriver galaganm_driver;	/* (c) 1981 */
+extern struct GameDriver galagabl_driver;	/* bootleg */
+extern struct GameDriver gallag_driver;		/* bootleg */
+extern struct GameDriver galagab2_driver;	/* bootleg */
+extern struct GameDriver digdugnm_driver;	/* (c) 1982 */
+extern struct GameDriver digdugat_driver;	/* (c) 1982 Atari */
+extern struct GameDriver xevious_driver;	/* (c) 1982 + Atari license */
+extern struct GameDriver xeviousn_driver;	/* (c) 1982 */
+extern struct GameDriver sxevious_driver;	/* (c) 1984 */
+extern struct GameDriver superpac_driver;	/* (c) 1982 Midway */
+extern struct GameDriver superpcn_driver;	/* (c) 1982 */
+extern struct GameDriver pacnpal_driver;	/* (c) 1983 */
+extern struct GameDriver mappy_driver;		/* (c) 1983 */
+extern struct GameDriver mappyjp_driver;	/* (c) 1983 */
+extern struct GameDriver digdug2_driver;	/* (c) 1985 */
+extern struct GameDriver todruaga_driver;	/* (c) 1984 */
+extern struct GameDriver motos_driver;		/* (c) 1985 */
+/* Universal games */
+extern struct GameDriver ladybug_driver;	/* (c) 1981 */
+extern struct GameDriver snapjack_driver;	/* (c) */
+extern struct GameDriver cavenger_driver;	/* (c) 1981 */
+extern struct GameDriver mrdo_driver;		/* (c) 1982 */
+extern struct GameDriver mrdot_driver;		/* (c) 1982 + Taito license */
+extern struct GameDriver mrlo_driver;		/* bootleg */
+extern struct GameDriver mrdu_driver;		/* bootleg */
+extern struct GameDriver docastle_driver;	/* (c) 1983 */
+extern struct GameDriver docastl2_driver;	/* (c) 1983 */
+extern struct GameDriver dounicorn_driver;	/* (c) 1983 */
+extern struct GameDriver dowild_driver;		/* (c) 1984 */
+extern struct GameDriver jjack_driver;		/* (c) 1984 */
+extern struct GameDriver dorunrun_driver;	/* (c) 1984 */
+extern struct GameDriver spiero_driver;		/* (c) 1987 */
+extern struct GameDriver kickridr_driver;	/* (c) 1984 */
+/* Nintendo games */
+extern struct GameDriver dkong_driver;		/* (c) 1981 Nintendo of America */
+extern struct GameDriver radarscp_driver;	/* (c) 1980 Nintendo */
+extern struct GameDriver dkongjp_driver;	/* (c) 1981 Nintendo */
+extern struct GameDriver dkongjr_driver;	/* (c) 1982 Nintendo of America */
+extern struct GameDriver dkngjrjp_driver;	/* no copyright notice */
+extern struct GameDriver dkjrjp_driver;		/* (c) 1982 Nintendo */
+extern struct GameDriver dkjrbl_driver;		/* (c) 1982 Nintendo of America */
+extern struct GameDriver dkong3_driver;		/* (c) 1983 Nintendo of America */
+extern struct GameDriver mario_driver;		/* (c) 1983 Nintendo of America */
+extern struct GameDriver hunchy_driver;		/* hacked Donkey Kong board */
+extern struct GameDriver popeyebl_driver;	/* bootleg - different hardware from the other ones */
+extern struct GameDriver punchout_driver;	/* (c) 1984 - different hardware */
+extern struct GameDriver spnchout_driver;
+/* Bally Midway "Astrocade" games */
+extern struct GameDriver wow_driver;		/* (c) 1980 */
+extern struct GameDriver robby_driver;		/* (c) 1981 */
+extern struct GameDriver gorf_driver;		/* (c) 1981 */
+extern struct GameDriver gorfpgm1_driver;	/* (c) 1981 */
+extern struct GameDriver seawolf_driver;
+extern struct GameDriver spacezap_driver;	/* (c) 1980 */
+extern struct GameDriver ebases_driver;
+/* Bally Midway "MCR" games */
+extern struct GameDriver kick_driver;		/* (c) 1981 */
+extern struct GameDriver solarfox_driver;	/* (c) 1981 */
+extern struct GameDriver tron_driver;		/* (c) 1982 */
+extern struct GameDriver twotiger_driver;	/* (c) 1984 */
+extern struct GameDriver domino_driver;		/* (c) 1982 */
+extern struct GameDriver shollow_driver;	/* (c) 1981 */
+extern struct GameDriver wacko_driver;		/* (c) 1982 */
+extern struct GameDriver kroozr_driver;		/* (c) 1982 */
+extern struct GameDriver journey_driver;	/* (c) 1983 */
+extern struct GameDriver tapper_driver;		/* (c) 1983 */
+extern struct GameDriver sutapper_driver;	/* (c) 1983 */
+extern struct GameDriver rbtapper_driver;	/* (c) 1984 */
+extern struct GameDriver dotron_driver;		/* (c) 1983 */
+extern struct GameDriver destderb_driver;	/* (c) 1984 */
+extern struct GameDriver timber_driver;		/* (c) 1984 */
+extern struct GameDriver spyhunt_driver;	/* (c) 1983 */
+extern struct GameDriver crater_driver;		/* (c) 1984 */
+extern struct GameDriver rampage_driver;	/* (c) 1986 */
+extern struct GameDriver sarge_driver;		/* (c) 1985 */
+/* Irem games */
+extern struct GameDriver mpatrol_driver;	/* (c) 1982 */
+extern struct GameDriver mpatrolw_driver;	/* (c) 1982 + Williams license */
+extern struct GameDriver mranger_driver;	/* bootleg */
+extern struct GameDriver yard_driver;		/* (c) 1983 */
+extern struct GameDriver vsyard_driver;		/* (c) 1983/1984 */
+extern struct GameDriver kungfum_driver;	/* (c) 1984 */
+extern struct GameDriver kungfub_driver;	/* bootleg */
+extern struct GameDriver travrusa_driver;	/* (c) 1983 */
+extern struct GameDriver lrunner_driver;	/* (c) 1984 + Broderbund license */
+	/* other games running on similar hardware: Kid Niki */
+/* Gottlieb games */
+extern struct GameDriver reactor_driver;	/* GV-100 (c) 1982 */
+extern struct GameDriver mplanets_driver;	/* GV-102 (c) 1983 */
+extern struct GameDriver qbert_driver;		/* GV-103 (c) 1982 */
+extern struct GameDriver qbertjp_driver;	/* GV-103 (c) 1982 + Konami license */
+extern struct GameDriver krull_driver;		/* GV-105 (c) 1983 */
+extern struct GameDriver stooges_driver;	/* GV-113 (c) 1984 Mylstar */
+extern struct GameDriver qbertqub_driver;	/* GV-119 (c) 1983 Mylstar */
+	/* other games running on similar hardware: GV-134 Curveball, GV-109 Mach 3 (a laserdisc game) */
+/* Taito "Qix hardware" games */
+extern struct GameDriver qix_driver;		/* (c) 1981 */
+extern struct GameDriver qix2_driver;		/* (c) 1981 */
+extern struct GameDriver zookeep_driver;	/* (c) 1982 Taito America */
+/* Taito "Jungle King hardware" games */
+extern struct GameDriver junglek_driver;	/* (c) 1982 */
+extern struct GameDriver jhunt_driver;		/* (c) 1982 Taito America */
+extern struct GameDriver elevator_driver;	/* (c) 1983 */
+extern struct GameDriver elevatob_driver;	/* bootleg */
+extern struct GameDriver wwestern_driver;	/* (c) 1982 */
+extern struct GameDriver frontlin_driver;	/* (c) 1982 */
+extern struct GameDriver alpine_driver;
+/* other Taito games */
+extern struct GameDriver bublbobl_driver;	/* (c) 1986 */
+extern struct GameDriver boblbobl_driver;	/* bootleg */
+extern struct GameDriver sboblbob_driver;	/* bootleg */
+extern struct GameDriver rastan_driver;		/* (c) 1987 Taito Japan */
+extern struct GameDriver rastsaga_driver;	/* (c) 1987 Taito */
+extern struct GameDriver rainbow_driver;	/* (c) 1987 */
+extern struct GameDriver rainbowe_driver;	/* (c) 1988 */
+extern struct GameDriver arkanoid_driver;	/* (c) 1986 Taito */
+extern struct GameDriver arknoidu_driver;	/* (c) 1986 Taito America */
+extern struct GameDriver arkbl2_driver;		/* bootleg */
+extern struct GameDriver arkabeta_driver;	/* bootleg */
+extern struct GameDriver arkatayt_driver;	/* bootleg */
+extern struct GameDriver superqix_driver;
+extern struct GameDriver sqixbl_driver;		/* bootleg? but (c) 1987 */
+extern struct GameDriver tnzs_driver;		/* (c) 1988 */
+extern struct GameDriver tnzs2_driver;		/* (c) 1988 */
+//extern struct GameDriver twincobr_driver;
+/* Williams games */
+extern struct GameDriver robotron_driver;	/* (c) 1982 */
+extern struct GameDriver robotryo_driver;	/* (c) 1982 */
+extern struct GameDriver stargate_driver;	/* (c) 1981 */
+extern struct GameDriver joust_driver;		/* (c) 1982 */
+extern struct GameDriver joustr_driver;		/* (c) 1982 */
+extern struct GameDriver joustg_driver;		/* (c) 1982 */
+extern struct GameDriver joustwr_driver;	/* (c) 1982 */
+extern struct GameDriver sinistar_driver;	/* (c) 1982 */
+extern struct GameDriver bubbles_driver;	/* (c) 1982 */
+extern struct GameDriver bubblesr_driver;	/* (c) 1982 */
+extern struct GameDriver defender_driver;	/* (c) 1980 */
+extern struct GameDriver splat_driver;		/* (c) 1982 */
+extern struct GameDriver blaster_driver;	/* (c) 1983 */
+extern struct GameDriver colony7_driver;	/* (c) 1981 Taito */
+extern struct GameDriver colony7a_driver;	/* (c) 1981 Taito */
+extern struct GameDriver lottofun_driver;	/* (c) 1987 H.A.R. Management */
+/* Capcom games */
+extern struct GameDriver c1942_driver;		/* (c) 1984 */
+extern struct GameDriver vulgus_driver;		/* (c) 1984 */
+extern struct GameDriver commando_driver;	/* (c) 1985 */
+extern struct GameDriver commandj_driver;	/* (c) 1985 */
+extern struct GameDriver gng_driver;		/* (c) 1985 */
+extern struct GameDriver gngcross_driver;	/* (c) 1985 */
+extern struct GameDriver gngjap_driver;		/* (c) 1985 */
+extern struct GameDriver diamond_driver;	/* (c) 1989 KH Video (runs on GnG hardware) */
+extern struct GameDriver sonson_driver;		/* (c) 1984 */
+extern struct GameDriver exedexes_driver;	/* (c) 1985 */
+extern struct GameDriver savgbees_driver;	/* (c) 1985 + Memetron license */
+extern struct GameDriver lwings_driver;		/* (c) 1986 */
+extern struct GameDriver lwingsjp_driver;	/* (c) 1986 */
+extern struct GameDriver sectionz_driver;	/* (c) 1985 */
+extern struct GameDriver trojan_driver;		/* (c) 1986 + Romstar */
+extern struct GameDriver trojanj_driver;	/* (c) 1986 */
+extern struct GameDriver c1943_driver;		/* (c) 1987 */
+extern struct GameDriver c1943kai_driver;	/* (c) 1987 */
+extern struct GameDriver gunsmoke_driver;	/* (c) 1985 */
+extern struct GameDriver gunsmrom_driver;	/* (c) 1985 + Romstar */
+extern struct GameDriver gunsmokj_driver;	/* (c) 1985 */
+extern struct GameDriver blktiger_driver;	/* (c) 1987 */
+extern struct GameDriver blkdrgon_driver;	/* (c) 1987 */
+extern struct GameDriver sidearms_driver;	/* (c) 1986 */
+extern struct GameDriver sidearjp_driver;	/* (c) 1986 */
+extern struct GameDriver srumbler_driver;	/* (c) 1986 */
+extern struct GameDriver srumblr2_driver;	/* (c) 1986 */
+extern struct GameDriver capbowl_driver;	/* (c) 1988 Incredible Technologies - very different hardware */
+extern struct GameDriver clbowl_driver;		/* (c) 1989 Incredible Technologies - very different hardware */
+extern struct GameDriver tigeroad_driver;	/* (c) 1987 + Romstar */
+/* Capcom CPS1 games */
+extern struct GameDriver strider_driver;	/* (c) 1989 */
+extern struct GameDriver willow_driver;		/* (c) 1989 */
+extern struct GameDriver ffight_driver;		/* (c) */
+extern struct GameDriver mtwins_driver;		/* (c) 1990 */
+extern struct GameDriver unsquad_driver;	/* (c) 1989 */
+/* Sega "dual game board" games */
+extern struct GameDriver carnival_driver;	/* (c) 1980 */
+extern struct GameDriver pulsar_driver;		/* (c) 1981 */
+extern struct GameDriver invho2_driver;		/* (c) 1979 */
+extern struct GameDriver sspaceat_driver;	/* (c) */
+extern struct GameDriver invinco_driver;	/* (c) 1979 */
+/* Sega G-80 vector games */
+extern struct GameDriver spacfury_driver;	/* no copyright notice */
+extern struct GameDriver spacfurc_driver;	/* (c) 1981 */
+extern struct GameDriver zektor_driver;		/* (c) 1982 */
+extern struct GameDriver tacscan_driver;	/* (c) */
+extern struct GameDriver elim2_driver;		/* (c) 1981 Gremlin */
+extern struct GameDriver elim4_driver;
+extern struct GameDriver startrek_driver;	/* (c) 1982 */
+/* Sega G-80 raster games */
+extern struct GameDriver astrob_driver;		/* (c) 1981 */
+extern struct GameDriver astrob1_driver;	/* (c) 1981 */
+extern struct GameDriver s005_driver;		/* (c) 1981 */
+extern struct GameDriver monsterb_driver;	/* (c) 1982 */
+extern struct GameDriver spaceod_driver;	/* (c) 1981 */
+/* Sega "Zaxxon hardware" games */
+extern struct GameDriver zaxxon_driver;		/* (c) 1982 */
+extern struct GameDriver szaxxon_driver;	/* (c) 1982 */
+extern struct GameDriver futspy_driver;
+extern struct GameDriver congo_driver;		/* (c) 1983 */
+extern struct GameDriver tiptop_driver;		/* (c) 1983 */
+/* Sega System 8 games */
+extern struct GameDriver wbdeluxe_driver;	/* (c) 1986 + Escape license */
+extern struct GameDriver wbml_driver;		/* (c) 1987 */
+extern struct GameDriver pitfall2_driver;	/* reprogrammed, (c) 1984 Activision */
+extern struct GameDriver chplft_driver;
+extern struct GameDriver chplftb_driver;	/* (c) 1985, (c) 1982 Dan Gorlin */
+extern struct GameDriver chplftbl_driver;	/* bootleg */
+/* Data East "Burger Time hardware" games */
+extern struct GameDriver btime_driver;		/* (c) 1982 + Midway */
+extern struct GameDriver btimea_driver;		/* (c) 1982 */
+extern struct GameDriver hamburge_driver;	/* bootleg */
+extern struct GameDriver bnj_driver;		/* (c) 1982 + Midway */
+extern struct GameDriver brubber_driver;	/* (c) 1982 */
+extern struct GameDriver caractn_driver;	/* bootleg */
+extern struct GameDriver eggs_driver;		/* (c) 1983 Universal USA */
+extern struct GameDriver scregg_driver;		/* (c) 1983 Technos Japan */
+	/* other games running on this hardware: Zoar */
+/* other Data East games */
+extern struct GameDriver astrof_driver;		/* (c) [1980?] */
+extern struct GameDriver astrof2_driver;	/* (c) [1980?] */
+extern struct GameDriver firetrap_driver;	/* (c) 1986 */
+extern struct GameDriver firetpbl_driver;	/* bootleg */
+extern struct GameDriver brkthru_driver;	/* (c) 1986 */
+/* Data East 16-bit games */
+extern struct GameDriver karnov_driver;		/* (c) 1987 */
+extern struct GameDriver karnovj_driver;	/* (c) 1987 */
+extern struct GameDriver chelnov_driver;	/* (c) 1987 */
+extern struct GameDriver chelnovj_driver;	/* (c) 1987 */
+	/* the following ones run all on similar hardware */
+extern struct GameDriver baddudes_driver;	/* (c) 1988 Data East USA */
+extern struct GameDriver drgninja_driver;	/* (c) 1988 Data East */
+extern struct GameDriver robocopp_driver;	/* (c) 1988 */
+extern struct GameDriver hbarrel_driver;	/* (c) 1987 */
+extern struct GameDriver slyspy_driver;		/* (c) 1989 */
+extern struct GameDriver hippodrm_driver;	/* (c) 1989 */
+extern struct GameDriver midres_driver;		/* (c) 1989 */
+/* Tehkan games */
+extern struct GameDriver bombjack_driver;	/* (c) 1984 */
+extern struct GameDriver starforc_driver;	/* (c) 1984 */
+extern struct GameDriver megaforc_driver;	/* (c) 1985 + Videoware license */
+extern struct GameDriver pbaction_driver;	/* (c) 1985 */
+/* Tecmo games (Tehkan became Tecmo in 1986) */
+extern struct GameDriver silkworm_driver;	/* (c) 1988 */
+extern struct GameDriver rygar_driver;		/* (c) 1986 */
+extern struct GameDriver rygarj_driver;		/* (c) 1986 */
+extern struct GameDriver gemini_driver;		/* (c) 1987 */
+extern struct GameDriver wc90_driver;		/* (c) 1989 */
+extern struct GameDriver wc90b_driver;		/* bootleg */
+extern struct GameDriver gaiden_driver;		/* (c) 1988 */
+extern struct GameDriver shadoww_driver;	/* (c) 1988 */
+/* Konami games */
+extern struct GameDriver pooyan_driver;		/* GX320 (c) 1982 Stern */
+extern struct GameDriver pootan_driver;		/* bootleg */
+extern struct GameDriver timeplt_driver;	/* GX393 (c) 1982 */
+extern struct GameDriver spaceplt_driver;	/* bootleg */
+extern struct GameDriver rocnrope_driver;	/* GX364 (c) 1983 + Kosuka */
+extern struct GameDriver ropeman_driver;	/* bootleg */
+extern struct GameDriver gyruss_driver;		/* GX347 (c) 1983 */
+extern struct GameDriver gyrussce_driver;	/* GX347 (c) 1983 + Centuri license */
+extern struct GameDriver trackfld_driver;	/* GX361 (c) 1983 */
+extern struct GameDriver hyprolym_driver;	/* GX361 (c) 1983 */
+extern struct GameDriver circusc_driver;	/* GX380 (c) 1984 */
+extern struct GameDriver circusc2_driver;	/* GX380 (c) 1984 */
+extern struct GameDriver tp84_driver;		/* GX388 (c) 1984 */
+extern struct GameDriver hyperspt_driver;	/* GX330 (c) 1984 + Centuri */
+extern struct GameDriver sbasketb_driver;	/* GX405 (c) 1984 */
+extern struct GameDriver mikie_driver;		/* GX469 (c) 1984 */
+extern struct GameDriver roadf_driver;		/* GX461 (c) 1984 */
+extern struct GameDriver yiear_driver;		/* GX407 (c) 1985 */
+extern struct GameDriver shaolins_driver;	/* GX477 (c) 1985 */
+extern struct GameDriver pingpong_driver;	/* GX555 (c) 1985 */
+extern struct GameDriver gberet_driver;		/* GX577 (c) 1985 */
+extern struct GameDriver rushatck_driver;	/* GX577 (c) 1985 */
+extern struct GameDriver ironhors_driver;	/* GX560 (c) 1986 */
+extern struct GameDriver farwest_driver;
+/* Exidy games */
+extern struct GameDriver venture_driver;	/* (c) 1981 */
+extern struct GameDriver venture2_driver;	/* (c) 1981 */
+extern struct GameDriver mtrap_driver;		/* (c) 1981 */
+extern struct GameDriver pepper2_driver;	/* (c) 1982 */
+extern struct GameDriver targ_driver;		/* (c) 1980 */
+extern struct GameDriver spectar_driver;	/* (c) 1980 */
+extern struct GameDriver circus_driver;		/* no copyright notice [1977?] */
+extern struct GameDriver robotbwl_driver;	/* no copyright notice */
+extern struct GameDriver crash_driver;		/* Exidy [1979?] */
+extern struct GameDriver starfire_driver;	/* Exidy */
+/* Atari vector games */
+extern struct GameDriver asteroid_driver;	/* no copyright notice */
+extern struct GameDriver asteroi2_driver;	/* (c) 1979 */
+extern struct GameDriver astdelux_driver;	/* (c) 1980 */
+extern struct GameDriver bwidow_driver;		/* (c) 1982 */
+extern struct GameDriver bzone_driver;		/* (c) 1980 */
+extern struct GameDriver bzone2_driver;		/* (c) 1980 */
+extern struct GameDriver gravitar_driver;	/* (c) 1982 */
+extern struct GameDriver llander_driver;	/* no copyright notice */
+extern struct GameDriver redbaron_driver;	/* (c) 1980 */
+extern struct GameDriver spacduel_driver;	/* (c) 1980 */
+extern struct GameDriver tempest_driver;	/* (c) 1980 */
+extern struct GameDriver temptube_driver;	/* hack */
+extern struct GameDriver starwars_driver;	/* (c) 1983 */
+extern struct GameDriver mhavoc_driver;		/* (c) 1983 */
+extern struct GameDriver mhavoc2_driver;	/* (c) 1983 */
+extern struct GameDriver mhavocrv_driver;	/* hack */
+extern struct GameDriver quantum_driver;	/* (c) 1982 */
+extern struct GameDriver quantum2_driver;	/* (c) 1982 */
+/* Atari "Centipede hardware" games */
+extern struct GameDriver centiped_driver;	/* (c) 1980 */
+extern struct GameDriver milliped_driver;	/* (c) 1982 */
+extern struct GameDriver warlord_driver;	/* (c) 1980 */
+/* Atari "Kangaroo hardware" games */
+extern struct GameDriver kangaroo_driver;	/* (c) 1982 */
+extern struct GameDriver arabian_driver;	/* (c) 1983 */
+/* Atari "Missile Command hardware" games */
+extern struct GameDriver missile_driver;	/* (c) 1980 */
+extern struct GameDriver suprmatk_driver;	/* (c) 1980 + (c) 1981 Gencomp */
+/* Atary b/w games */
+extern struct GameDriver sprint1_driver;	/* no copyright notice */
+extern struct GameDriver sprint2_driver;	/* no copyright notice */
+extern struct GameDriver sbrkout_driver;	/* no copyright notice */
+extern struct GameDriver dominos_driver;	/* no copyright notice */
+extern struct GameDriver nitedrvr_driver;	/* no copyright notice [1976] */
+extern struct GameDriver bsktball_driver;	/* no copyright notice */
+extern struct GameDriver copsnrob_driver;	/* [1976] */
+/* Atari System 1 games */
+extern struct GameDriver marble_driver;		/* (c) 1984 */
+extern struct GameDriver marble2_driver;	/* (c) 1984 */
+extern struct GameDriver marblea_driver;	/* (c) 1984 */
+extern struct GameDriver peterpak_driver;	/* (c) 1984 */
+extern struct GameDriver indytemp_driver;	/* (c) 1985 */
+extern struct GameDriver roadrunn_driver;	/* (c) 1985 */
+extern struct GameDriver roadblst_driver;	/* (c) 1986, 1987 */
+/* later Atari games */
+extern struct GameDriver gauntlet_driver;	/* (c) 1985 */
+extern struct GameDriver gauntir1_driver;
+extern struct GameDriver gauntir2_driver;
+extern struct GameDriver gaunt2p_driver;
+extern struct GameDriver gaunt2_driver;		/* (c) 1986 */
+extern struct GameDriver atetris_driver;	/* (c) 1988 */
+extern struct GameDriver atetrisa_driver;	/* (c) 1988 */
+extern struct GameDriver atetrisb_driver;	/* bootleg */
+extern struct GameDriver atetcktl_driver;	/* (c) 1988 */
+extern struct GameDriver toobin_driver;		/* (c) 1988 */
+/* Rock-ola games */
+extern struct GameDriver vanguard_driver;	/* (c) 1981 SNK */
+extern struct GameDriver nibbler_driver;	/* (c) 1982 */
+extern struct GameDriver fantasy_driver;	/* (c) 1981 */
+extern struct GameDriver warpwarp_driver;	/* (c) 1981 - different hardware */
+/* Technos games */
+extern struct GameDriver mystston_driver;	/* (c) 1984 */
+extern struct GameDriver matmania_driver;	/* (c) 1985 + Taito America license */
+extern struct GameDriver excthour_driver;	/* (c) 1985 + Taito license */
+extern struct GameDriver maniach_driver;
+extern struct GameDriver blockout_driver;	/* (c) 1989 + California Dreams */
+/* Stern "Berzerk hardware" games */
+extern struct GameDriver berzerk_driver;	/* (c) 1980 */
+extern struct GameDriver berzerk1_driver;	/* (c) 1980 */
+extern struct GameDriver frenzy_driver;		/* (c) 1982 */
+extern struct GameDriver frenzy1_driver;	/* (c) 1982 */
+/* GamePlan games */
+extern struct GameDriver megatack_driver;	/* (c) 1980 Centuri */
+extern struct GameDriver killcom_driver;	/* (c) 1980 Centuri */
+/* "stratovox hardware" games */
+extern struct GameDriver route16_driver;	/* (c) 1981 Leisure and Allied (bootleg) */
+extern struct GameDriver stratvox_driver;	/* Taito */
+
+extern struct GameDriver bagman_driver;		/* (c) 1982 Stern + Valadon license */
+extern struct GameDriver sbagman_driver;	/* (c) 1984 Valadon + "Stern presents" */
+extern struct GameDriver panic_driver;		/* (c) 1980 Universal */
+extern struct GameDriver panica_driver;		/* (c) 1980 Universal */
+extern struct GameDriver spacefb_driver;	/* (c) Nintendo */
+extern struct GameDriver tutankhm_driver;	/* GX350 (c) 1982 Stern */
+extern struct GameDriver ccastles_driver;	/* (c) 1983 Atari */
+extern struct GameDriver blueprnt_driver;	/* (c) 1982 Bally Midway */
+extern struct GameDriver omegrace_driver;	/* (c) 1981 Midway */
+extern struct GameDriver bankp_driver;		/* (c) 1984 Sega */
+extern struct GameDriver espial_driver;		/* (c) 1983 Thunderbolt */
+extern struct GameDriver espiale_driver;	/* (c) 1983 Thunderbolt */
+extern struct GameDriver cloak_driver;		/* (c) 1983 Atari */
+extern struct GameDriver champbas_driver;	/* (c) 1983 Sega */
+extern struct GameDriver exerion_driver;	/* (c) 1983 Jaleco */
+extern struct GameDriver foodf_driver;		/* (c) 1982 Atari */
+extern struct GameDriver jack_driver;		/* (c) 1982 Cinematronics */
+extern struct GameDriver vastar_driver;		/* (c) 1983 Sesame Japan */
+extern struct GameDriver citycon_driver;	/* (c) 1985 Jaleco */
+extern struct GameDriver jedi_driver;		/* (c) 1984 Atari */
+extern struct GameDriver tankbatt_driver;	/* (c) 1980 Namco */
+extern struct GameDriver liberatr_driver;	/* (c) 1982 Atari */
+extern struct GameDriver wiz_driver;		/* (c) 1985 Seibu Kaihatsu */
+extern struct GameDriver fastfred_driver;	/* (c) 1982 Atari */
+extern struct GameDriver flyboy_driver;		/* (c) 1982 Kaneko (bootleg?) */
+extern struct GameDriver thepit_driver;		/* (c) 1982 Centuri */
+extern struct GameDriver toki_driver;		/* (c) 1990 Datsu (bootleg) */
+extern struct GameDriver snowbros_driver;	/* (c) 1990 Toaplan + Romstar license */
+extern struct GameDriver gundealr_driver;	/* (c) 1990 Dooyong */
+extern struct GameDriver blockade_driver;	/* [1977 Gremlin] */
+extern struct GameDriver comotion_driver;	/* [1977 Gremlin] */
+extern struct GameDriver leprechn_driver;	/* (c) 1982 Tong Electronic */
+extern struct GameDriver dday_driver;		/* (c) 1982 Centuri */
 
 
 
-ROM_START( pacman_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "%s.6e", 0x0000, 0x1000 )
-	ROM_LOAD( "%s.6f", 0x1000, 0x1000 )
-	ROM_LOAD( "%s.6h", 0x2000, 0x1000 )
-	ROM_LOAD( "%s.6j", 0x3000, 0x1000 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "%s.5e", 0x0000, 0x1000 )
-	ROM_LOAD( "%s.5f", 0x1000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( pacmod_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "6e.mod",    0x0000, 0x1000 )
-	ROM_LOAD( "pacman.6f", 0x1000, 0x1000 )
-	ROM_LOAD( "6h.mod",    0x2000, 0x1000 )
-	ROM_LOAD( "pacman.6j", 0x3000, 0x1000 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "5e",        0x0000, 0x1000 )
-	ROM_LOAD( "5f",        0x1000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( piranha_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "pr1.cpu", 0x0000, 0x1000 )
-	ROM_LOAD( "pr2.cpu", 0x1000, 0x1000 )
-	ROM_LOAD( "pr3.cpu", 0x2000, 0x1000 )
-	ROM_LOAD( "pr4.cpu", 0x3000, 0x1000 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "pr5.cpu", 0x0000, 0x0800 )
-	ROM_LOAD( "pr7.cpu", 0x0800, 0x0800 )
-	ROM_LOAD( "pr6.cpu", 0x1000, 0x0800 )
-	ROM_LOAD( "pr8.cpu", 0x1800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( mspacman_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "boot1", 0x0000, 0x1000 )
-	ROM_LOAD( "boot2", 0x1000, 0x1000 )
-	ROM_LOAD( "boot3", 0x2000, 0x1000 )
-	ROM_LOAD( "boot4", 0x3000, 0x1000 )
-	ROM_LOAD( "boot5", 0x8000, 0x1000 )
-	ROM_LOAD( "boot6", 0x9000, 0x1000 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "5e",    0x0000, 0x1000 )
-	ROM_LOAD( "5f",    0x1000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( crush_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "CR1", 0x0000, 0x0800 )
-	ROM_LOAD( "CR5", 0x0800, 0x0800 )
-	ROM_LOAD( "CR2", 0x1000, 0x0800 )
-	ROM_LOAD( "CR6", 0x1800, 0x0800 )
-	ROM_LOAD( "CR3", 0x2000, 0x0800 )
-	ROM_LOAD( "CR7", 0x2800, 0x0800 )
-	ROM_LOAD( "CR4", 0x3000, 0x0800 )
-	ROM_LOAD( "CR8", 0x3800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "CRA", 0x0000, 0x0800 )
-	ROM_LOAD( "CRC", 0x0800, 0x0800 )
-	ROM_LOAD( "CRB", 0x1000, 0x0800 )
-	ROM_LOAD( "CRD", 0x1800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( pengo_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "pengopop.u8",  0x0000, 0x1000 )
-	ROM_LOAD( "pengopop.u7",  0x1000, 0x1000 )
-	ROM_LOAD( "pengopop.u15", 0x2000, 0x1000 )
-	ROM_LOAD( "pengopop.u14", 0x3000, 0x1000 )
-	ROM_LOAD( "pengopop.u21", 0x4000, 0x1000 )
-	ROM_LOAD( "pengopop.u20", 0x5000, 0x1000 )
-	ROM_LOAD( "pengopop.u32", 0x6000, 0x1000 )
-	ROM_LOAD( "pengopop.u31", 0x7000, 0x1000 )
-
-	ROM_REGION(0x4000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "pengopop.u92", 0x0000, 0x2000 )
-	ROM_LOAD( "pengopop.105", 0x2000, 0x2000 )
-ROM_END
-
-
-
-ROM_START( penta_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "penta.u8",  0x0000, 0x1000 )
-	ROM_LOAD( "penta.u7",  0x1000, 0x1000 )
-	ROM_LOAD( "penta.u15", 0x2000, 0x1000 )
-	ROM_LOAD( "penta.u14", 0x3000, 0x1000 )
-	ROM_LOAD( "penta.u21", 0x4000, 0x1000 )
-	ROM_LOAD( "penta.u20", 0x5000, 0x1000 )
-	ROM_LOAD( "penta.u32", 0x6000, 0x1000 )
-	ROM_LOAD( "penta.u31", 0x7000, 0x1000 )
-
-	ROM_REGION(0x4000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "penta.u92", 0x0000, 0x2000 )
-	ROM_LOAD( "penta.105", 0x2000, 0x2000 )
-ROM_END
-
-
-
-ROM_START( ladybug_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "lb1.cpu",  0x0000, 0x1000 )
-	ROM_LOAD( "lb2.cpu",  0x1000, 0x1000 )
-	ROM_LOAD( "lb3.cpu",  0x2000, 0x1000 )
-	ROM_LOAD( "lb4.cpu",  0x3000, 0x1000 )
-	ROM_LOAD( "lb5.cpu",  0x4000, 0x1000 )
-	ROM_LOAD( "lb6.cpu",  0x5000, 0x1000 )
-
-	ROM_REGION(0x4000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "lb9.vid",  0x0000, 0x1000 )
-	ROM_LOAD( "lb10.vid", 0x1000, 0x1000 )
-	ROM_LOAD( "lb8.cpu",  0x2000, 0x1000 )
-	ROM_LOAD( "lb7.cpu",  0x3000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( mrdo_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "D1",  0x0000, 0x2000 )
-	ROM_LOAD( "D2",  0x2000, 0x2000 )
-	ROM_LOAD( "D3",  0x4000, 0x2000 )
-	ROM_LOAD( "D4",  0x6000, 0x2000 )
-
-	ROM_REGION(0x6000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "D9",  0x0000, 0x1000 )
-	ROM_LOAD( "D10", 0x1000, 0x1000 )
-	ROM_LOAD( "D8",  0x2000, 0x1000 )
-	ROM_LOAD( "D7",  0x3000, 0x1000 )
-	ROM_LOAD( "D5",  0x4000, 0x1000 )
-	ROM_LOAD( "D6",  0x5000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( mrlo_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "a4-01.bin", 0x0000, 0x2000 )
-	ROM_LOAD( "c4-02.bin", 0x2000, 0x2000 )
-	ROM_LOAD( "e4-03.bin", 0x4000, 0x2000 )
-	ROM_LOAD( "g4-04.bin", 0x6000, 0x2000 )
-
-	ROM_REGION(0x6000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "s8-09.bin", 0x0000, 0x1000 )
-	ROM_LOAD( "u8-10.bin", 0x1000, 0x1000 )
-	ROM_LOAD( "r8-08.bin", 0x2000, 0x1000 )
-	ROM_LOAD( "n8-07.bin", 0x3000, 0x1000 )
-	ROM_LOAD( "h5-05.bin", 0x4000, 0x1000 )
-	ROM_LOAD( "k5-06.bin", 0x5000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( cclimber_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "cc11", 0x0000, 0x1000 )
-	ROM_LOAD( "cc10", 0x1000, 0x1000 )
-	ROM_LOAD( "cc09", 0x2000, 0x1000 )
-	ROM_LOAD( "cc08", 0x3000, 0x1000 )
-	ROM_LOAD( "cc07", 0x4000, 0x1000 )
-
-	ROM_REGION(0x3000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "cc06", 0x0000, 0x0800 )
-	ROM_LOAD( "cc04", 0x0800, 0x0800 )
-	ROM_LOAD( "cc05", 0x1000, 0x0800 )
-	ROM_LOAD( "cc03", 0x1800, 0x0800 )
-	ROM_LOAD( "cc02", 0x2000, 0x0800 )
-	ROM_LOAD( "cc01", 0x2800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* samples */
-	ROM_LOAD( "cc13", 0x0000, 0x1000 )
-	ROM_LOAD( "cc12", 0x1000, 0x1000 )
-ROM_END
-
-
-
-unsigned cclimber_decode(dword A)
+const struct GameDriver *drivers[] =
 {
-	static const unsigned char evetab[] =
-	{
-		0x44,0x14,0x47,0x12,0x54,0x10,0x13,0x46,0x4c,0x1c,0x4f,0x1a,0x5c,0x18,0x1b,0x4e,
-		0x11,0x41,0x07,0x52,0x05,0x50,0x53,0x06,0x19,  -1,0x0f,0x5a,0x0d,0x58,0x5b,0x0e,
-		0x64,0x34,0x67,0x32,0x74,0x30,0x33,0x66,0x6c,0x3c,0x6f,0x3a,0x7c,0x38,0x3b,0x6e,
-		0x31,  -1,0x27,0x72,0x25,0x70,0x73,0x26,0x39,  -1,0x2f,0x7a,0x2d,0x78,0x7b,0x2e,
-		0x51,0x00,0x43,0x16,0x40,0x55,0x17,0x42,0x59,0x08,0x4b,0x1e,0x48,0x5d,0x1f,0x4a,
-		  -1,0x04,0x03,0x56,0x01,0x15,0x57,0x02,  -1,  -1,0x0b,0x5e,0x09,0x1d,0x5f,0x0a,
-		0x71,0x20,0x63,0x36,0x60,0x75,0x37,0x62,0x79,0x28,0x6b,0x3e,0x68,0x7d,0x3f,0x6a,
-		  -1,  -1,0x23,0x76,0x21,0x35,0x77,0x22,  -1,  -1,0x2b,0x7e,0x29,0x3d,0x7f,0x2a,
-		0xd4,0xd1,0xd3,0x86,0x95,0xc5,0x92,  -1,0xdc,0xd9,0xdb,  -1,0x9d,0xcd,0x9a,  -1,
-		0xc4,0x81,0xd2,0xc2,0x91,0xc1,0x82,  -1,0xcc,  -1,0xda,0xca,0x99,0xc9,0x8a,  -1,
-		0xf4,0xf1,0xf3,  -1,0xb5,0xe5,0xb2,  -1,0xfc,0xf9,0xfb,  -1,0xbd,0xed,0xba,  -1,
-		0xe4,  -1,0xf2,0xe2,0xb1,0xe1,0xa2,  -1,0xec,  -1,0xfa,0xea,0xb9,0xe9,0xaa,  -1,
-		0x84,0xd5,0xc3,0x83,0xd0,  -1,0x87,0x97,0x8c,0xdd,0xcb,  -1,0xd8,  -1,0x8f,0x9f,
-		0x80,0x90,0x93,0x96,0xc0,  -1,0xc6,0xd6,0x88,0x98,0x9b,0x9e,0xc8,  -1,0xce,0xde,
-		0xa4,0xf5,0xe3,  -1,0xf0,  -1,0xa7,0xb7,0xac,0xfd,0xeb,  -1,0xf8,  -1,0xaf,0xbf,
-		0xa0,0xb0,0xb3,0xb6,0xe0,  -1,0xe6,0xf6,0xa8,0xb8,0xbb,0xbe,0xe8,  -1,0xee,0xfe
-	};
-	static const unsigned char oddtab[] =
-	{
-		0x44,0x10,0x06,0x53,0x15,0x55,0x47,0x02,0x4c,0x18,0x0e,0x5b,0x1d,0x5d,0x4f,0x0a,
-		0x00,0x41,0x46,0x12,  -1,0x51,  -1,0x57,0x08,  -1,0x4e,0x1a,  -1,0x59,  -1,0x5f,
-		0x64,0x30,0x26,0x73,0x35,0x75,0x67,0x22,0x6c,0x38,0x2e,0x7b,0x3d,0x7d,0x6f,0x2a,
-		0x20,  -1,0x66,0x32,  -1,0x71,  -1,0x77,0x28,  -1,0x6e,0x3a,  -1,0x79,  -1,0x7f,
-		0x14,0x45,0x13,0x56,0x11,0x50,0x52,0x42,0x1c,0x4d,0x1b,0x5e,0x19,0x58,0x5a,  -1,
-		0x01,0x54,0x07,  -1,0x04,0x05,0x16,0x03,0x09,0x5c,0x0f,  -1,0x0c,0x0d,0x1e,0x0b,
-		0x34,0x65,0x33,0x76,0x31,0x70,0x72,  -1,0x3c,0x6d,0x3b,0x7e,0x39,0x78,0x7a,  -1,
-		0x21,0x74,0x27,  -1,0x24,0x25,0x36,0x23,0x29,0x7c,0x2f,  -1,0x2c,0x2d,0x3e,0x2b,
-		  -1,  -1,  -1,  -1,  -1,  -1,0xd6,0x83,  -1,0xdc,  -1,  -1,  -1,0xd8,0xde,  -1,
-		0xd1,0x81,0x97,0xc2,  -1,0xc0,0xc7,0xc3,0xd9,  -1,0x9f,0xca,  -1,0xc8,  -1,0xcb,
-		  -1,  -1,  -1,  -1,0xb4,  -1,0xf6,  -1,  -1,  -1,  -1,  -1,  -1,  -1,0xfe,  -1,
-		0xf1,  -1,0xb7,0xe2,  -1,0xe0,  -1,0xe3,0xf9,  -1,0xbf,0xea,  -1,0xe8,  -1,0xeb,
-		0xc1,0x90,0xd3,0x86,0x80,0xd5,0xd2,0x87,0xc9,0x98,0xdb,0x8e,  -1,0xdd,0xda,0x8f,
-		0x85,0xc4,0x93,0xc6,0x91,0xc5,0x92,0x96,  -1,0xcc,0x9b,0xce,0x99,0xcd,  -1,0x9e,
-		0xe1,0xb0,0xf3,0xa6,  -1,0xf5,0xf2,0xa7,0xe9,0xb8,0xfb,0xae,  -1,0xfd,0xfa,0xaf,
-		  -1,0xe4,0xb3,0xe6,0xb1,0xe5,  -1,0xb6,  -1,0xec,0xbb,0xee,0xb9,0xed,  -1,0xbe
-	};
-
-
-	if (A & 1) return oddtab[RAM[A]];
-	else return evetab[RAM[A]];
-}
-
-
-
-ROM_START( ccjap_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "cc11j.bin", 0x0000, 0x1000 )
-	ROM_LOAD( "cc10j.bin", 0x1000, 0x1000 )
-	ROM_LOAD( "cc09j.bin", 0x2000, 0x1000 )
-	ROM_LOAD( "cc08j.bin", 0x3000, 0x1000 )
-	ROM_LOAD( "cc07j.bin", 0x4000, 0x1000 )
-
-	ROM_REGION(0x3000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "cc06j.bin", 0x0000, 0x0800 )
-	ROM_LOAD( "cc04j.bin", 0x0800, 0x0800 )
-	ROM_LOAD( "cc05j.bin", 0x1000, 0x0800 )
-	ROM_LOAD( "cc03j.bin", 0x1800, 0x0800 )
-	ROM_LOAD( "cc02j.bin", 0x2000, 0x0800 )
-	ROM_LOAD( "cc01j.bin", 0x2800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* samples */
-	ROM_LOAD( "cc13j.bin", 0x0000, 0x1000 )
-	ROM_LOAD( "cc12j.bin", 0x1000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( ccboot_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "m11.bin", 0x0000, 0x1000 )
-	ROM_LOAD( "m10.bin", 0x1000, 0x1000 )
-	ROM_LOAD( "m09.bin", 0x2000, 0x1000 )
-	ROM_LOAD( "m08.bin", 0x3000, 0x1000 )
-	ROM_LOAD( "m07.bin", 0x4000, 0x1000 )
-
-	ROM_REGION(0x3000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "m06.bin", 0x0000, 0x0800 )
-	ROM_LOAD( "m04.bin", 0x0800, 0x0800 )
-	ROM_LOAD( "m05.bin", 0x1000, 0x0800 )
-	ROM_LOAD( "m03.bin", 0x1800, 0x0800 )
-	ROM_LOAD( "m02.bin", 0x2000, 0x0800 )
-	ROM_LOAD( "m01.bin", 0x2800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* samples */
-	ROM_LOAD( "m13.bin", 0x0000, 0x1000 )
-	ROM_LOAD( "m12.bin", 0x1000, 0x1000 )
-ROM_END
-
-
-
-unsigned ccjap_decode(dword A)
-{
-	static const unsigned char evetab[] =
-	{
-		0x41,0x54,0x46,0x13,0x51,0x14,0x02,0x52,0x49,0x5c,0x4e,0x1b,0x59,0x1c,0x0a,0x5a,
-		0x05,0x10,0x43,0x56,0x01,0x55,0x06,0x16,0x0d,0x18,0x4b,0x5e,0x09,0x5d,0x0e,0x1e,
-		0x61,0x74,0x66,0x33,0x71,0x34,0x22,0x72,0x69,0x7c,0x6e,0x3b,0x79,0x3c,0x2a,0x7a,
-		0x25,0x30,0x63,0x76,0x21,0x75,0x26,0x36,0x2d,0x38,0x6b,0x7e,0x29,0x7d,0x2e,0x3e,
-		0x44,0x11,0x17,0x42,0x00,0x50,0x53,0x57,0x4c,0x19,0x1f,0x4a,0x08,0x58,0x5b,0x5f,
-		0x15,0x40,0x07,0x12,0x04,0x45,0x03,0x47,0x1d,0x48,0x0f,0x1a,0x0c,0x4d,0x0b,0x4f,
-		0x64,0x31,0x37,0x62,0x20,0x70,0x73,0x77,0x6c,0x39,0x3f,0x6a,0x28,0x78,0x7b,0x7f,
-		0x35,0x60,0x27,0x32,0x24,0x65,0x23,0x67,0x3d,0x68,0x2f,0x3a,0x2c,0x6d,0x2b,0x6f,
-		0x94,0xc1,0x87,0xd7,0x81,0xc4,0x82,0xd2,0x9c,0xc9,0x8f,0xdf,0x89,0xcc,0x8a,0xda,
-		0x84,0xd0,0x93,0xc2,0xd1,0xc5,0xd6,0x96,0x8c,0xd8,0x9b,0xca,0xd9,0xcd,0xde,0x9e,
-		0xb4,0xe1,0xa7,0xf7,0xa1,0xe4,0xa2,0xf2,0xbc,0xe9,0xaf,0xff,0xa9,0xec,0xaa,0xfa,
-		0xa4,0xf0,0xb3,0xe2,0xf1,0xe5,0xf6,0xb6,0xac,0xf8,0xbb,0xea,0xf9,0xed,0xfe,0xbe,
-		0x91,0xc0,0xc7,0xd3,0xd4,0x95,0x92,0x86,0x99,0xc8,0xcf,0xdb,0xdc,0x9d,0x9a,0x8e,
-		0x90,0x80,0xc6,0x83,0xd5,0x85,0xc3,0x97,0x98,0x88,0xce,0x8b,0xdd,0x8d,0xcb,0x9f,
-		0xb1,0xe0,0xe7,0xf3,0xf4,0xb5,0xb2,0xa6,0xb9,0xe8,0xef,0xfb,0xfc,0xbd,0xba,0xae,
-		0xb0,0xa0,0xe6,0xa3,0xf5,0xa5,0xe3,0xb7,0xb8,0xa8,0xee,0xab,0xfd,0xad,0xeb,0xbf
-	};
-	static const unsigned char oddtab[] =
-	{
-		0x50,0x11,0x12,0x52,0x40,0x55,0x56,0x57,0x58,0x19,0x1a,0x5a,0x48,0x5d,0x5e,0x5f,
-		0x51,0x14,0x03,0x46,0x45,0x04,0x42,0x06,0x59,0x1c,0x0b,0x4e,0x4d,0x0c,0x4a,0x0e,
-		0x70,0x31,0x32,0x72,0x60,0x75,0x76,0x77,0x78,0x39,0x3a,0x7a,0x68,0x7d,0x7e,0x7f,
-		0x71,0x34,0x23,0x66,0x65,0x24,0x62,0x26,0x79,0x3c,0x2b,0x6e,0x6d,0x2c,0x6a,0x2e,
-		0x54,0x15,0x16,0x13,0x10,0x05,0x02,0x43,0x5c,0x1d,0x1e,0x1b,0x18,0x0d,0x0a,0x4b,
-		0x44,0x01,0x47,0x17,0x00,0x41,0x53,0x07,0x4c,0x09,0x4f,0x1f,0x08,0x49,0x5b,0x0f,
-		0x74,0x35,0x36,0x33,0x30,0x25,0x22,0x63,0x7c,0x3d,0x3e,0x3b,0x38,0x2d,0x2a,0x6b,
-		0x64,0x21,0x67,0x37,0x20,0x61,0x73,0x27,0x6c,0x29,0x6f,0x3f,0x28,0x69,0x7b,0x2f,
-		0x81,0x85,0xd7,0xd2,0xc1,0xc5,0x97,0x92,0x89,0x8d,0xdf,0xda,0xc9,0xcd,0x9f,0x9a,
-		0xd4,0xd0,0x83,0x86,0xd5,0x90,0xc3,0xc6,0xdc,0xd8,0x8b,0x8e,0xdd,0x98,0xcb,0xce,
-		0xa1,0xa5,0xf7,0xf2,0xe1,0xe5,0xb7,0xb2,0xa9,0xad,0xff,0xfa,0xe9,0xed,0xbf,0xba,
-		0xf4,0xf0,0xa3,0xa6,0xf5,0xb0,0xe3,0xe6,0xfc,0xf8,0xab,0xae,0xfd,0xb8,0xeb,0xee,
-		0x91,0x95,0xc7,0xc2,0xd1,0x94,0x87,0x82,0x99,0x9d,0xcf,0xca,0xd9,0x9c,0x8f,0x8a,
-		0xc4,0xc0,0x93,0x96,0x84,0x80,0xd3,0xd6,0xcc,0xc8,0x9b,0x9e,0x8c,0x88,0xdb,0xde,
-		0xb1,0xb5,0xe7,0xe2,0xf1,0xb4,0xa7,0xa2,0xb9,0xbd,0xef,0xea,0xf9,0xbc,0xaf,0xaa,
-		0xe4,0xe0,0xb3,0xb6,0xa4,0xa0,0xf3,0xf6,0xec,0xe8,0xbb,0xbe,0xac,0xa8,0xfb,0xfe
-	};
-
-
-	if (A & 1) return oddtab[RAM[A]];
-	else return evetab[RAM[A]];
-}
-
-
-
-ROM_START( ckong_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "7.dat",  0x0000, 0x1000 )
-	ROM_LOAD( "8.dat",  0x1000, 0x1000 )
-	ROM_LOAD( "9.dat",  0x2000, 0x1000 )
-	ROM_LOAD( "10.dat", 0x3000, 0x1000 )
-	ROM_LOAD( "11.dat", 0x4000, 0x1000 )
-	ROM_LOAD( "12.dat", 0x5000, 0x1000 )
-
-	ROM_REGION(0x5000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "6.dat",  0x0000, 0x1000 )
-	ROM_LOAD( "4.dat",  0x1000, 0x1000 )
-	ROM_LOAD( "5.dat",  0x2000, 0x1000 )
-	ROM_LOAD( "3.dat",  0x3000, 0x1000 )
-	ROM_LOAD( "2.dat",  0x4000, 0x0800 )
-	ROM_LOAD( "1.dat",  0x4800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* samples */
-	ROM_LOAD( "14.dat", 0x0000, 0x1000 )
-	ROM_LOAD( "13.dat", 0x1000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( dkong_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "dk.5e",  0x0000, 0x1000 )
-	ROM_LOAD( "dk.5c",  0x1000, 0x1000 )
-	ROM_LOAD( "dk.5b",  0x2000, 0x1000 )
-	ROM_LOAD( "dk.5a",  0x3000, 0x1000 )
-
-	ROM_REGION(0x3000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "dk.3n",  0x0000, 0x0800 )
-	ROM_LOAD( "dk.3p",  0x0800, 0x0800 )
-	ROM_LOAD( "dk.7c",  0x1000, 0x0800 )
-	ROM_LOAD( "dk.7d",  0x1800, 0x0800 )
-	ROM_LOAD( "dk.7e",  0x2000, 0x0800 )
-	ROM_LOAD( "dk.7f",  0x2800, 0x0800 )
-
-	ROM_REGION(0x1000)	/* sound? */
-	ROM_LOAD( "dk.3h",  0x0000, 0x0800 )
-	ROM_LOAD( "dk.3f",  0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( dkongjr_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "dkj.5b",  0x0000, 0x1000 )
-	ROM_CONTINUE(        0x3000, 0x1000 )
-	ROM_LOAD( "dkj.5c",  0x2000, 0x0800 )
-	ROM_CONTINUE(        0x4800, 0x0800 )
-	ROM_CONTINUE(        0x1000, 0x0800 )
-	ROM_CONTINUE(        0x5800, 0x0800 )
-	ROM_LOAD( "dkj.5e",  0x4000, 0x0800 )
-	ROM_CONTINUE(        0x2800, 0x0800 )
-	ROM_CONTINUE(        0x5000, 0x0800 )
-	ROM_CONTINUE(        0x1800, 0x0800 )
-
-	ROM_REGION(0x4000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "dkj.3n",  0x0000, 0x1000 )
-	ROM_LOAD( "dkj.3p",  0x1000, 0x1000 )
-	ROM_LOAD( "dkj.7c",  0x2000, 0x0800 )
-	ROM_LOAD( "dkj.7d",  0x2800, 0x0800 )
-	ROM_LOAD( "dkj.7e",  0x3000, 0x0800 )
-	ROM_LOAD( "dkj.7f",  0x3800, 0x0800 )
-
-	ROM_REGION(0x1000)	/* sound? */
-	ROM_LOAD( "dkj.3h",  0x0000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( bagman_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "a4_9e.bin", 0x0000, 0x1000 )
-	ROM_LOAD( "a4_9f.bin", 0x1000, 0x1000 )
-	ROM_LOAD( "a4_9j.bin", 0x2000, 0x1000 )
-	ROM_LOAD( "a4_9k.bin", 0x3000, 0x1000 )
-	ROM_LOAD( "a4_9m.bin", 0x4000, 0x1000 )
-	ROM_LOAD( "a4_9n.bin", 0x5000, 0x1000 )
-
-	ROM_REGION(0x4000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "a2_1e.bin", 0x0000, 0x1000 )
-	ROM_LOAD( "a2_1j.bin", 0x1000, 0x1000 )
-	ROM_LOAD( "a2_1c.bin", 0x2000, 0x1000 )
-	ROM_LOAD( "a2_1f.bin", 0x3000, 0x1000 )
-
-	ROM_REGION(0x2000)	/* ??? */
-	ROM_LOAD( "a1_9r.bin", 0x0000, 0x1000 )
-	ROM_LOAD( "a1_9t.bin", 0x1000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( wow_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "wow.x1", 0x0000, 0x1000 )
-	ROM_LOAD( "wow.x2", 0x1000, 0x1000 )
-	ROM_LOAD( "wow.x3", 0x2000, 0x1000 )
-	ROM_LOAD( "wow.x4", 0x3000, 0x1000 )
-	ROM_LOAD( "wow.x5", 0x8000, 0x1000 )
-	ROM_LOAD( "wow.x6", 0x9000, 0x1000 )
-	ROM_LOAD( "wow.x7", 0xa000, 0x1000 )
-/*	ROM_LOAD( "wow.x8", 0xc000, 0x1000 )	here would go the foreign language ROM */
-ROM_END
-
-
-
-ROM_START( robby_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "robbya", 0x0000, 0x1000 )
-	ROM_LOAD( "robbyb", 0x1000, 0x1000 )
-	ROM_LOAD( "robbyc", 0x2000, 0x1000 )
-	ROM_LOAD( "robbyd", 0x3000, 0x1000 )
-	ROM_LOAD( "robbye", 0x8000, 0x1000 )
-	ROM_LOAD( "robbyf", 0x9000, 0x1000 )
-	ROM_LOAD( "robbyg", 0xa000, 0x1000 )
-	ROM_LOAD( "robbyh", 0xb000, 0x1000 )
-	ROM_LOAD( "robbyi", 0xc000, 0x1000 )
-	ROM_LOAD( "robbyj", 0xd000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( gorf_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "gorf-a.bin", 0x0000, 0x1000 )
-	ROM_LOAD( "gorf-b.bin", 0x1000, 0x1000 )
-	ROM_LOAD( "gorf-c.bin", 0x2000, 0x1000 )
-	ROM_LOAD( "gorf-d.bin", 0x3000, 0x1000 )
-	ROM_LOAD( "gorf-e.bin", 0x8000, 0x1000 )
-	ROM_LOAD( "gorf-f.bin", 0x9000, 0x1000 )
-	ROM_LOAD( "gorf-g.bin", 0xa000, 0x1000 )
-	ROM_LOAD( "gorf-h.bin", 0xb000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( galaxian_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "%s.u",  0x0000, 0x0800 )
-	ROM_LOAD( "%s.v",  0x0800, 0x0800 )
-	ROM_LOAD( "%s.w",  0x1000, 0x0800 )
-	ROM_LOAD( "%s.y",  0x1800, 0x0800 )
-	ROM_LOAD( "%s.z",  0x2000, 0x0800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "%s.1j", 0x0000, 0x0800 )
-	ROM_LOAD( "%s.1k", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( galnamco_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "galaxian.u",  0x0000, 0x0800 )
-	ROM_LOAD( "galaxian.v",  0x0800, 0x0800 )
-	ROM_LOAD( "galaxian.w",  0x1000, 0x0800 )
-	ROM_LOAD( "galaxian.y",  0x1800, 0x0800 )
-	ROM_LOAD( "galaxian.z",  0x2000, 0x0800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "galaxian.1h", 0x0000, 0x0800 )
-	ROM_LOAD( "galaxian.1k", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( galapx_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "galx.u",  0x0000, 0x0800 )
-	ROM_LOAD( "galx.v",  0x0800, 0x0800 )
-	ROM_LOAD( "galx.w",  0x1000, 0x0800 )
-	ROM_LOAD( "galx.y",  0x1800, 0x0800 )
-	ROM_LOAD( "galx.z",  0x2000, 0x0800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "galx.1h", 0x0000, 0x0800 )
-	ROM_LOAD( "galx.1k", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( galap1_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "galx_1.rom",   0x0000, 0x2800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "galx_1c1.rom", 0x0000, 0x0800 )
-	ROM_LOAD( "galx_1c2.rom", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( galap4_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "galx_4.rom",   0x0000, 0x2800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "galx_4c1.rom", 0x0000, 0x0800 )
-	ROM_LOAD( "galx_4c2.rom", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( pisces_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "pisces.a1", 0x0000, 0x0800 )
-	ROM_LOAD( "pisces.a2", 0x0800, 0x0800 )
-	ROM_LOAD( "pisces.b2", 0x1000, 0x0800 )
-	ROM_LOAD( "pisces.c1", 0x1800, 0x0800 )
-	ROM_LOAD( "pisces.d1", 0x2000, 0x0800 )
-	ROM_LOAD( "pisces.e2", 0x2800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "pisces.1j", 0x0000, 0x1000 )
-	ROM_LOAD( "pisces.1k", 0x1000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( japirem_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "f07_1a.bin",  0x0000, 0x0800 )
-	ROM_LOAD( "h07_2a.bin",  0x0800, 0x0800 )
-	ROM_LOAD( "k07_3a.bin",  0x1000, 0x0800 )
-	ROM_LOAD( "m07_4a.bin",  0x1800, 0x0800 )
-	ROM_LOAD( "d08p_5a.bin", 0x2000, 0x0800 )
-	ROM_LOAD( "e08p_6a.bin", 0x2800, 0x0800 )
-	ROM_LOAD( "m08p_7a.bin", 0x3000, 0x0800 )
-	ROM_LOAD( "n08p_8a.bin", 0x3800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "k01_1.bin",   0x0000, 0x0800 )
-	ROM_LOAD( "k01_2.bin",   0x0800, 0x0800 )
-	ROM_LOAD( "h01_1.bin",   0x1000, 0x0800 )
-	ROM_LOAD( "h01_2.bin",   0x1800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( uniwars_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "u1",  0x0000, 0x0800 )
-	ROM_LOAD( "u2",  0x0800, 0x0800 )
-	ROM_LOAD( "u3",  0x1000, 0x0800 )
-	ROM_LOAD( "u4",  0x1800, 0x0800 )
-	ROM_LOAD( "u5",  0x2000, 0x0800 )
-	ROM_LOAD( "u6",  0x2800, 0x0800 )
-	ROM_LOAD( "u7",  0x3000, 0x0800 )
-	ROM_LOAD( "u8",  0x3800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "u9",  0x0000, 0x0800 )
-	ROM_LOAD( "u11", 0x0800, 0x0800 )
-	ROM_LOAD( "u10", 0x1000, 0x0800 )
-	ROM_LOAD( "u12", 0x1800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( mooncrst_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "mc1", 0x0000, 0x0800 )
-	ROM_LOAD( "mc2", 0x0800, 0x0800 )
-	ROM_LOAD( "mc3", 0x1000, 0x0800 )
-	ROM_LOAD( "mc4", 0x1800, 0x0800 )
-	ROM_LOAD( "mc5", 0x2000, 0x0800 )
-	ROM_LOAD( "mc6", 0x2800, 0x0800 )
-	ROM_LOAD( "mc7", 0x3000, 0x0800 )
-	ROM_LOAD( "mc8", 0x3800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "mca", 0x0000, 0x0800 )
-	ROM_LOAD( "mcc", 0x0800, 0x0800 )
-	ROM_LOAD( "mcb", 0x1000, 0x0800 )
-	ROM_LOAD( "mcd", 0x1800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( mooncrsb_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "EPR194", 0x0000, 0x0800 )
-	ROM_LOAD( "EPR195", 0x0800, 0x0800 )
-	ROM_LOAD( "EPR196", 0x1000, 0x0800 )
-	ROM_LOAD( "EPR197", 0x1800, 0x0800 )
-	ROM_LOAD( "EPR198", 0x2000, 0x0800 )
-	ROM_LOAD( "EPR199", 0x2800, 0x0800 )
-	ROM_LOAD( "EPR200", 0x3000, 0x0800 )
-	ROM_LOAD( "EPR201", 0x3800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "EPR202", 0x0000, 0x0800 )
-	ROM_LOAD( "EPR171", 0x0800, 0x0800 )
-	ROM_LOAD( "EPR203", 0x1000, 0x0800 )
-	ROM_LOAD( "EPR172", 0x1800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( moonqsr_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "mq1", 0x0000, 0x0800 )
-	ROM_LOAD( "mq2", 0x0800, 0x0800 )
-	ROM_LOAD( "mq3", 0x1000, 0x0800 )
-	ROM_LOAD( "mq4", 0x1800, 0x0800 )
-	ROM_LOAD( "mq5", 0x2000, 0x0800 )
-	ROM_LOAD( "mq6", 0x2800, 0x0800 )
-	ROM_LOAD( "mq7", 0x3000, 0x0800 )
-	ROM_LOAD( "mq8", 0x3800, 0x0800 )
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "mqa", 0x0000, 0x0800 )
-	ROM_LOAD( "mqc", 0x0800, 0x0800 )
-	ROM_LOAD( "mqb", 0x1000, 0x0800 )
-	ROM_LOAD( "mqd", 0x1800, 0x0800 )
-ROM_END
-
-
-
-unsigned moonqsr_decode(dword A)
-{
-	static unsigned char evetab[] =
-	{
-		0x00,0x01,0x06,0x07,0x40,0x41,0x46,0x47,0x08,0x09,0x0e,0x0f,0x48,0x49,0x4e,0x4f,
-		0x10,0x11,0x16,0x17,0x50,0x51,0x56,0x57,0x18,0x19,0x1e,0x1f,0x58,0x59,0x5e,0x5f,
-		0x60,0x61,0x66,0x67,0x20,0x21,0x26,0x27,0x68,0x69,0x6e,0x6f,0x28,0x29,0x2e,0x2f,
-		0x70,0x71,0x76,0x77,0x30,0x31,0x36,0x37,0x78,0x79,0x7e,0x7f,0x38,0x39,0x3e,0x3f,
-		0x04,0x05,0x02,0x03,0x44,0x45,0x42,0x43,0x0c,0x0d,0x0a,0x0b,0x4c,0x4d,0x4a,0x4b,
-		0x14,0x15,0x12,0x13,0x54,0x55,0x52,0x53,0x1c,0x1d,0x1a,0x1b,0x5c,0x5d,0x5a,0x5b,
-		0x64,0x65,0x62,0x63,0x24,0x25,0x22,0x23,0x6c,0x6d,0x6a,0x6b,0x2c,0x2d,0x2a,0x2b,
-		0x74,0x75,0x72,0x73,0x34,0x35,0x32,0x33,0x7c,0x7d,0x7a,0x7b,0x3c,0x3d,0x3a,0x3b,
-		0x80,0x81,0x86,0x87,0xc0,0xc1,0xc6,0xc7,0x88,0x89,0x8e,0x8f,0xc8,0xc9,0xce,0xcf,
-		0x90,0x91,0x96,0x97,0xd0,0xd1,0xd6,0xd7,0x98,0x99,0x9e,0x9f,0xd8,0xd9,0xde,0xdf,
-		0xe0,0xe1,0xe6,0xe7,0xa0,0xa1,0xa6,0xa7,0xe8,0xe9,0xee,0xef,0xa8,0xa9,0xae,0xaf,
-		0xf0,0xf1,0xf6,0xf7,0xb0,0xb1,0xb6,0xb7,0xf8,0xf9,0xfe,0xff,0xb8,0xb9,0xbe,0xbf,
-		0x84,0x85,0x82,0x83,0xc4,0xc5,0xc2,0xc3,0x8c,0x8d,0x8a,0x8b,0xcc,0xcd,0xca,0xcb,
-		0x94,0x95,0x92,0x93,0xd4,0xd5,0xd2,0xd3,0x9c,0x9d,0x9a,0x9b,0xdc,0xdd,0xda,0xdb,
-		0xe4,0xe5,0xe2,0xe3,0xa4,0xa5,0xa2,0xa3,0xec,0xed,0xea,0xeb,0xac,0xad,0xaa,0xab,
-		0xf4,0xf5,0xf2,0xf3,0xb4,0xb5,0xb2,0xb3,0xfc,0xfd,0xfa,0xfb,0xbc,0xbd,0xba,0xbb
-	};
-	static unsigned char oddtab[] =
-	{
-		0x00,0x01,0x42,0x43,0x04,0x05,0x46,0x47,0x08,0x09,0x4a,0x4b,0x0c,0x0d,0x4e,0x4f,
-		0x10,0x11,0x52,0x53,0x14,0x15,0x56,0x57,0x18,0x19,0x5a,0x5b,0x1c,0x1d,0x5e,0x5f,
-		0x24,0x25,0x66,0x67,0x20,0x21,0x62,0x63,0x2c,0x2d,0x6e,0x6f,0x28,0x29,0x6a,0x6b,
-		0x34,0x35,0x76,0x77,0x30,0x31,0x72,0x73,0x3c,0x3d,0x7e,0x7f,0x38,0x39,0x7a,0x7b,
-		0x40,0x41,0x02,0x03,0x44,0x45,0x06,0x07,0x48,0x49,0x0a,0x0b,0x4c,0x4d,0x0e,0x0f,
-		0x50,0x51,0x12,0x13,0x54,0x55,0x16,0x17,0x58,0x59,0x1a,0x1b,0x5c,0x5d,0x1e,0x1f,
-		0x64,0x65,0x26,0x27,0x60,0x61,0x22,0x23,0x6c,0x6d,0x2e,0x2f,0x68,0x69,0x2a,0x2b,
-		0x74,0x75,0x36,0x37,0x70,0x71,0x32,0x33,0x7c,0x7d,0x3e,0x3f,0x78,0x79,0x3a,0x3b,
-		0x80,0x81,0xc2,0xc3,0x84,0x85,0xc6,0xc7,0x88,0x89,0xca,0xcb,0x8c,0x8d,0xce,0xcf,
-		0x90,0x91,0xd2,0xd3,0x94,0x95,0xd6,0xd7,0x98,0x99,0xda,0xdb,0x9c,0x9d,0xde,0xdf,
-		0xa4,0xa5,0xe6,0xe7,0xa0,0xa1,0xe2,0xe3,0xac,0xad,0xee,0xef,0xa8,0xa9,0xea,0xeb,
-		0xb4,0xb5,0xf6,0xf7,0xb0,0xb1,0xf2,0xf3,0xbc,0xbd,0xfe,0xff,0xb8,0xb9,0xfa,0xfb,
-		0xc0,0xc1,0x82,0x83,0xc4,0xc5,0x86,0x87,0xc8,0xc9,0x8a,0x8b,0xcc,0xcd,0x8e,0x8f,
-		0xd0,0xd1,0x92,0x93,0xd4,0xd5,0x96,0x97,0xd8,0xd9,0x9a,0x9b,0xdc,0xdd,0x9e,0x9f,
-		0xe4,0xe5,0xa6,0xa7,0xe0,0xe1,0xa2,0xa3,0xec,0xed,0xae,0xaf,0xe8,0xe9,0xaa,0xab,
-		0xf4,0xf5,0xb6,0xb7,0xf0,0xf1,0xb2,0xb3,0xfc,0xfd,0xbe,0xbf,0xf8,0xf9,0xba,0xbb
-	};
-
-
-	if (A & 1) return oddtab[RAM[A]];
-	else return evetab[RAM[A]];
-}
-
-
-
-ROM_START( theend_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "IC13", 0x0000, 0x0800 )
-	ROM_LOAD( "IC14", 0x0800, 0x0800 )
-	ROM_LOAD( "IC15", 0x1000, 0x0800 )
-	ROM_LOAD( "IC16", 0x1800, 0x0800 )
-	ROM_LOAD( "IC17", 0x2000, 0x0800 )
-	ROM_LOAD( "IC18", 0x2800, 0x0800 )
-	ROM_LOAD( "IC56", 0x3000, 0x0800 )
-	ROM_LOAD( "IC55", 0x3800, 0x0800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "IC30", 0x0000, 0x0800 )
-	ROM_LOAD( "IC31", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( scramble_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "2c", 0x0000, 0x0800 )
-	ROM_LOAD( "2e", 0x0800, 0x0800 )
-	ROM_LOAD( "2f", 0x1000, 0x0800 )
-	ROM_LOAD( "2h", 0x1800, 0x0800 )
-	ROM_LOAD( "2j", 0x2000, 0x0800 )
-	ROM_LOAD( "2l", 0x2800, 0x0800 )
-	ROM_LOAD( "2m", 0x3000, 0x0800 )
-	ROM_LOAD( "2p", 0x3800, 0x0800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "5f", 0x0000, 0x0800 )
-	ROM_LOAD( "5h", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( atlantis_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "2c", 0x0000, 0x0800 )
-	ROM_LOAD( "2e", 0x0800, 0x0800 )
-	ROM_LOAD( "2f", 0x1000, 0x0800 )
-	ROM_LOAD( "2h", 0x1800, 0x0800 )
-	ROM_LOAD( "2j", 0x2000, 0x0800 )
-	ROM_LOAD( "2l", 0x2800, 0x0800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "5f", 0x0000, 0x0800 )
-	ROM_LOAD( "5h", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( scobra_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "2c", 0x0000, 0x1000 )
-	ROM_LOAD( "2e", 0x1000, 0x1000 )
-	ROM_LOAD( "2f", 0x2000, 0x1000 )
-	ROM_LOAD( "2h", 0x3000, 0x1000 )
-	ROM_LOAD( "2j", 0x4000, 0x1000 )
-	ROM_LOAD( "2l", 0x5000, 0x1000 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "5f", 0x0000, 0x0800 )
-	ROM_LOAD( "5h", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( scobrab_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "vid_2c.bin",   0x0000, 0x0800 )
-	ROM_LOAD( "vid_2e.bin",   0x0800, 0x0800 )
-	ROM_LOAD( "vid_2f.bin",   0x1000, 0x0800 )
-	ROM_LOAD( "vid_2h.bin",   0x1800, 0x0800 )
-	ROM_LOAD( "vid_2j_l.bin", 0x2000, 0x0800 )
-	ROM_LOAD( "vid_2l_l.bin", 0x2800, 0x0800 )
-	ROM_LOAD( "vid_2m_l.bin", 0x3000, 0x0800 )
-	ROM_LOAD( "vid_2p_l.bin", 0x3800, 0x0800 )
-	ROM_LOAD( "vid_2j_u.bin", 0x4000, 0x0800 )
-	ROM_LOAD( "vid_2l_u.bin", 0x4800, 0x0800 )
-	ROM_LOAD( "vid_2m_u.bin", 0x5000, 0x0800 )
-	ROM_LOAD( "vid_2p_u.bin", 0x5800, 0x0800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "vid_5f.bin",   0x0000, 0x0800 )
-	ROM_LOAD( "vid_5h.bin",   0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( frogger_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "frogger.ic5", 0x0000, 0x1000 )
-	ROM_LOAD( "frogger.ic6", 0x1000, 0x1000 )
-	ROM_LOAD( "frogger.ic7", 0x2000, 0x1000 )
-	ROM_LOAD( "frogger.ic8", 0x3000, 0x1000 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "frogger.606", 0x0000, 0x0800 )
-	ROM_LOAD( "frogger.607", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( froggers_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "vid_d2.bin", 0x0000, 0x0800 )
-	ROM_LOAD( "vid_e2.bin", 0x0800, 0x0800 )
-	ROM_LOAD( "vid_f2.bin", 0x1000, 0x0800 )
-	ROM_LOAD( "vid_h2.bin", 0x1800, 0x0800 )
-	ROM_LOAD( "vid_j2.bin", 0x2000, 0x0800 )
-	ROM_LOAD( "vid_l2.bin", 0x2800, 0x0800 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "vid_f5.bin", 0x0000, 0x0800 )
-	ROM_LOAD( "vid_h5.bin", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( amidar_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "%s.2c", 0x0000, 0x1000 )
-	ROM_LOAD( "%s.2e", 0x1000, 0x1000 )
-	ROM_LOAD( "%s.2f", 0x2000, 0x1000 )
-	ROM_LOAD( "%s.2h", 0x3000, 0x1000 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "%s.5f", 0x0000, 0x0800 )
-	ROM_LOAD( "%s.5h", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( amidarus_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "%s.2c", 0x0000, 0x1000 )
-	ROM_LOAD( "%s.2e", 0x1000, 0x1000 )
-	ROM_LOAD( "%s.2f", 0x2000, 0x1000 )
-	ROM_LOAD( "%s.2h", 0x3000, 0x1000 )
-	ROM_LOAD( "%s.2j", 0x4000, 0x1000 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "%s.5f", 0x0000, 0x0800 )
-	ROM_LOAD( "%s.5h", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( turtles_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "turt_vid.2c", 0x0000, 0x1000 )
-	ROM_LOAD( "turt_vid.2e", 0x1000, 0x1000 )
-	ROM_LOAD( "turt_vid.2f", 0x2000, 0x1000 )
-	ROM_LOAD( "turt_vid.2h", 0x3000, 0x1000 )
-	ROM_LOAD( "turt_vid.2j", 0x4000, 0x1000 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "turt_vid.5f", 0x0000, 0x0800 )
-	ROM_LOAD( "turt_vid.5h", 0x0800, 0x0800 )
-ROM_END
-
-
-
-ROM_START( rallyx_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "%s.1b", 0x0000, 0x1000 )
-	ROM_LOAD( "%s.1e", 0x1000, 0x1000 )
-	ROM_LOAD( "%s.1h", 0x2000, 0x1000 )
-	ROM_LOAD( "%s.1k", 0x3000, 0x1000 )
-
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "%s.8e", 0x0000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( pooyan_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "ic22_a4.cpu",  0x0000, 0x2000 )
-	ROM_LOAD( "ic23_a5.cpu",  0x2000, 0x2000 )
-	ROM_LOAD( "ic24_a6.cpu",  0x4000, 0x2000 )
-	ROM_LOAD( "ic25_a7.cpu",  0x6000, 0x2000 )
-
-	ROM_REGION(0x4000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "ic14_g9.cpu",  0x0000, 0x1000 )
-	ROM_LOAD( "ic13_g10.cpu", 0x1000, 0x1000 )
-	ROM_LOAD( "ic15_a9.cpu",  0x2000, 0x1000 )
-	ROM_LOAD( "ic16_a8.cpu",  0x3000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( phoenix_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD("phoenix.45", 0x0000, 0x0800)
-	ROM_LOAD("phoenix.46", 0x0800, 0x0800)
-	ROM_LOAD("phoenix.47", 0x1000, 0x0800)
-	ROM_LOAD("phoenix.48", 0x1800, 0x0800)
-	ROM_LOAD("phoenix.49", 0x000, 0x0800)
-	ROM_LOAD("phoenix.50", 0x2800, 0x0800)
-	ROM_LOAD("phoenix.51", 0x3000, 0x0800)
-	ROM_LOAD("phoenix.52", 0x3800, 0x0800)
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD("phoenix.39", 0x0000, 0x0800)
-	ROM_LOAD("phoenix.40", 0x0800, 0x0800)
-	ROM_LOAD("phoenix.23", 0x1000, 0x0800)
-	ROM_LOAD("phoenix.24", 0x1800, 0x0800)
-ROM_END
-
-
-
-ROM_START( pleiades_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "pleiades.47", 0x0000, 0x0800)
-	ROM_LOAD( "pleiades.48", 0x0800, 0x0800)
-	ROM_LOAD( "pleiades.49", 0x1000, 0x0800)
-	ROM_LOAD( "pleiades.50", 0x1800, 0x0800)
-	ROM_LOAD( "pleiades.51", 0x2000, 0x0800)
-	ROM_LOAD( "pleiades.52", 0x2800, 0x0800)
-	ROM_LOAD( "pleiades.53", 0x3000, 0x0800)
-	ROM_LOAD( "pleiades.54", 0x3800, 0x0800)
-
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "pleiades.27", 0x0000, 0x0800)
-	ROM_LOAD( "pleiades.26", 0x0800, 0x0800)
-	ROM_LOAD( "pleiades.45", 0x1000, 0x0800)
-	ROM_LOAD( "pleiades.44", 0x1800, 0x0800)
-ROM_END
-
-
-
-ROM_START( carnival_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "651u33.cpu", 0x0000, 0x0400 )
-	ROM_CONTINUE(           0x4000, 0x0400 )
-	ROM_LOAD( "652u32.cpu", 0x0400, 0x0400 )
-	ROM_CONTINUE(           0x4400, 0x0400 )
-	ROM_LOAD( "653u31.cpu", 0x0800, 0x0400 )
-	ROM_CONTINUE(           0x4800, 0x0400 )
-	ROM_LOAD( "654u30.cpu", 0x0c00, 0x0400 )
-	ROM_CONTINUE(           0x4c00, 0x0400 )
-	ROM_LOAD( "655u29.cpu", 0x1000, 0x0400 )
-	ROM_CONTINUE(           0x5000, 0x0400 )
-	ROM_LOAD( "656u28.cpu", 0x1400, 0x0400 )
-	ROM_CONTINUE(           0x5400, 0x0400 )
-	ROM_LOAD( "657u27.cpu", 0x1800, 0x0400 )
-	ROM_CONTINUE(           0x5800, 0x0400 )
-	ROM_LOAD( "658u26.cpu", 0x1c00, 0x0400 )
-	ROM_CONTINUE(           0x5c00, 0x0400 )
-	ROM_LOAD( "659u8.cpu",  0x2000, 0x0400 )
-	ROM_CONTINUE(           0x6000, 0x0400 )
-	ROM_LOAD( "660u7.cpu",  0x2400, 0x0400 )
-	ROM_CONTINUE(           0x6400, 0x0400 )
-	ROM_LOAD( "661u6.cpu",  0x2800, 0x0400 )
-	ROM_CONTINUE(           0x6800, 0x0400 )
-	ROM_LOAD( "662u5.cpu",  0x2c00, 0x0400 )
-	ROM_CONTINUE(           0x6c00, 0x0400 )
-	ROM_LOAD( "663u4.cpu",  0x3000, 0x0400 )
-	ROM_CONTINUE(           0x7000, 0x0400 )
-	ROM_LOAD( "664u3.cpu",  0x3400, 0x0400 )
-	ROM_CONTINUE(           0x7400, 0x0400 )
-	ROM_LOAD( "665u2.cpu",  0x3800, 0x0400 )
-	ROM_CONTINUE(           0x7800, 0x0400 )
-	ROM_LOAD( "666u1.cpu",  0x3c00, 0x0400 )
-	ROM_CONTINUE(           0x7c00, 0x0400 )
-ROM_END
-
-
-
-ROM_START( invaders_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "invaders.h", 0x0000, 0x0800)
-	ROM_LOAD( "invaders.g", 0x0800, 0x0800)
-	ROM_LOAD( "invaders.f", 0x1000, 0x0800)
-	ROM_LOAD( "invaders.e", 0x1800, 0x0800)
-ROM_END
-
-
-
-ROM_START( spaceatt_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "spaceatt.h", 0x0000, 0x0800)
-	ROM_LOAD( "spaceatt.g", 0x0800, 0x0800)
-	ROM_LOAD( "spaceatt.f", 0x1000, 0x0800)
-	ROM_LOAD( "spaceatt.e", 0x1800, 0x0800)
-ROM_END
-
-
-
-ROM_START( invdelux_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "invdelux.h", 0x0000, 0x0800)
-	ROM_LOAD( "invdelux.g", 0x0800, 0x0800)
-	ROM_LOAD( "invdelux.f", 0x1000, 0x0800)
-	ROM_LOAD( "invdelux.e", 0x1800, 0x0800)
-	ROM_LOAD( "invdelux.d", 0x4000, 0x0800)
-ROM_END
-
-
-
-ROM_START( galxwars_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "galxwars.0", 0x0000, 0x0400)
-	ROM_LOAD( "galxwars.1", 0x0400, 0x0400)
-	ROM_LOAD( "galxwars.2", 0x0800, 0x0400)
-	ROM_LOAD( "galxwars.3", 0x0c00, 0x0400)
-	ROM_LOAD( "galxwars.4", 0x4000, 0x0400)
-	ROM_LOAD( "galxwars.5", 0x4400, 0x0400)
-ROM_END
-
-
-
-ROM_START( lrescue_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "lrescue.1", 0x0000, 0x0800)
-	ROM_LOAD( "lrescue.2", 0x0800, 0x0800)
-	ROM_LOAD( "lrescue.3", 0x1000, 0x0800)
-	ROM_LOAD( "lrescue.4", 0x1800, 0x0800)
-	ROM_LOAD( "lrescue.5", 0x4000, 0x0800)
-	ROM_LOAD( "lrescue.6", 0x4800, 0x0800)
-ROM_END
-
-
-
-ROM_START( desterth_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "36_h.bin", 0x0000, 0x0800)
-	ROM_LOAD( "35_g.bin", 0x0800, 0x0800)
-	ROM_LOAD( "34_f.bin", 0x1000, 0x0800)
-	ROM_LOAD( "33_e.bin", 0x1800, 0x0800)
-	ROM_LOAD( "32_d.bin", 0x4000, 0x0800)
-	ROM_LOAD( "31_c.bin", 0x4800, 0x0800)
-	ROM_LOAD( "42_b.bin", 0x5000, 0x0800)
-ROM_END
-
-
-
-ROM_START( mario_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "%s.7f", 0x0000, 0x2000 )
-	ROM_LOAD( "%s.7e", 0x2000, 0x2000 )
-	ROM_LOAD( "%s.7d", 0x4000, 0x2000 )
-	ROM_LOAD( "%s.7c", 0xf000, 0x1000 )
-
-	ROM_REGION(0x8000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "%s.3f", 0x0000, 0x1000 )
-	ROM_LOAD( "%s.3j", 0x1000, 0x1000 )
-	ROM_LOAD( "%s.7m", 0x2000, 0x1000 )
-	ROM_LOAD( "%s.7n", 0x3000, 0x1000 )
-	ROM_LOAD( "%s.7p", 0x4000, 0x1000 )
-	ROM_LOAD( "%s.7s", 0x5000, 0x1000 )
-	ROM_LOAD( "%s.7t", 0x6000, 0x1000 )
-	ROM_LOAD( "%s.7u", 0x7000, 0x1000 )
-
-	ROM_REGION(0x1000)	/* sound? */
-	ROM_LOAD( "%s.6k", 0x0000, 0x1000 )
-ROM_END
-
-
-
-ROM_START( zaxxon_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "%s.3",  0x0000, 0x2000 )
-	ROM_LOAD( "%s.2",  0x2000, 0x2000 )
-	ROM_LOAD( "%s.1",  0x4000, 0x1000 )
-
-	ROM_REGION(0xd000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "%s.15", 0x0000, 0x0800 )
-	ROM_LOAD( "%s.14", 0x0800, 0x0800 )
-	ROM_LOAD( "%s.13", 0x1000, 0x2000 )
-	ROM_LOAD( "%s.12", 0x3000, 0x2000 )
-	ROM_LOAD( "%s.11", 0x5000, 0x2000 )
-	ROM_LOAD( "%s.6",  0x7000, 0x2000 )
-	ROM_LOAD( "%s.5",  0x9000, 0x2000 )
-	ROM_LOAD( "%s.4",  0xb000, 0x2000 )
-
-	ROM_REGION(0x8000)	/* background graphics */
-	ROM_LOAD( "%s.8",  0x0000, 0x2000 )
-	ROM_LOAD( "%s.7",  0x2000, 0x2000 )
-	ROM_LOAD( "%s.10", 0x4000, 0x2000 )
-	ROM_LOAD( "%s.9",  0x6000, 0x2000 )
-ROM_END
-
-
-
-ROM_START( bombjack_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "09_j01b.bin",  0x0000, 0x2000 )
-	ROM_LOAD( "10_l01b.bin",  0x2000, 0x2000 )
-	ROM_LOAD( "11_m01b.bin",  0x4000, 0x2000 )
-	ROM_LOAD( "12_n01b.bin",  0x6000, 0x2000 )
-	ROM_LOAD( "13_r01b.bin",  0xc000, 0x2000 )
-
-	ROM_REGION(0xf000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "03_e08t.bin",  0x0000, 0x1000 )	/* chars */
-	ROM_LOAD( "04_h08t.bin",  0x1000, 0x1000 )
-	ROM_LOAD( "05_k08t.bin",  0x2000, 0x1000 )
-	ROM_LOAD( "06_l08t.bin",  0x3000, 0x2000 )	/* background tiles */
-	ROM_LOAD( "07_n08t.bin",  0x5000, 0x2000 )
-	ROM_LOAD( "08_r08t.bin",  0x7000, 0x2000 )
-	ROM_LOAD( "16_m07b.bin",  0x9000, 0x2000 )	/* sprites */
-	ROM_LOAD( "15_l07b.bin",  0xb000, 0x2000 )
-	ROM_LOAD( "14_j07b.bin",  0xd000, 0x2000 )
-
-	ROM_REGION(0x1000)	/* background graphics */
-	ROM_LOAD( "02_p04t.bin",  0x0000, 0x1000 )
-
-	ROM_REGION(0x10000)	/* 64 for sound board */
-	ROM_LOAD( "01_h03t.bin",  0x0000, 0x2000 )
-ROM_END
-
-
-
-struct GameDriver drivers[] =
-{
-	{ "pacman",   pacman_rom,   0, 0,               &pacman_driver },
-	{ "pacmod",   pacmod_rom,   0, 0,               &pacman_driver },
-	{ "namcopac", pacman_rom,   0, 0,               &pacman_driver },
-	{ "hangly",   pacman_rom,   0, 0,               &pacman_driver },
-	{ "puckman",  pacman_rom,   0, 0,               &pacman_driver },
-	{ "piranha",  piranha_rom,  0, 0,               &pacman_driver },
-	{ "mspacman", mspacman_rom, 0, 0,               &mspacman_driver },
-	{ "crush",    crush_rom,    0, 0,               &crush_driver },
-	{ "pengo",    pengo_rom,    0, 0,               &pengo_driver },
-	{ "penta",    penta_rom,    0, 0,               &pengo_driver },
-	{ "ladybug",  ladybug_rom,  0, 0,               &ladybug_driver },
-	{ "mrdo",     mrdo_rom,     0, 0,               &mrdo_driver },
-	{ "mrlo",     mrlo_rom,     0, 0,               &mrdo_driver },
-	{ "cclimber", cclimber_rom, 0, cclimber_decode, &cclimber_driver },
-	{ "ccjap",    ccjap_rom,    0, ccjap_decode,    &cclimber_driver },
-	{ "ccboot",   ccboot_rom,   0, ccjap_decode,    &cclimber_driver },
-	{ "ckong",    ckong_rom,    0, 0,               &ckong_driver },
-	{ "dkong",    dkong_rom,    0, 0,               &dkong_driver },
-	{ "dkongjr",  dkongjr_rom,  0, 0,               &dkongjr_driver },
-	{ "bagman",   bagman_rom,   0, 0,               &bagman_driver },
-	{ "wow",      wow_rom,      0, 0,               &wow_driver },
-	{ "robby",    robby_rom,    0, 0,               &wow_driver },
-	{ "gorf",     gorf_rom,     0, 0,               &wow_driver },
-	{ "galaxian", galaxian_rom, 0, 0,               &galaxian_driver },
-	{ "galnamco", galnamco_rom, 0, 0,               &galaxian_driver },
-	{ "superg",   galnamco_rom, 0, 0,               &galaxian_driver },
-	{ "galapx",   galapx_rom,   0, 0,               &galaxian_driver },
-	{ "galap1",   galap1_rom,   0, 0,               &galaxian_driver },
-	{ "galap4",   galap4_rom,   0, 0,               &galaxian_driver },
-	{ "galturbo", galnamco_rom, 0, 0,               &galaxian_driver },
-	{ "pisces",   pisces_rom,   0, 0,               &pisces_driver },
-	{ "japirem",  japirem_rom,  0, 0,               &japirem_driver },
-	{ "uniwars",  uniwars_rom,  0, 0,               &japirem_driver },
-	{ "warofbug", galaxian_rom, 0, 0,               &warofbug_driver },
-	{ "mooncrst", mooncrst_rom, moonqsr_decode, 0,  &mooncrst_driver },
-	{ "mooncrsb", mooncrsb_rom, 0, 0,               &mooncrst_driver },
-	{ "moonqsr",  moonqsr_rom,  0, moonqsr_decode,  &moonqsr_driver },
-	{ "theend",   theend_rom,   0, 0,               &theend_driver },
-	{ "scramble", scramble_rom, 0, 0,               &scramble_driver },
-	{ "atlantis", atlantis_rom, 0, 0,               &atlantis_driver },
-	{ "scobra",   scobra_rom,   0, 0,               &scobra_driver },
-	{ "scobrab",  scobrab_rom,  0, 0,               &scobra_driver },
-	{ "frogger",  frogger_rom,  0, 0,               &frogger_driver },
-	{ "froggers", froggers_rom, 0, 0,               &scramble_driver },
-	{ "amidar",   amidar_rom,   0, 0,               &amidar_driver },
-	{ "amidarus", amidarus_rom, 0, 0,               &amidar_driver },
-	{ "turtles",  turtles_rom,  0, 0,               &turtles_driver },
-	{ "rallyx",   rallyx_rom,   0, 0,               &rallyx_driver },
-	{ "pooyan",   pooyan_rom,   0, 0,               &pooyan_driver },
-	{ "phoenix",  phoenix_rom,  0, 0,               &phoenix_driver },
-	{ "pleiades", pleiades_rom, 0, 0,               &phoenix_driver },
-	{ "carnival", carnival_rom, 0, 0,               &carnival_driver },
-	{ "invaders", invaders_rom, 0, 0,               &invaders_driver },
-	{ "earthinv", invaders_rom, 0, 0,               &invaders_driver },
-	{ "spaceatt", spaceatt_rom, 0, 0,               &invaders_driver },
-	{ "invdelux", invdelux_rom, 0, 0,               &invaders_driver },
-	{ "galxwars", galxwars_rom, 0, 0,               &invaders_driver },
-	{ "lrescue",  lrescue_rom,  0, 0,               &invaders_driver },
-	{ "desterth", desterth_rom, 0, 0,               &invaders_driver },
-	{ "mario",    mario_rom,    0, 0,               &mario_driver },
-	{ "zaxxon",   zaxxon_rom,   0, 0,               &zaxxon_driver },
-	{ "bombjack", bombjack_rom, 0, 0,               &bombjack_driver },
-	{ 0	}	/* end of array */
+	/* "Pacman hardware" games */
+	&pacman_driver,
+	&pacplus_driver,
+	&jrpacman_driver,
+	&pacmod_driver,
+	&namcopac_driver,
+	&pacmanjp_driver,
+	&hangly_driver,
+	&puckman_driver,
+	&piranha_driver,
+	&mspacman_driver,
+	&mspacatk_driver,
+	&crush_driver,
+	&maketrax_driver,
+	&pengo_driver,
+	&pengoa_driver,
+	&penta_driver,
+	/* "Galaxian hardware" games */
+	&galaxian_driver,
+	&galmidw_driver,
+	&galnamco_driver,
+	&superg_driver,
+	&galapx_driver,
+	&galap1_driver,
+	&galap4_driver,
+	&galturbo_driver,
+	&pisces_driver,
+	&japirem_driver,
+	&uniwars_driver,
+	&warofbug_driver,
+	&redufo_driver,
+	&pacmanbl_driver,
+	&mooncrst_driver,
+	&mooncrsg_driver,
+	&mooncrsb_driver,
+	&fantazia_driver,
+	&eagle_driver,
+	&moonqsr_driver,
+	&checkman_driver,
+	/* "Scramble hardware" (and variations) games */
+	&scramble_driver,
+	&atlantis_driver,
+	&theend_driver,
+	&ckongs_driver,
+	&froggers_driver,
+	&amidars_driver,
+	&triplep_driver,
+	&scobra_driver,
+	&scobrak_driver,
+	&scobrab_driver,
+	&losttomb_driver,
+	&anteater_driver,
+	&rescue_driver,
+	&minefld_driver,
+	&armorcar_driver,
+	&tazmania_driver,
+	&stratgyx_driver,
+	&stratgyb_driver,
+	&darkplnt_driver,
+	&hustler_driver,
+	&pool_driver,
+	&frogger_driver,
+	&frogsega_driver,
+	&frogger2_driver,
+	&amidar_driver,
+	&amidarjp_driver,
+	&amigo_driver,
+	&turtles_driver,
+	&turpin_driver,
+	&jumpbug_driver,
+	&jbugsega_driver,
+	&jumpcoas_driver,
+	/* "Crazy Climber hardware" games */
+	&cclimber_driver,
+	&ccjap_driver,
+	&ccboot_driver,
+	&ckong_driver,
+	&ckonga_driver,
+	&ckongjeu_driver,
+	&ckongalc_driver,
+	&monkeyd_driver,
+	&swimmer_driver,
+	&swimmera_driver,
+	&guzzler_driver,
+	&seicross_driver,
+	&friskyt_driver,
+	/* "Phoenix hardware" (and variations) games */
+	&phoenix_driver,
+	&phoenixt_driver,
+	&phoenix3_driver,
+	&pleiads_driver,
+	&pleitek_driver,
+	&naughtyb_driver,
+	&popflame_driver,
+	/* "Space Invaders hardware" games */
+	&invaders_driver,
+	&earthinv_driver,
+	&spaceatt_driver,
+	&invrvnge_driver,
+	&invdelux_driver,
+	&galxwars_driver,
+	&lrescue_driver,
+	&desterth_driver,
+	&invadpt2_driver,
+	&cosmicmo_driver,
+	&spaceph_driver,
+	&rollingc_driver,
+	&boothill_driver,
+	&bandido_driver,
+	&astinvad_driver,
+	&schaser_driver,
+	&zzzap_driver,
+	&tornbase_driver,
+	&kamikaze_driver,
+	&maze_driver,
+	/* Namco games */
+	&rallyx_driver,
+	&nrallyx_driver,
+	&locomotn_driver,
+	&jungler_driver,
+	&commsega_driver,
+	&bosco_driver,
+	&bosconm_driver,
+	&galaga_driver,
+	&galaganm_driver,
+	&galagabl_driver,
+	&gallag_driver,
+	&galagab2_driver,
+	&digdugnm_driver,
+	&digdugat_driver,
+	&xevious_driver,
+	&xeviousn_driver,
+	&sxevious_driver,
+	&superpac_driver,
+	&superpcn_driver,
+	&pacnpal_driver,
+	&mappy_driver,
+	&mappyjp_driver,
+	&digdug2_driver,
+	&todruaga_driver,
+	&motos_driver,
+	/* Universal games */
+	&ladybug_driver,
+	&snapjack_driver,
+	&cavenger_driver,
+	&mrdo_driver,
+	&mrdot_driver,
+	&mrlo_driver,
+	&mrdu_driver,
+	&docastle_driver,
+	&docastl2_driver,
+	&dounicorn_driver,
+	&dowild_driver,
+	&jjack_driver,
+	&dorunrun_driver,
+	&spiero_driver,
+	&kickridr_driver,
+	/* Nintendo games */
+	&dkong_driver,
+	&radarscp_driver,
+	&dkongjp_driver,
+	&dkongjr_driver,
+	&dkngjrjp_driver,
+	&dkjrjp_driver,
+	&dkjrbl_driver,
+	&dkong3_driver,
+	&mario_driver,
+	&hunchy_driver,
+	&popeyebl_driver,
+	&punchout_driver,
+	&spnchout_driver,
+	/* Bally Midway "Astrocade" games */
+	&wow_driver,
+	&robby_driver,
+	&gorf_driver,
+	&gorfpgm1_driver,
+	&seawolf_driver,
+	&spacezap_driver,
+	&ebases_driver,
+	/* Bally Midway "MCR" games */
+	&kick_driver,
+	&solarfox_driver,
+	&tron_driver,
+	&twotiger_driver,
+	&domino_driver,
+	&shollow_driver,
+	&wacko_driver,
+	&kroozr_driver,
+	&journey_driver,
+	&tapper_driver,
+	&sutapper_driver,
+	&rbtapper_driver,
+	&dotron_driver,
+	&destderb_driver,
+	&timber_driver,
+	&spyhunt_driver,
+	&crater_driver,
+	&rampage_driver,
+	&sarge_driver,
+	/* Irem games */
+	&mpatrol_driver,
+	&mpatrolw_driver,
+	&mranger_driver,
+	&yard_driver,
+	&vsyard_driver,
+	&kungfum_driver,
+	&kungfub_driver,
+	&travrusa_driver,
+	&lrunner_driver,
+	/* Gottlieb games */
+	&reactor_driver,
+	&mplanets_driver,
+	&qbert_driver,
+	&qbertjp_driver,
+	&krull_driver,
+	&stooges_driver,
+	&qbertqub_driver,
+	/* Taito "Qix hardware" games */
+	&qix_driver,
+	&qix2_driver,
+	&zookeep_driver,
+	/* Taito "Jungle King hardware" games */
+	&junglek_driver,
+	&jhunt_driver,
+	&elevator_driver,
+	&elevatob_driver,
+	&wwestern_driver,
+	&frontlin_driver,
+	&alpine_driver,
+	/* other Taito games */
+	&bublbobl_driver,
+	&boblbobl_driver,
+	&sboblbob_driver,
+	&rastan_driver,
+	&rastsaga_driver,
+	&rainbow_driver,
+	&rainbowe_driver,
+	&arkanoid_driver,
+	&arknoidu_driver,
+	&arkbl2_driver,
+	&arkabeta_driver,
+	&arkatayt_driver,
+	&superqix_driver,
+	&sqixbl_driver,
+	&tnzs_driver,
+	&tnzs2_driver,
+//	&twincobr_driver,
+	/* Williams games */
+	&robotron_driver,
+	&robotryo_driver,
+	&stargate_driver,
+	&joust_driver,
+	&joustr_driver,
+	&joustg_driver,
+	&joustwr_driver,
+	&sinistar_driver,
+	&bubbles_driver,
+	&bubblesr_driver,
+	&defender_driver,
+	&splat_driver,
+	&blaster_driver,
+	&colony7_driver,
+	&colony7a_driver,
+	&lottofun_driver,
+	/* Capcom games */
+	&c1942_driver,
+	&vulgus_driver,
+	&commando_driver,
+	&commandj_driver,
+	&gng_driver,
+	&gngcross_driver,
+	&gngjap_driver,
+	&diamond_driver,
+	&sonson_driver,
+	&exedexes_driver,
+	&savgbees_driver,
+	&lwings_driver,
+	&lwingsjp_driver,
+	&sectionz_driver,
+	&trojan_driver,
+	&trojanj_driver,
+	&c1943_driver,
+	&c1943kai_driver,
+	&gunsmoke_driver,
+	&gunsmrom_driver,
+	&gunsmokj_driver,
+	&blktiger_driver,
+	&blkdrgon_driver,
+	&sidearms_driver,
+	&sidearjp_driver,
+	&srumbler_driver,
+	&srumblr2_driver,
+	&capbowl_driver,
+	&clbowl_driver,
+	&tigeroad_driver,
+	/* Capcom CPS1 games */
+	&strider_driver,
+	&willow_driver,
+	&ffight_driver,
+	&mtwins_driver,
+	&unsquad_driver,
+	/* Sega "dual game board" games */
+	&carnival_driver,
+	&pulsar_driver,
+	&invho2_driver,
+	&sspaceat_driver,
+	&invinco_driver,
+	/* Sega G-80 vector games */
+	&spacfury_driver,
+	&spacfurc_driver,
+	&zektor_driver,
+	&tacscan_driver,
+	&elim2_driver,
+	&elim4_driver,
+	&startrek_driver,
+	/* Sega G-80 raster games */
+	&astrob_driver,
+	&astrob1_driver,
+	&s005_driver,
+	&monsterb_driver,
+	&spaceod_driver,
+	/* Sega "Zaxxon hardware" games */
+	&zaxxon_driver,
+	&szaxxon_driver,
+	&futspy_driver,
+	&congo_driver,
+	&tiptop_driver,
+	/* Sega System 8 games */
+	&wbdeluxe_driver,
+	&wbml_driver,
+	&pitfall2_driver,
+	&chplft_driver,
+	&chplftb_driver,
+	&chplftbl_driver,
+	/* Data East "Burger Time hardware" games */
+	&btime_driver,
+	&btimea_driver,
+	&hamburge_driver,
+	&bnj_driver,
+	&brubber_driver,
+	&caractn_driver,
+	&eggs_driver,
+	&scregg_driver,
+	/* other Data East games */
+	&astrof_driver,
+	&astrof2_driver,
+	&firetrap_driver,
+	&firetpbl_driver,
+	&brkthru_driver,
+	/* Data East 16-bit games */
+	&karnov_driver,
+	&karnovj_driver,
+	&chelnov_driver,
+	&chelnovj_driver,
+	&baddudes_driver,
+	&drgninja_driver,
+	&robocopp_driver,
+	&hbarrel_driver,
+	&slyspy_driver,
+	&hippodrm_driver,
+	&midres_driver,
+	/* Tehkan games */
+	&bombjack_driver,
+	&starforc_driver,
+	&megaforc_driver,
+	&pbaction_driver,
+	/* Tecmo games (Tehkan became Tecmo in 1986) */
+	&silkworm_driver,
+	&rygar_driver,
+	&rygarj_driver,
+	&gemini_driver,
+	&wc90_driver,
+	&wc90b_driver,
+	&gaiden_driver,
+	&shadoww_driver,
+	/* Konami games */
+	&pooyan_driver,
+	&pootan_driver,
+	&timeplt_driver,
+	&spaceplt_driver,
+	&rocnrope_driver,
+	&ropeman_driver,
+	&gyruss_driver,
+	&gyrussce_driver,
+	&trackfld_driver,
+	&hyprolym_driver,
+	&circusc_driver,
+	&circusc2_driver,
+	&tp84_driver,
+	&hyperspt_driver,
+	&sbasketb_driver,
+	&mikie_driver,
+	&roadf_driver,
+	&yiear_driver,
+	&shaolins_driver,
+	&pingpong_driver,
+	&gberet_driver,
+	&rushatck_driver,
+	&ironhors_driver,
+	&farwest_driver,
+	/* Exidy games */
+	&venture_driver,
+	&venture2_driver,
+	&mtrap_driver,
+	&pepper2_driver,
+	&targ_driver,
+	&spectar_driver,
+	&circus_driver,
+	&robotbwl_driver,
+	&crash_driver,
+	&starfire_driver,
+	/* Atari vector games */
+	&asteroid_driver,
+	&asteroi2_driver,
+	&astdelux_driver,
+	&bwidow_driver,
+	&bzone_driver,
+	&bzone2_driver,
+	&gravitar_driver,
+	&llander_driver,
+	&redbaron_driver,
+	&spacduel_driver,
+	&tempest_driver,
+	&temptube_driver,
+	&starwars_driver,
+	&mhavoc_driver,
+	&mhavoc2_driver,
+	&mhavocrv_driver,
+	&quantum_driver,
+	&quantum2_driver,
+	/* Atari "Centipede hardware" games */
+	&centiped_driver,
+	&milliped_driver,
+	&warlord_driver,
+	/* Atari "Kangaroo hardware" games */
+	&kangaroo_driver,
+	&arabian_driver,
+	/* Atari "Missile Command hardware" games */
+	&missile_driver,
+	&suprmatk_driver,
+	/* Atary b/w games */
+	&sprint1_driver,
+	&sprint2_driver,
+	&sbrkout_driver,
+	&dominos_driver,
+	&nitedrvr_driver,
+	&bsktball_driver,
+	&copsnrob_driver,
+	/* Atari System 1 games */
+	&marble_driver,
+	&marble2_driver,
+	&marblea_driver,
+	&peterpak_driver,
+	&indytemp_driver,
+	&roadrunn_driver,
+	&roadblst_driver,
+	/* later Atari games */
+	&gauntlet_driver,
+	&gauntir1_driver,
+	&gauntir2_driver,
+	&gaunt2p_driver,
+	&gaunt2_driver,
+	&atetris_driver,
+	&atetrisa_driver,
+	&atetrisb_driver,
+	&atetcktl_driver,
+	&toobin_driver,
+	/* Rock-ola games */
+	&vanguard_driver,
+	&nibbler_driver,
+	&fantasy_driver,
+	&warpwarp_driver,
+	/* Technos games */
+	&mystston_driver,
+	&matmania_driver,
+	&excthour_driver,
+	&maniach_driver,
+	&blockout_driver,
+	/* Stern "Berzerk hardware" games */
+	&berzerk_driver,
+	&berzerk1_driver,
+	&frenzy_driver,
+	&frenzy1_driver,
+	/* GamePlan games */
+	&megatack_driver,
+	&killcom_driver,
+	/* "stratovox hardware" games */
+	&route16_driver,
+	&stratvox_driver,
+
+	&bagman_driver,
+	&sbagman_driver,
+	&panic_driver,
+	&panica_driver,
+	&spacefb_driver,
+	&tutankhm_driver,
+	&ccastles_driver,
+	&blueprnt_driver,
+	&omegrace_driver,
+	&bankp_driver,
+	&espial_driver,
+	&espiale_driver,
+	&cloak_driver,
+	&champbas_driver,
+	&exerion_driver,
+	&foodf_driver,
+	&jack_driver,
+	&vastar_driver,
+	&citycon_driver,
+	&jedi_driver,
+	&tankbatt_driver,
+	&liberatr_driver,
+	&wiz_driver,
+	&fastfred_driver,
+	&flyboy_driver,
+	&thepit_driver,
+	&toki_driver,
+	&snowbros_driver,
+	&gundealr_driver,
+	&blockade_driver,
+	&comotion_driver,
+	&leprechn_driver,
+	&dday_driver,
+	0	/* end of array */
 };

@@ -1,4 +1,4 @@
-CC	= gcc
+C	= gcc
 LD	= gcc
 
 DEFS   = -DLSB_FIRST
@@ -11,36 +11,214 @@ STRIP_OR_NOT=
 
 #-DX86_ASM
 
-CFLAGS = ${DEBUG_OR_OPTIMIZE} -DUNIX -Isrc -Isrc/Z80 -I/usr/include/SDL2 -Wall #-Werror
-LIBS   = -lSDL2 -lSDL2_mixer
-OBJS   = obj/mame.o obj/common.o obj/driver.o obj/osdepend.o \
-         obj/machine/pacman.o obj/vidhrdw/pacman.o obj/drivers/pacman.o \
-				 obj/drivers/crush.o \
-         obj/vidhrdw/pengo.o obj/sndhrdw/pengo.o obj/drivers/pengo.o \
-         obj/machine/ladybug.o obj/vidhrdw/ladybug.o obj/sndhrdw/ladybug.o obj/drivers/ladybug.o \
-         obj/machine/mrdo.o obj/vidhrdw/mrdo.o obj/drivers/mrdo.o \
+CFLAGS = ${DEBUG_OR_OPTIMIZE} -DUNIX -Isrc/sdl -Isrc -Isrc/Z80 -I/usr/include/SDL2 # -Wall -Werror
+LIBS   = -lSDL2 -lSDL2_mixer -lm
+OBJS   = obj/mame.o obj/common.o obj/usrintrf.o obj/driver.o \
+         obj/cpuintrf.o obj/memory.o obj/timer.o obj/gfxlayer.o \
+         obj/inptport.o obj/cheat.o obj/unzip.o obj/inflate.o \
+         obj/audit.o \
+         obj/sndhrdw/adpcm.o \
+         obj/sndhrdw/psg.o obj/sndhrdw/psgintf.o \
+         obj/sndhrdw/2151intf.o obj/sndhrdw/fm.o \
+         obj/sndhrdw/ym2151.o obj/sndhrdw/ym3812.o \
+		 obj/sndhrdw/tms5220.o obj/sndhrdw/5220intf.o obj/sndhrdw/vlm5030.o \
+		 obj/sndhrdw/pokey.o obj/sndhrdw/pokyintf.o obj/sndhrdw/sn76496.o \
+		 obj/sndhrdw/nes.o obj/sndhrdw/nesintf.o \
+		 obj/sndhrdw/votrax.o obj/sndhrdw/dac.o obj/sndhrdw/samples.o \
+         obj/machine/z80fmly.o obj/machine/6821pia.o \
+         obj/vidhrdw/generic.o obj/sndhrdw/generic.o \
+         obj/vidhrdw/vector.o obj/vidhrdw/avgdvg.o obj/machine/mathbox.o \
+         obj/sndhrdw/namco.o \
+         obj/machine/pacman.o obj/drivers/pacman.o \
+         obj/drivers/maketrax.o \
+         obj/machine/jrpacman.o obj/drivers/jrpacman.o obj/vidhrdw/jrpacman.o \
+         obj/vidhrdw/pengo.o obj/drivers/pengo.o \
+         obj/vidhrdw/ladybug.o obj/drivers/ladybug.o \
+         obj/vidhrdw/mrdo.o obj/drivers/mrdo.o \
+         obj/machine/docastle.o obj/vidhrdw/docastle.o obj/drivers/docastle.o \
+         obj/drivers/dowild.o \
          obj/vidhrdw/cclimber.o obj/sndhrdw/cclimber.o obj/drivers/cclimber.o \
-         obj/vidhrdw/ckong.o obj/drivers/ckong.o \
-         obj/vidhrdw/dkong.o obj/drivers/dkong.o \
+         obj/drivers/ckongs.o \
+         obj/vidhrdw/seicross.o obj/drivers/seicross.o \
+         obj/vidhrdw/dkong.o obj/sndhrdw/dkong.o obj/drivers/dkong.o \
          obj/machine/bagman.o obj/vidhrdw/bagman.o obj/drivers/bagman.o \
-         obj/vidhrdw/wow.o obj/drivers/wow.o \
-         obj/drivers/galaxian.o \
-         obj/vidhrdw/mooncrst.o obj/sndhrdw/mooncrst.o obj/drivers/mooncrst.o \
-         obj/vidhrdw/moonqsr.o obj/drivers/moonqsr.o \
-         obj/drivers/theend.o \
-         obj/vidhrdw/frogger.o obj/drivers/frogger.o \
-         obj/machine/scramble.o obj/vidhrdw/scramble.o obj/drivers/scramble.o \
+         obj/machine/wow.o obj/vidhrdw/wow.o obj/sndhrdw/wow.o obj/drivers/wow.o \
+         obj/sndhrdw/gorf.o \
+         obj/vidhrdw/galaxian.o obj/drivers/galaxian.o \
+         obj/sndhrdw/mooncrst.o obj/drivers/mooncrst.o \
+         obj/vidhrdw/frogger.o obj/sndhrdw/frogger.o obj/drivers/frogger.o \
+         obj/machine/scramble.o obj/sndhrdw/scramble.o obj/drivers/scramble.o \
          obj/drivers/scobra.o \
          obj/vidhrdw/amidar.o obj/drivers/amidar.o \
+         obj/machine/warpwarp.o obj/vidhrdw/warpwarp.o obj/drivers/warpwarp.o \
+         obj/vidhrdw/popeye.o obj/drivers/popeye.o \
          obj/vidhrdw/rallyx.o obj/drivers/rallyx.o \
+         obj/drivers/locomotn.o \
          obj/vidhrdw/pooyan.o obj/drivers/pooyan.o \
-         obj/machine/phoenix.o obj/vidhrdw/phoenix.o obj/drivers/phoenix.o \
-         obj/machine/carnival.o obj/vidhrdw/carnival.o obj/drivers/carnival.o \
-         obj/machine/invaders.o obj/vidhrdw/invaders.o obj/drivers/invaders.o \
-         obj/vidhrdw/mario.o obj/drivers/mario.o \
-         obj/machine/zaxxon.o obj/vidhrdw/zaxxon.o obj/drivers/zaxxon.o \
+         obj/vidhrdw/timeplt.o obj/drivers/timeplt.o \
+         obj/vidhrdw/phoenix.o obj/sndhrdw/phoenix.o obj/drivers/phoenix.o \
+         obj/sndhrdw/pleiads.o \
+         obj/machine/carnival.o obj/vidhrdw/carnival.o obj/sndhrdw/carnival.o obj/drivers/carnival.o \
+         obj/machine/invaders.o obj/vidhrdw/invaders.o obj/sndhrdw/invaders.o obj/drivers/invaders.o \
+         obj/vidhrdw/mario.o obj/sndhrdw/mario.o obj/drivers/mario.o \
+         obj/vidhrdw/zaxxon.o obj/sndhrdw/zaxxon.o obj/drivers/zaxxon.o \
+         obj/vidhrdw/congo.o obj/sndhrdw/congo.o obj/drivers/congo.o \
          obj/vidhrdw/bombjack.o obj/drivers/bombjack.o \
-         obj/Z80/Z80.o
+         obj/machine/centiped.o obj/vidhrdw/centiped.o obj/drivers/centiped.o \
+         obj/machine/milliped.o obj/vidhrdw/milliped.o obj/drivers/milliped.o \
+         obj/machine/warlord.o obj/vidhrdw/warlord.o obj/drivers/warlord.o \
+         obj/vidhrdw/rockola.o obj/sndhrdw/rockola.o obj/drivers/rockola.o \
+         obj/vidhrdw/mpatrol.o  obj/sndhrdw/mpatrol.o obj/drivers/mpatrol.o \
+         obj/vidhrdw/travrusa.o obj/drivers/travrusa.o \
+         obj/vidhrdw/btime.o obj/drivers/btime.o \
+         obj/vidhrdw/bnj.o obj/drivers/bnj.o \
+         obj/vidhrdw/jumpbug.o obj/drivers/jumpbug.o \
+         obj/vidhrdw/gberet.o obj/drivers/gberet.o \
+         obj/vidhrdw/exidy.o obj/drivers/exidy.o \
+		 obj/sndhrdw/targ.o \
+         obj/machine/gottlieb.o obj/vidhrdw/gottlieb.o obj/sndhrdw/gottlieb.o \
+         obj/drivers/reactor.o obj/drivers/qbert.o obj/drivers/krull.o \
+         obj/drivers/qbertqub.o obj/drivers/mplanets.o obj/drivers/3stooges.o \
+         obj/machine/taito.o obj/vidhrdw/taito.o obj/drivers/taito.o \
+         obj/machine/panic.o obj/vidhrdw/panic.o obj/drivers/panic.o \
+         obj/machine/arabian.o obj/vidhrdw/arabian.o obj/drivers/arabian.o \
+         obj/vidhrdw/1942.o obj/drivers/1942.o \
+         obj/machine/vulgus.o obj/vidhrdw/vulgus.o obj/drivers/vulgus.o \
+         obj/vidhrdw/commando.o obj/drivers/commando.o \
+         obj/machine/gng.o obj/vidhrdw/gng.o obj/drivers/gng.o \
+         obj/vidhrdw/sonson.o obj/drivers/sonson.o \
+         obj/vidhrdw/exedexes.o obj/drivers/exedexes.o \
+         obj/sndhrdw/gyruss.o obj/vidhrdw/gyruss.o obj/drivers/gyruss.o \
+         obj/machine/superpac.o obj/vidhrdw/superpac.o obj/drivers/superpac.o \
+         obj/machine/galaga.o obj/vidhrdw/galaga.o obj/drivers/galaga.o \
+         obj/machine/kangaroo.o obj/vidhrdw/kangaroo.o obj/drivers/kangaroo.o \
+         obj/vidhrdw/kungfum.o obj/drivers/kungfum.o \
+         obj/machine/qix.o obj/vidhrdw/qix.o obj/drivers/qix.o \
+         obj/machine/williams.o obj/vidhrdw/williams.o obj/drivers/williams.o \
+         obj/machine/ticket.o \
+         obj/sndhrdw/starforc.o obj/vidhrdw/starforc.o obj/drivers/starforc.o \
+         obj/vidhrdw/naughtyb.o obj/drivers/naughtyb.o \
+         obj/machine/mystston.o obj/vidhrdw/mystston.o obj/drivers/mystston.o \
+         obj/vidhrdw/matmania.o obj/drivers/matmania.o \
+         obj/vidhrdw/tutankhm.o obj/drivers/tutankhm.o \
+         obj/machine/spacefb.o obj/vidhrdw/spacefb.o obj/drivers/spacefb.o \
+         obj/machine/mappy.o obj/vidhrdw/mappy.o obj/drivers/mappy.o \
+         obj/vidhrdw/ccastles.o obj/drivers/ccastles.o \
+         obj/vidhrdw/yiear.o obj/sndhrdw/yiear.o obj/drivers/yiear.o \
+         obj/machine/digdug.o obj/vidhrdw/digdug.o obj/drivers/digdug.o \
+         obj/machine/asteroid.o obj/sndhrdw/asteroid.o \
+		 obj/machine/atari_vg.o obj/drivers/asteroid.o \
+         obj/drivers/bwidow.o \
+         obj/sndhrdw/bzone.o  obj/drivers/bzone.o \
+         obj/sndhrdw/redbaron.o \
+         obj/drivers/tempest.o \
+         obj/machine/starwars.o obj/machine/swmathbx.o obj/drivers/starwars.o obj/sndhrdw/starwars.o \
+         obj/machine/mhavoc.o obj/drivers/mhavoc.o \
+         obj/machine/quantum.o obj/drivers/quantum.o \
+         obj/machine/missile.o obj/vidhrdw/missile.o obj/drivers/missile.o \
+         obj/machine/bublbobl.o obj/vidhrdw/bublbobl.o obj/drivers/bublbobl.o \
+         obj/vidhrdw/eggs.o obj/drivers/eggs.o \
+         obj/machine/bosco.o obj/sndhrdw/bosco.o obj/vidhrdw/bosco.o obj/drivers/bosco.o \
+         obj/vidhrdw/yard.o obj/drivers/yard.o \
+         obj/vidhrdw/blueprnt.o obj/drivers/blueprnt.o \
+         obj/vidhrdw/sega.o obj/sndhrdw/sega.o obj/machine/sega.o obj/drivers/sega.o \
+         obj/vidhrdw/segar.o obj/sndhrdw/segar.o obj/machine/segar.o obj/drivers/segar.o \
+         obj/sndhrdw/monsterb.o \
+         obj/drivers/omegrace.o \
+         obj/vidhrdw/xevious.o obj/machine/xevious.o obj/drivers/xevious.o \
+         obj/vidhrdw/bankp.o obj/drivers/bankp.o \
+         obj/vidhrdw/sbasketb.o obj/drivers/sbasketb.o \
+         obj/machine/mcr.o \
+         obj/vidhrdw/mcr1.o obj/vidhrdw/mcr2.o obj/vidhrdw/mcr3.o \
+         obj/drivers/mcr1.o obj/drivers/mcr2.o obj/drivers/mcr3.o \
+         obj/machine/espial.o obj/vidhrdw/espial.o obj/drivers/espial.o \
+         obj/machine/tp84.o obj/vidhrdw/tp84.o obj/drivers/tp84.o \
+         obj/vidhrdw/mikie.o obj/drivers/mikie.o \
+         obj/vidhrdw/ironhors.o obj/drivers/ironhors.o \
+         obj/vidhrdw/shaolins.o obj/drivers/shaolins.o \
+         obj/machine/rastan.o obj/vidhrdw/rastan.o obj/sndhrdw/rastan.o obj/drivers/rastan.o \
+         obj/machine/cloak.o obj/vidhrdw/cloak.o obj/drivers/cloak.o \
+         obj/machine/lwings.o obj/vidhrdw/lwings.o obj/drivers/lwings.o \
+         obj/machine/berzerk.o obj/vidhrdw/berzerk.o obj/sndhrdw/berzerk.o obj/drivers/berzerk.o \
+         obj/machine/capbowl.o obj/vidhrdw/capbowl.o obj/drivers/capbowl.o \
+         obj/vidhrdw/1943.o obj/drivers/1943.o \
+         obj/vidhrdw/gunsmoke.o obj/drivers/gunsmoke.o \
+         obj/vidhrdw/blktiger.o obj/drivers/blktiger.o \
+         obj/vidhrdw/tecmo.o obj/drivers/tecmo.o \
+         obj/vidhrdw/gaiden.o obj/drivers/gaiden.o \
+         obj/vidhrdw/sidearms.o obj/drivers/sidearms.o \
+         obj/vidhrdw/srumbler.o obj/drivers/srumbler.o \
+         obj/vidhrdw/champbas.o obj/drivers/champbas.o \
+         obj/vidhrdw/pbaction.o obj/drivers/pbaction.o \
+         obj/vidhrdw/exerion.o obj/drivers/exerion.o \
+         obj/machine/arkanoid.o obj/vidhrdw/arkanoid.o obj/drivers/arkanoid.o \
+         obj/machine/slapstic.o \
+         obj/machine/gauntlet.o obj/vidhrdw/gauntlet.o obj/drivers/gauntlet.o \
+         obj/machine/atarisy1.o obj/vidhrdw/atarisy1.o obj/drivers/atarisy1.o \
+         obj/machine/foodf.o obj/vidhrdw/foodf.o obj/drivers/foodf.o \
+         obj/vidhrdw/circus.o obj/drivers/circus.o \
+         obj/machine/konami.o obj/vidhrdw/trackfld.o obj/sndhrdw/trackfld.o obj/drivers/trackfld.o \
+         obj/vidhrdw/hyperspt.o obj/drivers/hyperspt.o \
+         obj/vidhrdw/rocnrope.o obj/drivers/rocnrope.o \
+         obj/vidhrdw/circusc.o obj/drivers/circusc.o \
+         obj/vidhrdw/pingpong.o obj/drivers/pingpong.o \
+         obj/vidhrdw/astrof.o obj/drivers/astrof.o \
+         obj/machine/sprint2.o obj/vidhrdw/sprint2.o obj/drivers/sprint2.o \
+         obj/vidhrdw/punchout.o obj/sndhrdw/punchout.o obj/drivers/punchout.o \
+         obj/vidhrdw/firetrap.o obj/drivers/firetrap.o \
+         obj/vidhrdw/jack.o obj/drivers/jack.o \
+         obj/machine/vastar.o obj/vidhrdw/vastar.o obj/drivers/vastar.o \
+         obj/vidhrdw/brkthru.o obj/drivers/brkthru.o \
+         obj/vidhrdw/citycon.o obj/drivers/citycon.o \
+         obj/machine/starfire.o obj/vidhrdw/starfire.o obj/drivers/starfire.o \
+         obj/machine/sbrkout.o obj/vidhrdw/sbrkout.o obj/drivers/sbrkout.o \
+         obj/vidhrdw/superqix.o obj/drivers/superqix.o \
+         obj/machine/jedi.o obj/vidhrdw/jedi.o obj/sndhrdw/jedi.o obj/drivers/jedi.o \
+         obj/vidhrdw/gameplan.o obj/drivers/gameplan.o \
+         obj/machine/dominos.o obj/vidhrdw/dominos.o obj/drivers/dominos.o \
+         obj/vidhrdw/jumpcoas.o obj/drivers/jumpcoas.o \
+         obj/vidhrdw/tankbatt.o obj/drivers/tankbatt.o \
+         obj/machine/rainbow.o obj/drivers/rainbow.o \
+         obj/vidhrdw/nitedrvr.o obj/machine/nitedrvr.o obj/drivers/nitedrvr.o \
+         obj/vidhrdw/lrunner.o obj/drivers/lrunner.o \
+         obj/vidhrdw/liberatr.o obj/machine/liberatr.o obj/drivers/liberatr.o \
+         obj/vidhrdw/wiz.o obj/drivers/wiz.o \
+         obj/vidhrdw/blockout.o obj/drivers/blockout.o \
+         obj/vidhrdw/fastfred.o obj/drivers/fastfred.o \
+         obj/vidhrdw/thepit.o obj/drivers/thepit.o \
+         obj/vidhrdw/bsktball.o obj/machine/bsktball.o obj/drivers/bsktball.o \
+         obj/vidhrdw/copsnrob.o obj/machine/copsnrob.o obj/drivers/copsnrob.o \
+         obj/vidhrdw/toki.o obj/sndhrdw/toki.o obj/drivers/toki.o \
+         obj/vidhrdw/snowbros.o obj/drivers/snowbros.o \
+         obj/machine/cps1.o obj/vidhrdw/cps1.o obj/drivers/cps1.o \
+         obj/vidhrdw/gundealr.o obj/drivers/gundealr.o \
+         obj/machine/tnzs.o obj/vidhrdw/tnzs.o obj/drivers/tnzs.o \
+         obj/vidhrdw/route16.o obj/drivers/route16.o \
+         obj/vidhrdw/wc90.o obj/drivers/wc90.o \
+         obj/vidhrdw/wc90b.o obj/drivers/wc90b.o \
+         obj/drivers/twincobr.o \
+         obj/machine/dec0.o obj/vidhrdw/dec0.o obj/drivers/dec0.o \
+         obj/vidhrdw/karnov.o obj/drivers/karnov.o \
+         obj/machine/toobin.o obj/vidhrdw/toobin.o obj/drivers/toobin.o \
+         obj/vidhrdw/tigeroad.o obj/drivers/tigeroad.o \
+         obj/vidhrdw/blockade.o obj/drivers/blockade.o \
+         obj/machine/leprechn.o obj/vidhrdw/leprechn.o obj/drivers/leprechn.o \
+         obj/vidhrdw/atetris.o obj/drivers/atetris.o \
+         obj/vidhrdw/dday.o obj/drivers/dday.o \
+         obj/machine/system8.o obj/drivers/system8.o \
+         obj/Z80/Z80.o obj/M6502/M6502.o obj/I86/I86.o obj/I8039/I8039.o \
+		 obj/M6809/m6809.o obj/M6808/m6808.o obj/M6805/m6805.o \
+         obj/M68000/opcode0.o obj/M68000/opcode1.o obj/M68000/opcode2.o obj/M68000/opcode3.o obj/M68000/opcode4.o obj/M68000/opcode5.o \
+         obj/M68000/opcode6.o obj/M68000/opcode7.o obj/M68000/opcode8.o obj/M68000/opcode9.o obj/M68000/opcodeb.o \
+         obj/M68000/opcodec.o obj/M68000/opcoded.o obj/M68000/opcodee.o obj/M68000/mc68kmem.o \
+         obj/M68000/cpufunc.o \
+         obj/mamedbg.o obj/asg.o obj/M6502/6502dasm.o \
+         obj/M6809/6809dasm.o obj/M6808/6808dasm.o obj/M6805/6805dasm.o \
+         obj/M68000/m68kdasm.o \
+		 obj/osdepend.o obj/sdl/stricmp.o obj/sdl/fileio.o
+
+#         obj/msdos/msdos.o obj/msdos/video.o obj/msdos/vector.o obj/msdos/sound.o \
+#         obj/msdos/input.o obj/msdos/fileio.o obj/msdos/config.o obj/msdos/fronthlp.o
 
 VPATH = src src/Z80
 
@@ -48,11 +226,27 @@ all: mame
 
 obj:
 	mkdir -p $@
+	mkdir -p $@/sdl
 	mkdir -p $@/drivers
 	mkdir -p $@/machine
 	mkdir -p $@/vidhrdw
 	mkdir -p $@/sndhrdw
 	mkdir -p $@/Z80
+	mkdir -p $@/M68000
+	mkdir -p $@/M6809
+	mkdir -p $@/M6808
+	mkdir -p $@/M6805
+	mkdir -p $@/M6502
+	mkdir -p $@/I86
+	mkdir -p $@/I8039
+
+fromdos_everything:
+	for i in `find src | grep \\\.c$$` ; do fromdos "$$i" ; done
+	for i in `find src | grep \\\.h$$` ; do fromdos "$$i" ; done
+	fromdos *.txt
+
+wavtosam/wavtosam:
+	cd wavtosam; ${MAKE} wavtosam
 
 mame: obj $(OBJS)
 	$(LD) ${DEBUG_OR_OPTIMIZE} ${STRIP_OR_NOT} -o $@ $(OBJS) $(LIBS)
@@ -75,7 +269,9 @@ clean:
 	rm -f obj/crush/*.o
 	rm -f obj/pengo/*.o
 	rm -f obj/ladybug/*.o
+	rm -f wavtosam/wavtosam
 
 cleanall: clean
-	rm -f src/Z80/*.o src/Z80/z80dasm mame roms/*/*.dsw #dsw is dip switch settings
-	rm -rf obj
+	rm -f src/Z80/*.o src/Z80/z80dasm mame roms/*/*.dsw romcmp #dsw is dip switch settings
+	-rmdir roms/* >/dev/null 2>&1
+	rm -rf obj mame.obj

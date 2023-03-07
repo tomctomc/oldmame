@@ -1,91 +1,18 @@
-/*
-** $Id:$
-**
-** File: psg/psg.h -- header file for software implementation of AY-3-8910
-**		Programmable sound generator.  This module is used in my
-**		GYRUSS emulator.
-**
-** Based on: Sound.c, (C) Ville Hallik (ville@physic.ut.ee) 1996
-**
-** SCC emulation removed.  Made modular and capable of multiple PSG
-** emulation.
-**
-** Modifications (C) 1996 Michael Cuddy, Fen's Ende Software.
-** http://www.fensende.com/Users/mcuddy
-**
-*/
-#ifndef _H_PSG_PSG_
-#define _H_PSG_PSG_
+#ifndef PSG_H
+#define PSG_H
 
-/* register id's */
-#define AY_AFINE	(0)
-#define AY_ACOARSE	(1)
-#define AY_BFINE	(2)
-#define AY_BCOARSE	(3)
-#define AY_CFINE	(4)
-#define AY_CCOARSE	(5)
-#define AY_NOISEPER	(6)
-#define AY_ENABLE	(7)
-#define AY_AVOL		(8)
-#define AY_BVOL		(9)
-#define AY_CVOL		(10)
-#define AY_EFINE	(11)
-#define AY_ECOARSE	(12)
-#define AY_ESHAPE	(13)
 
-#define AY_PORTA	(14)
-#define AY_PORTB	(15)
-
-/*typedef unsigned char byte;*/
-
-/* default clock frequency, frequency in MHz * 100 */
-#ifndef AY8910_CLOCK
-#define AY8910_CLOCK (1832727040)	/* 1.832727040 MHZ */
-#endif /* !defined AY8910_CLOCK */
-
-/* SAMPLE_16BIT is not supported, yet */
-#ifndef SAMPLE_16BIT
-typedef unsigned char SAMPLE;
-/* #define AUDIO_CONV(A) (128+(A))*/	/* use this macro for signed samples */
-#define AUDIO_CONV(A) (A)		/* use this macro for unsigned samples */
-#else
-typedef unsigned short SAMPLE;
-#endif
-
-/* forward declaration of typedef, so we can use this in next typedef ... */
-typedef struct ay8910_f AY8910;
-
-/*
-** this is a handler for the AY8910's I/O ports -- called when
-** AYWriteReg(AY_PORTA) or AYWriteReg(AY_PORTB) is called.
-*/
-typedef byte (*AYPortHandler)(AY8910 *, int port, int iswrite, byte val);
-
-/* here's the virtual AY8910 ... */
-struct ay8910_f {
-    SAMPLE *Buf;	/* sound buffer */
-    int UserBuffer;	/* if user provided buffers */
-    AYPortHandler Port[2];	/* 'A' and 'B' port */
-    byte Regs[16];
-
-    /* state variables */
-    int Incr0, Incr1, Incr2;
-    int Increnv, Incrnoise;
-    int StateNoise, NoiseGen;
-    int Counter0, Counter1, Counter2, Countenv, Countnoise;
-    int Vol0, Vol1, Vol2, Volnoise, Envelope;
-};
+#define MAX_PSG 5
 
 /*
 ** Initialize AY8910 emulator(s).
 **
 ** 'num' is the number of virtual AY8910's to allocate
+** 'clock' is master clock rate (Hz)
 ** 'rate' is sampling rate and 'bufsiz' is the size of the
 ** buffer that should be updated at each interval
-** varargs are user-supplied buffers, one for each PSG (or NULL
-** to let PSG library allocate buffers)
 */
-int AYInit(int num, int rate, int bufsiz, ...);
+int AYInit(int num, int clock, int rate, int bitsize, int bufsiz, void **buffer );
 
 /*
 ** shutdown the AY8910 emulators .. make sure that no sound system stuff
@@ -104,6 +31,8 @@ void AYResetChip(int num);
 */
 void AYUpdate(void);
 
+void AYUpdateOne(int chip , int endp );
+
 /*
 ** write 'v' to register 'r' on AY8910 chip number 'n'
 */
@@ -112,26 +41,29 @@ void AYWriteReg(int n, int r, int v);
 /*
 ** read register 'r' on AY8910 chip number 'n'
 */
-byte AYReadReg(int n, int r);
+unsigned char AYReadReg(int n, int r);
 
 
 /*
-** return pointer to synthesized data
+** set clockrate for one
 */
-SAMPLE *AYBuffer(int n);
-/*
-** setup buffer
-*/
-void AYSetBuffer(int n, SAMPLE *buf);
+void AYSetClock(int n,int clock,int rate);
 
 /*
-** set handler function for I/O port
+** set output gain
+**
+** The gain is expressed in 0.2dB increments, e.g. a gain of 10 is an increase
+** of 2dB. Note that the gain only affects sounds not playing at full volume,
+** since the ones at full volume are already played at the maximum intensity
+** allowed by the sound card.
+** 0x00 is the default.
+** 0xff is the maximum allowed value.
 */
-void AYSetPortHandler(int n, int port, AYPortHandler func);
+void AYSetGain(int n,int gain);
 
-#endif /* _H_PSG_PSG_ */
 /*
-** Change Log
-** ----------
-** $Log:$
+** You have to provide this function
 */
+unsigned char AYPortHandler(int num,int port, int iswrite, unsigned char val);
+
+#endif

@@ -7,21 +7,11 @@
 ***************************************************************************/
 
 #include "driver.h"
+#include "vidhrdw/generic.h"
 
 
-#define VIDEO_RAM_SIZE 0x400
 
-
-unsigned char *bombjack_videoram;
-unsigned char *bombjack_colorram;
-unsigned char *bombjack_spriteram;
 unsigned char *bombjack_paletteram;
-static unsigned char dirtybuffer[VIDEO_RAM_SIZE];	/* keep track of modified portions of the screen */
-											/* to speed up video refresh */
-static unsigned char dirtycolor[16];	/* keep track of modified colors as well */
-static struct osd_bitmap *tmpbitmap;
-
-static int background_image;
 
 
 
@@ -35,10 +25,25 @@ static int background_image;
   Since the graphics use 3 bitplanes, hence 8 colors, this makes for 16
   different color codes.
 
-  MAME currently doesn't support dynamic palette creation. As a temporary
-  workaround, we create here a 256 colors (8 bits, vs. the original 12)
-  palette which will be static, and dynamically create a lookup table at
-  run time which approximates the original palette.
+  I don't know the exact values of the resistors between the RAM and the
+  RGB output. I assumed these values (the same as Commando)
+  bit 7 -- 220 ohm resistor  -- GREEN
+        -- 470 ohm resistor  -- GREEN
+        -- 1  kohm resistor  -- GREEN
+        -- 2.2kohm resistor  -- GREEN
+        -- 220 ohm resistor  -- RED
+        -- 470 ohm resistor  -- RED
+        -- 1  kohm resistor  -- RED
+  bit 0 -- 2.2kohm resistor  -- RED
+
+  bit 7 -- unused
+        -- unused
+        -- unused
+        -- unused
+        -- 220 ohm resistor  -- BLUE
+        -- 470 ohm resistor  -- BLUE
+        -- 1  kohm resistor  -- BLUE
+  bit 0 -- 2.2kohm resistor  -- BLUE
 
 ***************************************************************************/
 void bombjack_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
@@ -46,99 +51,98 @@ void bombjack_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 	int i;
 
 
-	for (i = 0;i < 256;i++)
+	/* the palette will be initialized by the game. We just set it to some */
+	/* pre-cooked values so the startup copyright notice can be displayed. */
+	for (i = 0;i < Machine->drv->total_colors;i++)
 	{
-		int bits;
-
-		bits = (i >> 0) & 0x07;
-		palette[3*i] = (bits >> 1) | (bits << 2) | (bits << 5);
-		bits = (i >> 3) & 0x07;
-		palette[3*i + 1] = (bits >> 1) | (bits << 2) | (bits << 5);
-		bits = (i >> 6) & 0x03;
-		palette[3*i + 2] = bits | (bits >> 2) | (bits << 4) | (bits << 6);
+		*(palette++) = ((i & 1) >> 0) * 0xff;
+		*(palette++) = ((i & 2) >> 1) * 0xff;
+		*(palette++) = ((i & 4) >> 2) * 0xff;
 	}
 
-	for (i = 0;i < 256;i++)
+	/* initialize the color table */
+	for (i = 0;i < Machine->drv->total_colors;i++)
 		colortable[i] = i;
-
-	/* provide a default palette so the ROM copyright notice at startup can be read */
-	for (i = 256;i < 256+128;i++)
-		colortable[i] = (i-256) % 8;
-}
-
-
-
-int bombjack_vh_start(void)
-{
-	background_image = 0;
-
-	if ((tmpbitmap = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
-		return 1;
-
-	return 0;
-}
-
-
-
-/***************************************************************************
-
-  Stop the video hardware emulation.
-
-***************************************************************************/
-void bombjack_vh_stop(void)
-{
-	osd_free_bitmap(tmpbitmap);
-}
-
-
-
-void bombjack_videoram_w(int offset,int data)
-{
-	if (bombjack_videoram[offset] != data)
-	{
-		dirtybuffer[offset] = 1;
-
-		bombjack_videoram[offset] = data;
-	}
-}
-
-
-
-void bombjack_colorram_w(int offset,int data)
-{
-	if (bombjack_colorram[offset] != data)
-	{
-		dirtybuffer[offset] = 1;
-
-		bombjack_colorram[offset] = data;
-	}
 }
 
 
 
 void bombjack_paletteram_w(int offset,int data)
 {
-	if (bombjack_paletteram[offset] != data)
-	{
-		dirtycolor[offset / 16] = 1;
+	int bit0,bit1,bit2,bit3;
+	int r,g,b,val;
 
-		bombjack_paletteram[offset] = data;
-	}
+
+	bombjack_paletteram[offset] = data;
+
+	/* red component */
+	val = bombjack_paletteram[offset & ~1];
+	bit0 = (val >> 0) & 0x01;
+	bit1 = (val >> 1) & 0x01;
+	bit2 = (val >> 2) & 0x01;
+	bit3 = (val >> 3) & 0x01;
+	r = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+
+	/* green component */
+	val = bombjack_paletteram[offset & ~1];
+	bit0 = (val >> 4) & 0x01;
+	bit1 = (val >> 5) & 0x01;
+	bit2 = (val >> 6) & 0x01;
+	bit3 = (val >> 7) & 0x01;
+	g = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+
+	/* blue component */
+	val = bombjack_paletteram[offset | 1];
+	bit0 = (val >> 0) & 0x01;
+	bit1 = (val >> 1) & 0x01;
+	bit2 = (val >> 2) & 0x01;
+	bit3 = (val >> 3) & 0x01;
+	b = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+
+	osd_modify_pen(Machine->pens[offset / 2],r,g,b);
 }
 
 
 
 void bombjack_background_w(int offset,int data)
 {
-	if (background_image != data)
+	int base,offs,code,attr;
+
+
+	base = 0x200 * (data & 0x07);
+
+	for (offs = 0;offs < 0x100;offs++)
 	{
-		int i;
+		if (data & 0x10)
+		{
+			code = Machine->memory_region[2][base + offs];
+			attr = Machine->memory_region[2][base + offs + 0x100];
+		}
+		else
+		{
+			code = 0xff;
+			attr = 0;
+		}
 
-		for (i = 0;i < VIDEO_RAM_SIZE;i++)
-			dirtybuffer[i] = 1;
-
-		background_image = data;
+		set_tile_attributes(1,			/* layer number */
+			offs,						/* x/y position */
+			0,code,						/* tile bank, code */
+			attr & 0x0f,				/* color */
+			attr & 0x40,attr & 0x80,	/* flip x/y */
+			TILE_TRANSPARENCY_OPAQUE);	/* transparency */
 	}
+}
+
+
+
+void bombjack_updatehook0(int offset)
+{
+	set_tile_attributes(0,											/* layer number */
+		offset,														/* x/y position */
+		0,videoram00[offset] + ((videoram01[offset] & 0x10) << 4),	/* tile bank, code */
+		videoram01[offset] & 0x0f,									/* color */
+		0,0,														/* flip x/y */
+		TILE_TRANSPARENCY_PEN);										/* transparency */
 }
 
 
@@ -152,109 +156,78 @@ void bombjack_background_w(int offset,int data)
 ***************************************************************************/
 void bombjack_vh_screenrefresh(struct osd_bitmap *bitmap)
 {
-	int i,offs,col;
+	int offs;
 
 
-	/* rebuild the color lookup table */
-	for (i = 0;i < 128;i++)
-	{
-		col = (bombjack_paletteram[2*i] >> 1) & 0x07;	/* red component */
-		col |= (bombjack_paletteram[2*i] >> 2) & 0x38;	/* green component */
-		col |= (bombjack_paletteram[2*i + 1] << 4) & 0xc0;	/* blue component */
-		//TOMCXXXXX Machine->gfx[0]->colortable[i] = Machine->gfx[4]->colortable[col];
-	}
-
-
-	/* for every character in the Video RAM, check if it has been modified */
-	/* since last time and update it accordingly. */
-	for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
-	{
-		int sx,sy;
-
-
-		if (dirtybuffer[offs] || dirtycolor[bombjack_colorram[offs] & 0x0f])
-		{
-			sx = 8 * (31 - offs / 32);
-			sy = 8 * (offs % 32);
-
-			/* draw the background (this can be handled better) */
-			if (background_image & 0x10)
-			{
-			/* don't redraw the background if only the foreground color has changed */
-				if (dirtybuffer[offs])
-				{
-					struct rectangle clip;
-					int bx,by;
-					int base;
-
-
-					clip.min_x = sx;
-					clip.max_x = sx+7;
-					clip.min_y = sy;
-					clip.max_y = sy+7;
-
-					bx = sx & 0xf0;
-					by = sy & 0xf0;
-
-					base = 0x200 * (background_image & 0x07);
-
-					drawgfx(tmpbitmap,Machine->gfx[1],
-							Machine->memory_region[2][base+16*(15-bx/16)+by/16],
-							Machine->memory_region[2][base+16*(15-bx/16)+by/16+0x100],
-							0,0,
-							bx,by,
-							&clip,TRANSPARENCY_NONE,0);
-				}
-
-				drawgfx(tmpbitmap,Machine->gfx[0],
-							bombjack_videoram[offs] + 16 * (bombjack_colorram[offs] & 0x10),
-							bombjack_colorram[offs] & 0x0f,
-							0,0,
-							sx,sy,
-							&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
-			}
-			else
-				drawgfx(tmpbitmap,Machine->gfx[0],
-							bombjack_videoram[offs] + 16 * (bombjack_colorram[offs] & 0x10),
-							bombjack_colorram[offs] & 0x0f,
-							0,0,
-							sx,sy,
-							&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
-
-
-			dirtybuffer[offs] = 0;
-		}
-	}
-
-
-	for (i = 0;i < 16;i++)
-		dirtycolor[i] = 0;
-
-
-	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	set_tile_layer_attributes(1,bitmap,			/* layer number, bitmap */
+			0,0,								/* scroll x/y */
+			*flip_screen & 1,*flip_screen & 1,	/* flip x/y */
+			0,0);								/* global attributes */
+	set_tile_layer_attributes(0,bitmap,			/* layer number, bitmap */
+			0,0,								/* scroll x/y */
+			*flip_screen & 1,*flip_screen & 1,	/* flip x/y */
+			0,0);								/* global attributes */
+	update_tile_layer(1,bitmap);
+	update_tile_layer(0,bitmap);
 
 
 	/* Draw the sprites. */
-	for (offs = 0;offs < 4*24;offs += 4)
+	for (offs = spriteram_size - 4;offs >= 0;offs -= 4)
 	{
+
 /*
  abbbbbbb cdefgggg hhhhhhhh iiiiiiii
 
- a        ? (set when big sprites are selected)
+ a        use big sprites (32x32 instead of 16x16)
  bbbbbbb  sprite code
  c        x flip
  d        y flip (used only in death sequence?)
- e        use big sprites (32x32 instead of 16x16)
+ e        ? (set when big sprites are selected)
  f        ? (set only when the bonus (B) materializes?)
  gggg     color
  hhhhhhhh x position
  iiiiiiii y position
 */
-		drawgfx(bitmap,Machine->gfx[bombjack_spriteram[offs+1] & 0x20 ? 3 : 2],
-				bombjack_spriteram[offs] & 0x7f,bombjack_spriteram[offs+1] & 0x0f,
-				bombjack_spriteram[offs+1] & 0x80,bombjack_spriteram[offs+1] & 0x40,
-				bombjack_spriteram[offs+2]-1,bombjack_spriteram[offs+3],
+		int sx,sy,flipx,flipy;
+
+
+		sx = spriteram[offs+3];
+		if (spriteram[offs] & 0x80)
+			sy = 225-spriteram[offs+2];
+		else
+			sy = 241-spriteram[offs+2];
+		flipx = spriteram[offs+1] & 0x40;
+		flipy =	spriteram[offs+1] & 0x80;
+		if (*flip_screen & 1)
+		{
+			if (spriteram[offs] & 0x80)
+			{
+				sx = 224 - sx;
+				sy = 224 - sy;
+			}
+			else
+			{
+				sx = 240 - sx;
+				sy = 240 - sy;
+			}
+			flipx = !flipx;
+			flipy = !flipy;
+		}
+
+		drawgfx(bitmap,Machine->gfx[(spriteram[offs] & 0x80) ? 1 : 0],
+				spriteram[offs] & 0x7f,
+				spriteram[offs+1] & 0x0f,
+				flipx,flipy,
+				sx,sy,
 				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+
+if (spriteram[offs] & 0x80)
+{
+	layer_mark_rectangle_dirty(Machine->layer[1],sx,sx+31,sy,sy+31);
+}
+else
+{
+	layer_mark_rectangle_dirty(Machine->layer[1],sx,sx+15,sy,sy+15);
+}
 	}
 }

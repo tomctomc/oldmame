@@ -7,97 +7,100 @@
 ***************************************************************************/
 
 #include "driver.h"
+#include "vidhrdw/generic.h"
 
 
-#define VIDEO_RAM_SIZE	0x400
 
-unsigned char *phoenix_videoram1;
 unsigned char *phoenix_videoram2;
+unsigned char *phoenix_scroll;
 
-static unsigned char dirtybuffer1[VIDEO_RAM_SIZE];	/* keep track of modified portions of the screen */
-static unsigned char dirtybuffer2[VIDEO_RAM_SIZE];	/* to speed up video refresh */
-static struct osd_bitmap *tmpbitmap1,*tmpbitmap2;
-
-static int scrollreg;
 static int palette_bank;
 
 
 
-static struct rectangle backvisiblearea =
-{
-	3*8, 29*8-1,
-	3*8, 31*8-1
-};
-
 static struct rectangle backtmparea =
 {
-	3*8, 29*8-1,
+	6*8, 32*8-1,
 	0*8, 32*8-1
 };
 
 
 
-int phoenix_vh_start(void)
-{
-	scrollreg = 0;
-	palette_bank = 0;
-
-
-	if ((tmpbitmap2 = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
-		return 1;
-
-	/* small temp bitmap for the score display */
-	if ((tmpbitmap1 = osd_create_bitmap(Machine->drv->screen_width,3*8)) == 0)
-	{
-		osd_free_bitmap(tmpbitmap2);
-		return 1;
-	}
-
-	return 0;
-}
-
-
-
 /***************************************************************************
 
-  Stop the video hardware emulation.
+  Convert the color PROMs into a more useable format.
+
+  Phoenix has two 256x4 palette PROMs, one containing the high bits and the
+  other the low bits (2x2x2 color space).
+  The palette PROMs are connected to the RGB output this way:
+
+  bit 3 --
+        -- 270 ohm resistor  -- GREEN
+        -- 270 ohm resistor  -- BLUE
+  bit 0 -- 270 ohm resistor  -- RED
+
+  bit 3 --
+        -- GREEN
+        -- BLUE
+  bit 0 -- RED
+
+  plus 270 ohm pullup and pulldown resistors on all lines
 
 ***************************************************************************/
-void phoenix_vh_stop(void)
+void phoenix_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
 {
-	osd_free_bitmap(tmpbitmap1);
-	osd_free_bitmap(tmpbitmap2);
-}
+	int i;
+	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
+	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
 
 
-
-void phoenix_videoram1_w(int offset,int data)
-{
-	if (phoenix_videoram1[offset] != data)
+	for (i = 0;i < Machine->drv->total_colors;i++)
 	{
-		dirtybuffer1[offset] = 1;
+		int bit0,bit1;
 
-		phoenix_videoram1[offset] = data;
+
+		bit0 = (color_prom[0] >> 0) & 0x01;
+		bit1 = (color_prom[Machine->drv->total_colors] >> 0) & 0x01;
+		*(palette++) = 0x55 * bit0 + 0xaa * bit1;
+		bit0 = (color_prom[0] >> 2) & 0x01;
+		bit1 = (color_prom[Machine->drv->total_colors] >> 2) & 0x01;
+		*(palette++) = 0x55 * bit0 + 0xaa * bit1;
+		bit0 = (color_prom[0] >> 1) & 0x01;
+		bit1 = (color_prom[Machine->drv->total_colors] >> 1) & 0x01;
+		*(palette++) = 0x55 * bit0 + 0xaa * bit1;
+
+		color_prom++;
 	}
-}
 
-
-
-void phoenix_videoram2_w(int offset,int data)
-{
-	if (phoenix_videoram2[offset] != data)
+	/* first bank of characters use colors 0-31 and 64-95 */
+	for (i = 0;i < 8;i++)
 	{
-		dirtybuffer2[offset] = 1;
+		int j;
 
-		phoenix_videoram2[offset] = data;
+
+		for (j = 0;j < 2;j++)
+		{
+			COLOR(0,4*i + j*4*8) = i + j*64;
+			COLOR(0,4*i + j*4*8 + 1) = 8 + i + j*64;
+			COLOR(0,4*i + j*4*8 + 2) = 2*8 + i + j*64;
+			COLOR(0,4*i + j*4*8 + 3) = 3*8 + i + j*64;
+		}
 	}
-}
+
+	/* second bank of characters use colors 32-63 and 96-127 */
+	for (i = 0;i < 8;i++)
+	{
+		int j;
 
 
-
-void phoenix_scrollreg_w (int offset,int data)
-{
-	scrollreg = data;
+		for (j = 0;j < 2;j++)
+		{
+			COLOR(1,4*i + j*4*8) = i + 32 + j*64;
+			COLOR(1,4*i + j*4*8 + 1) = 8 + i + 32 + j*64;
+			COLOR(1,4*i + j*4*8 + 2) = 2*8 + i + 32 + j*64;
+			COLOR(1,4*i + j*4*8 + 3) = 3*8 + i + 32 + j*64;
+		}
+	}
 }
 
 
@@ -106,16 +109,9 @@ void phoenix_videoreg_w (int offset,int data)
 {
 	if (palette_bank != ((data >> 1) & 1))
 	{
-		int offs;
-
-
 		palette_bank = (data >> 1) & 1;
 
-		for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
-		{
-			dirtybuffer1[offs] = 1;
-			dirtybuffer2[offs] = 1;
-		}
+		memset(dirtybuffer,1,videoram_size);
 	}
 }
 
@@ -135,69 +131,63 @@ void phoenix_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 	/* for every character in the Video RAM, check if it has been modified */
 	/* since last time and update it accordingly. */
-	for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
+	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
-		/* background */
-		if (dirtybuffer2[offs])
+		if (dirtybuffer[offs])
 		{
 			int sx,sy;
 
 
-			dirtybuffer2[offs] = 0;
+			dirtybuffer[offs] = 0;
 
-			sx = 8 * (31 - offs / 32) - 3 * 8;
-			sy = 8 * (offs % 32);
+			sx = 31 - offs / 32;
+			sy = offs % 32;
 
-			drawgfx(tmpbitmap2,Machine->gfx[1],
-					phoenix_videoram2[offs],
-					(phoenix_videoram2[offs] >> 5) + 8 * palette_bank,
-					0,0,sx,sy,
+			drawgfx(tmpbitmap,Machine->gfx[0],
+					videoram[offs],
+					(videoram[offs] >> 5) + 8 * palette_bank,
+					0,0,
+					8*sx,8*sy,
 					&backtmparea,TRANSPARENCY_NONE,0);
-		}
-	}
-
-	/* score */
-	for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
-	{
-		if (dirtybuffer1[offs])
-		{
-			int sx,sy;
-
-
-			dirtybuffer1[offs] = 0;
-
-			sx = 8 * (31 - offs / 32) - 3 * 8;
-			sy = 8 * (offs % 32);
-
-			drawgfx(tmpbitmap1,Machine->gfx[0],
-					phoenix_videoram1[offs],
-					phoenix_videoram1[offs] >> 5,
-					0,0,sx,sy,
-					0,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
 	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap2,0,0,0,256-scrollreg,&backvisiblearea,TRANSPARENCY_NONE,0);
-	copybitmap(bitmap,tmpbitmap2,0,0,0,-scrollreg,&backvisiblearea,TRANSPARENCY_NONE,0);
-	copybitmap(bitmap,tmpbitmap1,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	{
+		int scroll;
+
+
+		scroll = -*phoenix_scroll;
+
+		copyscrollbitmap(bitmap,tmpbitmap,0,0,1,&scroll,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	}
 
 
 	/* draw the frontmost playfield. They are characters, but draw them as sprites */
-	for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
+	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
 		int sx,sy;
 
 
-		sx = 8 * (31 - offs / 32) - 3 * 8;
-		sy = 8 * (offs % 32);
+		sx = 31 - offs / 32;
+		sy = offs % 32;
 
-		if (sy >= 3 * 8 && phoenix_videoram1[offs])	/* don't draw score and spaces */
-			drawgfx(bitmap,Machine->gfx[0],
-					phoenix_videoram1[offs],
-					(phoenix_videoram1[offs] >> 5) + 8 * palette_bank,
-					0,0,sx,sy,
+		if (sy >= 1)
+		{
+			drawgfx(bitmap,Machine->gfx[1],
+					phoenix_videoram2[offs],
+					(phoenix_videoram2[offs] >> 5) + 8 * palette_bank,
+					0,0,
+					8*sx,8*sy,
 					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+		}
+		else
+			drawgfx(bitmap,Machine->gfx[1],
+					phoenix_videoram2[offs],
+					(phoenix_videoram2[offs] >> 5) + 8 * palette_bank,
+					0,0,
+					8*sx,8*sy,
+					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
 	}
 }

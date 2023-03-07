@@ -7,23 +7,15 @@
 ***************************************************************************/
 
 #include "driver.h"
+#include "vidhrdw/generic.h"
 
 
-#define VIDEO_RAM_SIZE 0x400
 
-
-unsigned char *mrdo_videoram1;
-unsigned char *mrdo_colorram1;
 unsigned char *mrdo_videoram2;
 unsigned char *mrdo_colorram2;
-unsigned char *mrdo_spriteram;
-static unsigned char dirtybuffer[VIDEO_RAM_SIZE];	/* keep track of modified portions of the screen */
-											/* to speed up video refresh */
-
-static int scroll_x;
-
-
-static struct osd_bitmap *tmpbitmap,*tmpbitmap1,*tmpbitmap2;
+unsigned char *mrdo_scroll_y;
+static struct osd_bitmap *tmpbitmap1,*tmpbitmap2;
+static int flipscreen;
 
 
 
@@ -93,7 +85,7 @@ void mrdo_vh_convert_color_prom(unsigned char *palette, unsigned char *colortabl
 		else colortable[i] = i;
 	}
 	/* characters with colored pen 0 */
-	colortable[0 + 4 * 64] = 3;	/* black, but avoid avoid transparency */
+	colortable[0 + 4 * 64] = 3;	/* black, but avoid transparency */
 	for (i = 1;i < 4 * 64;i++)
 		colortable[i + 4 * 64] = i;
 
@@ -117,21 +109,26 @@ void mrdo_vh_convert_color_prom(unsigned char *palette, unsigned char *colortabl
 
 
 
+/***************************************************************************
+
+  Start the video hardware emulation.
+
+***************************************************************************/
 int mrdo_vh_start(void)
 {
-	if ((tmpbitmap = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
+	if (generic_vh_start() != 0)
 		return 1;
 
 	if ((tmpbitmap1 = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 	{
-		osd_free_bitmap(tmpbitmap);
+		generic_vh_stop();
 		return 1;
 	}
 
 	if ((tmpbitmap2 = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 	{
-		osd_free_bitmap(tmpbitmap);
 		osd_free_bitmap(tmpbitmap1);
+		generic_vh_stop();
 		return 1;
 	}
 
@@ -147,33 +144,9 @@ int mrdo_vh_start(void)
 ***************************************************************************/
 void mrdo_vh_stop(void)
 {
-	osd_free_bitmap(tmpbitmap);
-	osd_free_bitmap(tmpbitmap1);
 	osd_free_bitmap(tmpbitmap2);
-}
-
-
-
-void mrdo_videoram1_w(int offset,int data)
-{
-	if (mrdo_videoram1[offset] != data)
-	{
-		dirtybuffer[offset] = 1;
-
-		mrdo_videoram1[offset] = data;
-	}
-}
-
-
-
-void mrdo_colorram1_w(int offset,int data)
-{
-	if (mrdo_colorram1[offset] != data)
-	{
-		dirtybuffer[offset] = 1;
-
-		mrdo_colorram1[offset] = data;
-	}
+	osd_free_bitmap(tmpbitmap1);
+	generic_vh_stop();
 }
 
 
@@ -202,12 +175,16 @@ void mrdo_colorram2_w(int offset,int data)
 
 
 
-void mrdo_scrollx_w(int offset,int data)
+void mrdo_flipscreen_w(int offset,int data)
 {
-	if (offset != 0 && errorlog)
-		fprintf(errorlog,"%04x: warning - write SCROLLX from mirror address %04x\n",Z80_GetPC(),offset);
+	/* bits 1-3 control the playfield priority, but they are not used by */
+	/* Mr. Do! so we don't emulate them */
 
-	scroll_x = data;
+	if (flipscreen != (data & 0x01))
+	{
+		flipscreen = data & 0x01;
+		memset(dirtybuffer,1,videoram_size);
+	}
 }
 
 
@@ -221,12 +198,12 @@ void mrdo_scrollx_w(int offset,int data)
 ***************************************************************************/
 void mrdo_vh_screenrefresh(struct osd_bitmap *bitmap)
 {
-	int i,offs;
+	int offs;
 
 
 	/* for every character in the Video RAM, check if it has been modified */
 	/* since last time and update it accordingly. */
-	for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
+	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
 		if (dirtybuffer[offs])
 		{
@@ -235,44 +212,58 @@ void mrdo_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 			dirtybuffer[offs] = 0;
 
-			sx = 8 * (offs / 32);
-			sy = 8 * (31 - offs % 32);
+			sx = offs % 32;
+			sy = offs / 32;
+			if (flipscreen)
+			{
+				sx = 31 - sx;
+				sy = 31 - sy;
+			}
+
 
 			/* Mr. Do! has two playfields, one of which can be scrolled. However, */
 			/* during gameplay this feature is not used, so I keep the composition */
 			/* of the two playfields in a third temporary bitmap, to speed up rendering. */
 			drawgfx(tmpbitmap1,Machine->gfx[1],
-					mrdo_videoram1[offs] + 2 * (mrdo_colorram1[offs] & 0x80),
-					mrdo_colorram1[offs] & 0x7f,
-					0,0,sx,sy,
+					videoram[offs] + 2 * (colorram[offs] & 0x80),
+					colorram[offs] & 0x7f,
+					flipscreen,flipscreen,
+					8*sx,8*sy,
 					0,TRANSPARENCY_NONE,0);
 			drawgfx(tmpbitmap2,Machine->gfx[0],
 					mrdo_videoram2[offs] + 2 * (mrdo_colorram2[offs] & 0x80),
 					mrdo_colorram2[offs] & 0x7f,
-					0,0,sx,sy,
+					flipscreen,flipscreen,
+					8*sx,8*sy,
 					0,TRANSPARENCY_NONE,0);
 
 			drawgfx(tmpbitmap,Machine->gfx[1],
-					mrdo_videoram1[offs] + 2 * (mrdo_colorram1[offs] & 0x80),
-					mrdo_colorram1[offs] & 0x7f,
-					0,0,sx,sy,
+					videoram[offs] + 2 * (colorram[offs] & 0x80),
+					colorram[offs] & 0x7f,
+					flipscreen,flipscreen,
+					8*sx,8*sy,
 					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
 			drawgfx(tmpbitmap,Machine->gfx[0],
 					mrdo_videoram2[offs] + 2 * (mrdo_colorram2[offs] & 0x80),
 					mrdo_colorram2[offs] & 0x7f,
-					0,0,sx,sy,
+					flipscreen,flipscreen,
+					8*sx,8*sy,
 					&Machine->drv->visible_area,(mrdo_colorram2[offs] & 0x40) ? TRANSPARENCY_NONE : TRANSPARENCY_PEN,0);
 		}
 	}
 
 
 	/* copy the character mapped graphics */
-	if (scroll_x)
+	if (*mrdo_scroll_y)
 	{
-		copybitmap(bitmap,tmpbitmap1,0,0,256-scroll_x,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
-		copybitmap(bitmap,tmpbitmap1,0,0,-scroll_x,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		int scroll;
 
-		copybitmap(bitmap,tmpbitmap2,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_COLOR,Machine->background_pen);
+
+		scroll = -*mrdo_scroll_y;
+
+		copyscrollbitmap(bitmap,tmpbitmap1,0,0,1,&scroll,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+
+		copybitmap(bitmap,tmpbitmap2,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
 	}
 	else
 		copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
@@ -280,15 +271,15 @@ void mrdo_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 	/* Draw the sprites. Note that it is important to draw them exactly in this */
 	/* order, to have the correct priorities. */
-	for (i = 4 * 63;i >= 0;i -= 4)
+	for (offs = spriteram_size - 4;offs >= 0;offs -= 4)
 	{
-		if (mrdo_spriteram[i + 1] != 0)
+		if (spriteram[offs + 1] != 0)
 		{
 			drawgfx(bitmap,Machine->gfx[2],
-					mrdo_spriteram[i],mrdo_spriteram[i + 2] & 0x0f,
-					mrdo_spriteram[i + 2] & 0x20,mrdo_spriteram[i + 2] & 0x10,
-					256 - mrdo_spriteram[i + 1],240 - mrdo_spriteram[i + 3],
-					&Machine->drv->visible_area,TRANSPARENCY_PEN, 0);
+					spriteram[offs],spriteram[offs + 2] & 0x0f,
+					spriteram[offs + 2] & 0x10,spriteram[offs + 2] & 0x20,
+					spriteram[offs + 3],256 - spriteram[offs + 1],
+					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
 		}
 	}
 }

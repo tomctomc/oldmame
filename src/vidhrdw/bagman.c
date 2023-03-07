@@ -7,71 +7,78 @@
 ***************************************************************************/
 
 #include "driver.h"
-
-
-#define VIDEO_RAM_SIZE 0x400
-
-
-unsigned char *bagman_videoram;
-unsigned char *bagman_colorram;
-unsigned char *bagman_spriteram;
-static unsigned char dirtybuffer[VIDEO_RAM_SIZE];	/* keep track of modified portions of the screen */
-											/* to speed up video refresh */
-
-static struct osd_bitmap *tmpbitmap;
-int video_enable;
+#include "vidhrdw/generic.h"
 
 
 
-int bagman_vh_start(void)
-{
-	if ((tmpbitmap = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
-		return 1;
-
-	return 0;
-}
-
-
+unsigned char *bagman_video_enable;
+static int flipscreen[2];
 
 /***************************************************************************
 
-  Stop the video hardware emulation.
+  Convert the color PROMs into a more useable format.
+
+  Bagman has two 32 bytes palette PROMs, connected to the RGB output this
+  way:
+
+  bit 7 -- 220 ohm resistor  -- BLUE
+        -- 470 ohm resistor  -- BLUE
+        -- 220 ohm resistor  -- GREEN
+        -- 470 ohm resistor  -- GREEN
+        -- 1  kohm resistor  -- GREEN
+        -- 220 ohm resistor  -- RED
+        -- 470 ohm resistor  -- RED
+  bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void bagman_vh_stop(void)
+void bagman_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
 {
-	osd_free_bitmap(tmpbitmap);
-}
+	int i;
+	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
+	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
 
 
-
-void bagman_videoram_w(int offset,int data)
-{
-	if (bagman_videoram[offset] != data)
+	for (i = 0;i < Machine->drv->total_colors;i++)
 	{
-		dirtybuffer[offset] = 1;
+		int bit0,bit1,bit2;
 
-		bagman_videoram[offset] = data;
+
+		/* red component */
+		bit0 = (*color_prom >> 0) & 0x01;
+		bit1 = (*color_prom >> 1) & 0x01;
+		bit2 = (*color_prom >> 2) & 0x01;
+		*(palette++) = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+		/* green component */
+		bit0 = (*color_prom >> 3) & 0x01;
+		bit1 = (*color_prom >> 4) & 0x01;
+		bit2 = (*color_prom >> 5) & 0x01;
+		*(palette++) = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+		/* blue component */
+		bit0 = 0;
+		bit1 = (*color_prom >> 6) & 0x01;
+		bit2 = (*color_prom >> 7) & 0x01;
+		*(palette++) = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+
+		color_prom++;
 	}
+
+
+	/* characters and sprites use the same palette */
+	for (i = 0;i < TOTAL_COLORS(0);i++)
+		COLOR(0,i) = i;
 }
 
 
 
-void bagman_colorram_w(int offset,int data)
+
+
+void bagman_flipscreen_w(int offset,int data)
 {
-	if (bagman_colorram[offset] != data)
+	if ((data & 1) != flipscreen[offset])
 	{
-		dirtybuffer[offset] = 1;
-
-		bagman_colorram[offset] = data;
+		flipscreen[offset] = data & 1;
+		memset(dirtybuffer,1,videoram_size);
 	}
-}
-
-
-
-void bagman_video_enable_w(int offset,int data)
-{
-	video_enable = data;
 }
 
 
@@ -85,12 +92,12 @@ void bagman_video_enable_w(int offset,int data)
 ***************************************************************************/
 void bagman_vh_screenrefresh(struct osd_bitmap *bitmap)
 {
-	int i,offs;
+	int offs;
 
 
-	if (video_enable == 0)
+	if (*bagman_video_enable == 0)
 	{
-		clearbitmap(bitmap);
+		fillbitmap(bitmap,Machine->pens[0],&Machine->drv->visible_area);
 
 		return;
 	}
@@ -98,7 +105,7 @@ void bagman_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 	/* for every character in the Video RAM, check if it has been modified */
 	/* since last time and update it accordingly. */
-	for (offs = 0;offs < VIDEO_RAM_SIZE;offs++)
+	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
 		if (dirtybuffer[offs])
 		{
@@ -107,14 +114,16 @@ void bagman_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 			dirtybuffer[offs] = 0;
 
-			sx = 8 * (31 - offs / 32);
-			sy = 8 * (offs % 32);
+			sx = offs % 32;
+			if (flipscreen[0]) sx = 31 - sx;
+			sy = offs / 32;
+			if (flipscreen[1]) sy = 31 - sy;
 
-			drawgfx(tmpbitmap,Machine->gfx[bagman_colorram[offs] & 0x10 ? 1 : 0],
-					bagman_videoram[offs] + 8 * (bagman_colorram[offs] & 0x20),
-					bagman_colorram[offs] & 0x0f,
-					0,0,
-					sx,sy,
+			drawgfx(tmpbitmap,Machine->gfx[colorram[offs] & 0x10 ? 1 : 0],
+					videoram[offs] + 8 * (colorram[offs] & 0x20),
+					colorram[offs] & 0x0f,
+					flipscreen[0],flipscreen[1],
+					8*sx,8*sy,
 					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
@@ -125,14 +134,32 @@ void bagman_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 
 	/* Draw the sprites. */
-	for (i = 4*7;i >= 0;i -= 4)
+	for (offs = spriteram_size - 4;offs >= 0;offs -= 4)
 	{
-		if (bagman_spriteram[i+2] && bagman_spriteram[i+3])
+		int sx,sy,flipx,flipy;
+
+
+		sx = spriteram[offs + 3];
+		sy = 240 - spriteram[offs + 2];
+		flipx = spriteram[offs] & 0x40;
+		flipy = spriteram[offs] & 0x80;
+		if (flipscreen[0])
+		{
+			sx = 240 - sx +1;	/* compensate misplacement */
+			flipx = !flipx;
+		}
+		if (flipscreen[1])
+		{
+			sy = 240 - sy;
+			flipy = !flipy;
+		}
+
+		if (spriteram[offs + 2] && spriteram[offs + 3])
 			drawgfx(bitmap,Machine->gfx[2],
-					(bagman_spriteram[i] & 0x3f) + 2 * (bagman_spriteram[i+1] & 0x20),
-					bagman_spriteram[i+1] & 0x1f,
-					bagman_spriteram[i] & 0x80,bagman_spriteram[i] & 0x40,
-					bagman_spriteram[i+2] + 1,bagman_spriteram[i+3] - 1,
+					(spriteram[offs] & 0x3f) + 2 * (spriteram[offs + 1] & 0x20),
+					spriteram[offs + 1] & 0x1f,
+					flipx,flipy,
+					sx,sy+1,	/* compensate misplacement */
 					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
 	}
 }
