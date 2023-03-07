@@ -35,7 +35,7 @@ static unsigned char bgmap[9][9][2];
   bit 0 -- 2.2kohm resistor  -- RED/GREEN/BLUE
 
 ***************************************************************************/
-void gunsmoke_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void gunsmoke_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -95,12 +95,12 @@ void gunsmoke_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 
 int gunsmoke_vh_start(void)
 {
-	if ((bgbitmap = osd_create_bitmap(9*32,9*32)) == 0)
+	if ((bgbitmap = bitmap_alloc(9*32,9*32)) == 0)
 		return 1;
 
 	if (generic_vh_start() == 1)
 	{
-		osd_free_bitmap(bgbitmap);
+		bitmap_free(bgbitmap);
 		return 1;
 	}
 
@@ -112,14 +112,15 @@ int gunsmoke_vh_start(void)
 
 void gunsmoke_vh_stop(void)
 {
-	osd_free_bitmap(bgbitmap);
+	bitmap_free(bgbitmap);
 }
 
 
 
-void gunsmoke_c804_w(int offset,int data)
+WRITE_HANDLER( gunsmoke_c804_w )
 {
 	int bankaddress;
+	unsigned char *RAM = memory_region(REGION_CPU1);
 
 
 	/* bits 0 and 1 are for coin counters? - we ignore them */
@@ -143,7 +144,7 @@ void gunsmoke_c804_w(int offset,int data)
 
 
 
-void gunsmoke_d806_w(int offset,int data)
+WRITE_HANDLER( gunsmoke_d806_w )
 {
 	/* bits 0-2 select the sprite 3 bank */
 	sprite3bank = data & 0x07;
@@ -164,11 +165,11 @@ void gunsmoke_d806_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void gunsmoke_vh_screenrefresh(struct osd_bitmap *bitmap)
+void gunsmoke_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs,sx,sy;
 	int bg_scrolly, bg_scrollx;
-	unsigned char *p=Machine->memory_region[3];
+	unsigned char *p=memory_region(REGION_GFX4);
 	int top,left,xscroll,yscroll;
 
 
@@ -209,8 +210,8 @@ void gunsmoke_vh_screenrefresh(struct osd_bitmap *bitmap)
 					drawgfx(bgbitmap,Machine->gfx[1],
 							tile,
 							(attr & 0x3c) >> 2,
-							attr & 0x80,attr & 0x40,
-							tx*32, ty*32,
+							attr & 0x40,attr & 0x80,
+							(8-ty)*32, tx*32,
 							0,
 							TRANSPARENCY_NONE,0);
 				}
@@ -219,15 +220,15 @@ void gunsmoke_vh_screenrefresh(struct osd_bitmap *bitmap)
 			offs-=0x10;
 		}
 
-		xscroll = -(left*32+bg_scrollx);
-		yscroll = -(top*32+32-bg_scrolly);
+		xscroll = (top*32-bg_scrolly);
+		yscroll = -(left*32+bg_scrollx);
 		copyscrollbitmap(bitmap,bgbitmap,
 			1,&xscroll,
 			1,&yscroll,
-			&Machine->drv->visible_area,
+			&Machine->visible_area,
 			TRANSPARENCY_NONE,0);
 	}
-	else fillbitmap(bitmap,Machine->pens[0],&Machine->drv->visible_area);
+	else fillbitmap(bitmap,Machine->pens[0],&Machine->visible_area);
 
 
 
@@ -242,10 +243,10 @@ void gunsmoke_vh_screenrefresh(struct osd_bitmap *bitmap)
 			bank = (spriteram[offs + 1] & 0xc0) >> 6;
 			if (bank == 3) bank += sprite3bank;
 
- 			sx = spriteram[offs + 2];
-			sy = 240 - spriteram[offs + 3] + ((spriteram[offs + 1] & 0x20) << 3);
-			flipx = spriteram[offs + 1] & 0x10;
-			flipy = 0;
+			sx = spriteram[offs + 3] - ((spriteram[offs + 1] & 0x20) << 3);
+ 			sy = spriteram[offs + 2];
+			flipx = 0;
+			flipy = spriteram[offs + 1] & 0x10;
 			if (flipscreen)
 			{
 				sx = 240 - sx;
@@ -259,7 +260,7 @@ void gunsmoke_vh_screenrefresh(struct osd_bitmap *bitmap)
 					spriteram[offs + 1] & 0x0f,
 					flipx,flipy,
 					sx,sy,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
 		}
 	}
 
@@ -269,11 +270,8 @@ void gunsmoke_vh_screenrefresh(struct osd_bitmap *bitmap)
 		/* draw the frontmost playfield. They are characters, but draw them as sprites */
 		for (offs = videoram_size - 1;offs >= 0;offs--)
 		{
-			int sx,sy;
-
-
-			sx = offs / 32;
-			sy = 31 - offs % 32;
+			sx = offs % 32;
+			sy = offs / 32;
 			if (flipscreen)
 			{
 				sx = 31 - sx;
@@ -283,9 +281,9 @@ void gunsmoke_vh_screenrefresh(struct osd_bitmap *bitmap)
 			drawgfx(bitmap,Machine->gfx[0],
 					videoram[offs] + ((colorram[offs] & 0xc0) << 2),
 					colorram[offs] & 0x1f,
-					flipscreen,flipscreen,
+					!flipscreen,!flipscreen,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_COLOR,79);
+					&Machine->visible_area,TRANSPARENCY_COLOR,79);
 		}
 	}
 }

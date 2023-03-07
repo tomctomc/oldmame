@@ -1,41 +1,43 @@
 #include "driver.h"
-#include "I8039/I8039.h"
+#include "cpu/i8039/i8039.h"
 
 
 
-void mario_sh_w(int offset,int data)
+WRITE_HANDLER( mario_sh_w )
 {
 	if (data)
-		cpu_cause_interrupt(1,I8039_EXT_INT);
+		cpu_set_irq_line(1,0,ASSERT_LINE);
+	else
+		cpu_set_irq_line(1,0,CLEAR_LINE);
 }
 
 
 /* Mario running sample */
-void mario_sh1_w(int offset,int data)
+WRITE_HANDLER( mario_sh1_w )
 {
 	static int last;
 
 	if (last!= data)
 	{
 		last = data;
-		if (data) sample_start (0, 4, 0);
+                if (data && sample_playing(0) == 0) sample_start (0, 3, 0);
 	}
 }
 
 /* Luigi running sample */
-void mario_sh2_w(int offset,int data)
+WRITE_HANDLER( mario_sh2_w )
 {
 	static int last;
 
 	if (last!= data)
 	{
 		last = data;
-		if (data) sample_start (1, 5, 0);
+                if (data && sample_playing(1) == 0) sample_start (1, 4, 0);
 	}
 }
 
 /* Misc samples */
-void mario_sh3_w (int offset,int data)
+WRITE_HANDLER( mario_sh3_w )
 {
 	static int state[8];
 
@@ -47,17 +49,14 @@ void mario_sh3_w (int offset,int data)
 	{
 		switch (offset)
 		{
-			case 0: /* death */
+			case 2: /* ice */
 				sample_start (2, 0, 0);
 				break;
-			case 2: /* ice */
+			case 6: /* coin */
 				sample_start (2, 1, 0);
 				break;
-			case 6: /* coin */
-				sample_start (2, 2, 0);
-				break;
 			case 7: /* skid */
-				sample_start (2, 3, 0);
+				sample_start (2, 2, 0);
 				break;
 		}
 	}

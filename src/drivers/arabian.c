@@ -54,9 +54,9 @@ ON AY PORTS there are two things :
 
 port 0x0e (write only) to do ...
 
-port 0x0f (write only) controls:
-BIT 0 -
-BIT 1 -
+port 0x0f (write only) controls (active LO):
+BIT 0 -	coin counter 1
+BIT 1 - coin counter 2
 BIT 2 -
 BIT 3 -
 BIT 4 - 0-read RAM  1-read switches(ports)
@@ -74,36 +74,90 @@ standart IM 1 interrupt mode (rst #38 every vblank)
 
 
 
+void arabian_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
 int arabian_vh_start(void);
 void arabian_vh_stop(void);
-void arabian_vh_screenrefresh(struct osd_bitmap *bitmap);
-void arabian_spriteramw(int offset, int val);
-void arabian_videoramw(int offset, int val);
+void arabian_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
+WRITE_HANDLER( arabian_blitter_w );
+WRITE_HANDLER( arabian_videoram_w );
 
-int arabian_interrupt(void);
-void arabian_portB_w(int offset,int data);
-int arabian_input_port(int offset);
 
+static UINT8 arabian_clock=0;
+static UINT8 portB=0;
+
+
+static int arabian_interrupt(void)
+{
+	arabian_clock++;
+	return interrupt();
+}
+
+
+static WRITE_HANDLER( arabian_portB_w )
+{
+	int pc;
+	static int last;
+
+	portB = data;
+
+	pc = cpu_get_pc();
+	if ((pc == 0x0a7a) || (pc == 0x002a)) pc = cpu_geturnpc();
+	if ((data & 0xec) != last) logerror("Port B written  %02X  PC=%04X\n",data,pc);
+	last = data & 0xec;
+
+	coin_counter_w(0, ~data & 0x01);
+	coin_counter_w(1, ~data & 0x02);
+}
+
+static READ_HANDLER( arabian_input_port_r )
+{
+	int pom;
+
+
+	if (portB & 0x10)  /* if 1 read the switches */
+	{
+		switch(offset)
+		{
+		case 0:  pom = readinputport(2); break;
+		case 1:  pom = readinputport(3); break;
+		case 2:  pom = readinputport(4); break;
+		case 3:  pom = readinputport(5); break;
+		case 4:  pom = readinputport(6); break;
+		case 5:  pom = readinputport(7); break;
+		case 6:  pom = arabian_clock >> 4; break;
+		case 8:  pom = arabian_clock & 0x0f; break;
+		default:
+			logerror("Input Port %04X read.  PC=%04X\n", offset+0xd7f0, cpu_get_pc());
+			pom = 0;
+			break;
+		}
+	}
+	else  /* if bit 4 of AY port 0f==0 then read RAM memory instead of switches */
+	{
+		unsigned char *RAM = memory_region(REGION_CPU1);
+		pom = RAM[ 0xd7f0 + offset ];
+	}
+
+	return pom;
+}
 
 
 static struct MemoryReadAddress readmem[] =
 {
 	{ 0x0000, 0x7fff, MRA_ROM },
-	{ 0x8000, 0xbfff, MRA_RAM },
 	{ 0xc000, 0xc000, input_port_0_r },
 	{ 0xc200, 0xc200, input_port_1_r },
 	{ 0xd000, 0xd7ef, MRA_RAM },
-	{ 0xd7f0, 0xd7f8, arabian_input_port },
-	{ 0xd7f9, 0xdfff, MRA_RAM },
+	{ 0xd7f0, 0xd7ff, arabian_input_port_r },
 	{ -1 }  /* end of table */
 };
 
 static struct MemoryWriteAddress writemem[] =
 {
-	{ 0x8000, 0xbfff, arabian_videoramw, &videoram },
-	{ 0xd000, 0xd7ff, MWA_RAM },
-	{ 0xe000, 0xe07f, arabian_spriteramw, &spriteram },
 	{ 0x0000, 0x7fff, MWA_ROM },
+	{ 0x8000, 0xbfff, arabian_videoram_w, &videoram },
+	{ 0xd000, 0xd7ff, MWA_RAM },
+	{ 0xe000, 0xe07f, arabian_blitter_w, &spriteram },
 	{ -1 }  /* end of table */
 };
 
@@ -118,13 +172,11 @@ static struct IOWritePort writeport[] =
 
 
 
-INPUT_PORTS_START( input_ports )
-	PORT_START      /* IN6 */
+INPUT_PORTS_START( arabian )
+	PORT_START      /* IN0 */
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_COIN1 )
 	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_COIN2 )
-	PORT_BITX(    0x04, 0x00, IPT_DIPSWITCH_NAME | IPF_TOGGLE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x04, "On" )
+	PORT_SERVICE( 0x04, IP_ACTIVE_HIGH )
 	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x20, IP_ACTIVE_HIGH, IPT_UNKNOWN )
@@ -132,19 +184,19 @@ INPUT_PORTS_START( input_ports )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 
 	PORT_START      /* DSW1 */
-	PORT_DIPNAME( 0x01, 0x00, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0x01, 0x00, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x00, "3" )
 	PORT_DIPSETTING(    0x01, "5" )
-	PORT_DIPNAME( 0x02, 0x02, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "Upright" )
-	PORT_DIPSETTING(    0x00, "Cocktail" )
-	PORT_DIPNAME( 0x04, 0x04, "Flip Screen", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x04, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x08, 0x00, "Bonus", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Carry Bowls to Next Life" )
-	PORT_DIPSETTING(    0x08, "Do Not Carry Bowls" )
-	PORT_DIPNAME( 0xf0, 0x00, "Coinage", IP_KEY_NONE )
+	PORT_DIPNAME( 0x02, 0x02, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Cocktail ) )
+	PORT_DIPNAME( 0x04, 0x04, DEF_STR( Flip_Screen ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x08, 0x00, "Carry Bowls to Next Life" )
+	PORT_DIPSETTING(    0x08, DEF_STR( No ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Yes ) )
+	PORT_DIPNAME( 0xf0, 0x00, DEF_STR( Coinage ) )
 	PORT_DIPSETTING(    0x10, "A 2/1 B 2/1" )
 	PORT_DIPSETTING(    0x20, "A 2/1 B 1/3" )
 	PORT_DIPSETTING(    0x00, "A 1/1 B 1/1" )
@@ -159,10 +211,10 @@ INPUT_PORTS_START( input_ports )
 	PORT_DIPSETTING(    0xb0, "A 1/2 B 1/10" )
 	PORT_DIPSETTING(    0xc0, "A 1/2 B 1/11" )
 	PORT_DIPSETTING(    0xd0, "A 1/2 B 1/12" )
-	PORT_DIPSETTING(    0xf0, "Free Play" )
+	PORT_DIPSETTING(    0xf0, DEF_STR( Free_Play ) )
 	/* 0xe0 gives A 1/2 B 1/6 */
 
-	PORT_START      /* IN0 */
+	PORT_START      /* IN1 */
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_START1 )
 	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_START2 )
@@ -172,17 +224,17 @@ INPUT_PORTS_START( input_ports )
 	PORT_BIT( 0x40, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 
-	PORT_START      /* IN1 */
+	PORT_START      /* IN2 */
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT | IPF_8WAY )
-	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT | IPF_8WAY )
-	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP | IPF_8WAY )
-	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN | IPF_8WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT  | IPF_8WAY )
+	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP    | IPF_8WAY )
+	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN  | IPF_8WAY )
 	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x20, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x40, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 
-	PORT_START      /* IN2 */
+	PORT_START      /* IN3 */
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_BUTTON1 )
 	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_UNKNOWN )
@@ -192,17 +244,17 @@ INPUT_PORTS_START( input_ports )
 	PORT_BIT( 0x40, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 
-	PORT_START      /* IN3 */
+	PORT_START      /* IN4 */
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT | IPF_8WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT | IPF_8WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP | IPF_8WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT  | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP    | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN  | IPF_8WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x20, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x40, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 
-	PORT_START      /* IN4 */
+	PORT_START      /* IN5 */
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_BUTTON1 | IPF_COCKTAIL )
 	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_UNKNOWN )
@@ -212,72 +264,32 @@ INPUT_PORTS_START( input_ports )
 	PORT_BIT( 0x40, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 
-	PORT_START      /* IN5 */
-	PORT_DIPNAME( 0x01, 0x00, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x01, "On" )
-	PORT_DIPNAME( 0x02, 0x00, "Demo Sounds", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x0c, 0x00, "Bonus Life", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "No Bonus" )
+	PORT_START      /* DSW2 */
+	PORT_DIPNAME( 0x01, 0x00, "Coin Chutes" )
+	PORT_DIPSETTING(    0x01, "1" )
+	PORT_DIPSETTING(    0x00, "2" )
+	PORT_DIPNAME( 0x02, 0x02, DEF_STR( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x0c, 0x04, DEF_STR( Bonus_Life ) )
 	PORT_DIPSETTING(    0x04, "20000" )
-	PORT_DIPSETTING(    0x08, "30000" )
-	PORT_DIPSETTING(    0x0c, "Forget Bonus (??)" )
-	PORT_BIT( 0xf0, IP_ACTIVE_HIGH, IPT_UNUSED )
+	PORT_DIPSETTING(    0x08, "40000" )
+	PORT_DIPSETTING(    0x0c, "20000 50000 +100K" )
+	PORT_DIPSETTING(    0x00, "None" )
+	PORT_DIPNAME( 0x10, 0x00, DEF_STR( Unused ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( On ) )
+	PORT_DIPNAME( 0x20, 0x00, DEF_STR( Unused ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( On ) )
+	PORT_DIPNAME( 0x40, 0x00, DEF_STR( Unused ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( On ) )
+	PORT_DIPNAME( 0x80, 0x00, DEF_STR( Unused ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( On ) )
 INPUT_PORTS_END
 
-
-
-
-
-static unsigned char palette[] =
-{
-
-/*colors for plane 1*/
-	0   , 0   , 0,
-	0   , 37*4, 53*4,
-	0   , 40*4, 63*4,
-	0   , 44*4, 63*4,
-	48*4, 22*4, 0,
-	63*4, 39*4, 51*4,
-	63*4, 56*4, 0,
-	60*4, 60*4, 60*4,
-	0   , 0   , 0,
-	32*4, 12*4, 0,
-	39*4, 18*4, 0,
-	0   , 24*4, 51*4,
-	45*4, 20*4, 1*4,
-	63*4, 36*4, 51*4,
-	57*4, 41*4, 10*4,
-	63*4, 39*4, 51*4,
-/*colors for plane 2*/
-	0   , 0   , 0,
-	0   , 28*4, 0,
-	0   , 11*4, 0,
-	0   , 40*4, 0,
-	48*4, 22*4, 0,
-	58*4, 48*4, 0,
-	44*4, 18*4, 0,
-	60*4, 60*4, 60*4,
-	25*4, 6*4 , 0,
-	28*4, 21*4, 0,
-	26*4, 18*4, 0,
-	0   , 24*4, 0,
-	45*4, 20*4, 1*4,
-	51*4, 30*4, 5*4,
-	57*4, 41*4, 10*4,
-	63*4, 53*4, 16*4,
-};
-
-
-enum {BLACK,BLUE1,BLUE2,BLUE3,YELLOW };
-
-static unsigned char colortable[] =
-{
-	/* characters and sprites */
-	BLACK,BLUE1,BLACK,YELLOW,
-};
 
 
 
@@ -285,7 +297,7 @@ static struct AY8910interface ay8910_interface =
 {
 	1,	/* 1 chip */
 	1500000,	/* 1.5 MHz?????? */
-	{ 255 },
+	{ 50 },
 	{ 0 },
 	{ 0 },
 	{ 0 },
@@ -294,14 +306,13 @@ static struct AY8910interface ay8910_interface =
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_arabian =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80 | CPU_16BIT_PORT,
 			4000000,	/* 4 Mhz */
-			0,
 			readmem,writemem,0,writeport,
 			arabian_interrupt,1
 		}
@@ -311,12 +322,12 @@ static struct MachineDriver machine_driver =
 	0,
 
 	/* video hardware */
-	32*8, 32*8, { 0x0b, 0xf2, 0, 32*8-1 },
-        0,
-	sizeof(palette)/3,sizeof(colortable),
+	256, 256, { 0, 255, 11, 242 },
 	0,
+	32,32,
+	arabian_vh_convert_color_prom,
 
-	VIDEO_TYPE_RASTER|VIDEO_SUPPORTS_DIRTY,
+	VIDEO_TYPE_RASTER | VIDEO_SUPPORTS_DIRTY,
 	0,
 	arabian_vh_start,
 	arabian_vh_stop,
@@ -340,80 +351,35 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( arabian_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "ic1.87", 0x0000, 0x2000, 0x71cadc52 )
-	ROM_LOAD( "ic2.88", 0x2000, 0x2000, 0xc24b12f9 )
-	ROM_LOAD( "ic3.89", 0x4000, 0x2000, 0x7aac9abe )
-	ROM_LOAD( "ic4.90", 0x6000, 0x2000, 0xcd8565b1 )
+ROM_START( arabian )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "ic1rev2.87",       0x0000, 0x2000, 0x5e1c98b8 )
+	ROM_LOAD( "ic2rev2.88",       0x2000, 0x2000, 0x092f587e )
+	ROM_LOAD( "ic3rev2.89",       0x4000, 0x2000, 0x15145f23 )
+	ROM_LOAD( "ic4rev2.90",       0x6000, 0x2000, 0x32b77b44 )
 
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	/* empty memory region - not used by the game, but needed bacause the main */
-	/* core currently always frees region #1 after initialization. */
+	ROM_REGION( 0x10000, REGION_GFX1 ) /* graphics roms */
+	ROM_LOAD( "ic84.91",      0x0000, 0x2000, 0xc4637822 )	/* because of very rare way */
+	ROM_LOAD( "ic85.92",      0x2000, 0x2000, 0xf7c6866d )  /* CRT controller uses these roms */
+	ROM_LOAD( "ic86.93",      0x4000, 0x2000, 0x71acd48d )  /* there's no way, but to decode */
+	ROM_LOAD( "ic87.94",      0x6000, 0x2000, 0x82160b9a )	/* it at runtime - which is SLOW */
+ROM_END
 
-	ROM_REGION(0x10000) /* space for graphics roms */
-	ROM_LOAD( "ic84.91", 0x0000, 0x2000, 0xb8edb68d )	/* because of very rare way */
-	ROM_LOAD( "ic85.92", 0x2000, 0x2000, 0x3e0048d8 )  /* CRT controller uses these roms */
-	ROM_LOAD( "ic86.93", 0x4000, 0x2000, 0xc871f425 )  /* there's no way, but to decode */
-	ROM_LOAD( "ic87.94", 0x6000, 0x2000, 0x46faa604 )	/* it at runtime - which is SLOW */
+ROM_START( arabiana )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "ic1.87",       0x0000, 0x2000, 0x51e9a6b1 )
+	ROM_LOAD( "ic2.88",       0x2000, 0x2000, 0x1cdcc1ab )
+	ROM_LOAD( "ic3.89",       0x4000, 0x2000, 0xb7b7faa0 )
+	ROM_LOAD( "ic4.90",       0x6000, 0x2000, 0xdbded961 )
 
+	ROM_REGION( 0x10000, REGION_GFX1 ) /* graphics roms */
+	ROM_LOAD( "ic84.91",      0x0000, 0x2000, 0xc4637822 )	/* because of very rare way */
+	ROM_LOAD( "ic85.92",      0x2000, 0x2000, 0xf7c6866d )  /* CRT controller uses these roms */
+	ROM_LOAD( "ic86.93",      0x4000, 0x2000, 0x71acd48d )  /* there's no way, but to decode */
+	ROM_LOAD( "ic87.94",      0x6000, 0x2000, 0x82160b9a )	/* it at runtime - which is SLOW */
 ROM_END
 
 
 
-static int arabian_hiload(void)
-{
-  unsigned char *RAM = Machine->memory_region[0];
-  void *f;
-
-  /* Wait for hiscore table initialization to be done. */
-  if (memcmp(&RAM[0xd384], "\x00\x00\x00\x01\x00\x00", 6) != 0)
-    return 0;
-
-  if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-    {
-      /* Load and set hiscore table. */
-      osd_fread(f,&RAM[0xd384],6*10);
-      osd_fclose(f);
-    }
-
-  return 1;
-}
-
-
-
-static void arabian_hisave(void)
-{
-  unsigned char *RAM = Machine->memory_region[0];
-  void *f;
-
-  if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-    {
-      /* Write hiscore table. */
-      osd_fwrite(f,&RAM[0xd384],6*10);
-      osd_fclose(f);
-    }
-}
-
-
-
-struct GameDriver arabian_driver =
-{
-	"Arabian",
-	"arabian",
-	"Jarek Burczynski (MAME driver)\nMarco Cassili",
-	&machine_driver,
-
-	arabian_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	input_ports,
-
-	0, palette, colortable,
-	ORIENTATION_DEFAULT,
-
-	arabian_hiload, arabian_hisave
-};
-
+GAMEX( 1983, arabian,  0,       arabian, arabian, 0, ROT270, "Sun Electronics", "Arabian", GAME_IMPERFECT_COLORS | GAME_NO_COCKTAIL )
+GAMEX( 1983, arabiana, arabian, arabian, arabian, 0, ROT270, "[Sun Electronics] (Atari license)", "Arabian (Atari)", GAME_IMPERFECT_COLORS | GAME_NO_COCKTAIL )

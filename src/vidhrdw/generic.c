@@ -7,27 +7,21 @@
 ***************************************************************************/
 
 #include "driver.h"
-#include "generic.h"
+#include "vidhrdw/generic.h"
 
-
-unsigned char *videoram00,*videoram01,*videoram02,*videoram03;
-unsigned char *videoram10,*videoram11,*videoram12,*videoram13;
-unsigned char *videoram20,*videoram21,*videoram22,*videoram23;
-unsigned char *videoram30,*videoram31,*videoram32,*videoram33;
 
 
 unsigned char *videoram;
-int videoram_size;
+size_t videoram_size;
 unsigned char *colorram;
 unsigned char *spriteram;	/* not used in this module... */
 unsigned char *spriteram_2;	/* ... */
 unsigned char *spriteram_3;	/* ... */
-int spriteram_size;	/* ... here just for convenience */
-int spriteram_2_size;	/* ... here just for convenience */
-int spriteram_3_size;	/* ... here just for convenience */
-unsigned char *flip_screen;	/* ... */
-unsigned char *flip_screen_x;	/* ... */
-unsigned char *flip_screen_y;	/* ... */
+unsigned char *buffered_spriteram;	/* not used in this module... */
+unsigned char *buffered_spriteram_2;	/* ... */
+size_t spriteram_size;	/* ... here just for convenience */
+size_t spriteram_2_size;	/* ... here just for convenience */
+size_t spriteram_3_size;	/* ... here just for convenience */
 unsigned char *dirtybuffer;
 struct osd_bitmap *tmpbitmap;
 
@@ -40,50 +34,38 @@ struct osd_bitmap *tmpbitmap;
 ***************************************************************************/
 int generic_vh_start(void)
 {
-	int i;
-
-
-	for (i = 0;i < MAX_LAYERS;i++)
-		Machine->layer[i] = 0;
 	dirtybuffer = 0;
 	tmpbitmap = 0;
 
-	if (Machine->drv->layer)
+	if (videoram_size == 0)
 	{
-		i = 0;
-		while (i < MAX_LAYERS && Machine->drv->layer[i].type)
-		{
-			if ((Machine->layer[i] = create_tile_layer(&Machine->drv->layer[i])) == 0)
-			{
-				generic_vh_stop();
-				return 1;
-			}
-
-			i++;
-		}
+logerror("Error: generic_vh_start() called but videoram_size not initialized\n");
+		return 1;
 	}
-	else
+
+	if ((dirtybuffer = malloc(videoram_size)) == 0)
+		return 1;
+	memset(dirtybuffer,1,videoram_size);
+
+	if ((tmpbitmap = bitmap_alloc(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 	{
-		if (videoram_size == 0)
-		{
-if (errorlog) fprintf(errorlog,"Error: generic_vh_start() called but videoram_size not initialized\n");
-			return 1;
-		}
-
-		if ((dirtybuffer = malloc(videoram_size)) == 0)
-			return 1;
-		memset(dirtybuffer,1,videoram_size);
-
-		if ((tmpbitmap = osd_new_bitmap(Machine->drv->screen_width,Machine->drv->screen_height,Machine->scrbitmap->depth)) == 0)
-		{
-			free(dirtybuffer);
-			return 1;
-		}
+		free(dirtybuffer);
+		return 1;
 	}
 
 	return 0;
 }
 
+
+int generic_bitmapped_vh_start(void)
+{
+	if ((tmpbitmap = bitmap_alloc(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
+	{
+		return 1;
+	}
+
+	return 0;
+}
 
 
 /***************************************************************************
@@ -93,39 +75,45 @@ if (errorlog) fprintf(errorlog,"Error: generic_vh_start() called but videoram_si
 ***************************************************************************/
 void generic_vh_stop(void)
 {
-	int i;
-
-
-	for (i = 0;i < MAX_LAYERS;i++)
-	{
-		free_tile_layer(Machine->layer[i]);
-		Machine->layer[i] = 0;
-	}
-
 	free(dirtybuffer);
-	osd_free_bitmap(tmpbitmap);
+	bitmap_free(tmpbitmap);
 
 	dirtybuffer = 0;
 	tmpbitmap = 0;
 }
 
+void generic_bitmapped_vh_stop(void)
+{
+	bitmap_free(tmpbitmap);
+
+	tmpbitmap = 0;
+}
 
 
-int videoram_r(int offset)
+/***************************************************************************
+
+  Draw the game screen in the given osd_bitmap.
+  To be used by bitmapped games not using sprites.
+
+***************************************************************************/
+void generic_bitmapped_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	if (full_refresh)
+		copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
+}
+
+
+READ_HANDLER( videoram_r )
 {
 	return videoram[offset];
 }
 
-
-
-int colorram_r(int offset)
+READ_HANDLER( colorram_r )
 {
 	return colorram[offset];
 }
 
-
-
-void videoram_w(int offset,int data)
+WRITE_HANDLER( videoram_w )
 {
 	if (videoram[offset] != data)
 	{
@@ -135,9 +123,7 @@ void videoram_w(int offset,int data)
 	}
 }
 
-
-
-void colorram_w(int offset,int data)
+WRITE_HANDLER( colorram_w )
 {
 	if (colorram[offset] != data)
 	{
@@ -149,266 +135,85 @@ void colorram_w(int offset,int data)
 
 
 
-
-
-
-void videoram00_w(int offset,int data)
+READ_HANDLER( spriteram_r )
 {
-	if (videoram00[offset] != data)
-	{
-		videoram00[offset] = data;
-		if (Machine->drv->layer[0].updatehook0) (*Machine->drv->layer[0].updatehook0)(offset);
-	}
+	return spriteram[offset];
 }
 
-void videoram01_w(int offset,int data)
+WRITE_HANDLER( spriteram_w )
 {
-	if (videoram01[offset] != data)
-	{
-		videoram01[offset] = data;
-		if (Machine->drv->layer[0].updatehook1) (*Machine->drv->layer[0].updatehook1)(offset);
-	}
+	spriteram[offset] = data;
 }
 
-void videoram02_w(int offset,int data)
+READ_HANDLER( spriteram_2_r )
 {
-	if (videoram02[offset] != data)
-	{
-		videoram02[offset] = data;
-		if (Machine->drv->layer[0].updatehook2) (*Machine->drv->layer[0].updatehook2)(offset);
-	}
+	return spriteram_2[offset];
 }
 
-void videoram03_w(int offset,int data)
+WRITE_HANDLER( spriteram_2_w )
 {
-	if (videoram03[offset] != data)
-	{
-		videoram03[offset] = data;
-		if (Machine->drv->layer[0].updatehook3) (*Machine->drv->layer[0].updatehook3)(offset);
-	}
+	spriteram_2[offset] = data;
 }
 
-void videoram10_w(int offset,int data)
+/* Mish:  171099
+
+	'Buffered spriteram' is where the graphics hardware draws the sprites
+from private ram that the main CPU cannot access.  The main CPU typically
+prepares sprites for the next frame in it's own sprite ram as the graphics
+hardware renders sprites for the current frame from private ram.  Main CPU
+sprite ram is usually copied across to private ram by setting some flag
+in the VBL interrupt routine.
+
+	The reason for this is to avoid sprite flicker or lag - if a game
+is unable to prepare sprite ram within a frame (for example, lots of sprites
+on screen) then it doesn't trigger the buffering hardware - instead the
+graphics hardware will use the sprites from the last frame. An example is
+Dark Seal - the buffer flag is only written to if the CPU is idle at the time
+of the VBL interrupt.  If the buffering is not emulated the sprites flicker
+at busy scenes.
+
+	Some games seem to use buffering because of hardware constraints -
+Capcom games (Cps1, Last Duel, etc) render spriteram _1 frame ahead_ and
+buffer this spriteram at the end of a frame, so the _next_ frame must be drawn
+from the buffer.  Presumably the graphics hardware and the main cpu cannot
+share the same spriteram for whatever reason.
+
+	Sprite buffering & Mame:
+
+	To use sprite buffering in a driver use VIDEO_BUFFERS_SPRITERAM in the
+machine driver.  This will automatically create an area for buffered spriteram
+equal to the size of normal spriteram.
+
+	Spriteram size _must_ be declared in the memory map:
+
+	{ 0x120000, 0x1207ff, MWA_BANK2, &spriteram, &spriteram_size },
+
+	Then the video driver must draw the sprites from the buffered_spriteram
+pointer.  The function buffer_spriteram_w() is used to simulate hardware
+which buffers the spriteram from a memory location write.  The function
+buffer_spriteram(unsigned char *ptr, int length) can be used where
+more control is needed over what is buffered.
+
+	For examples see darkseal.c, contra.c, lastduel.c, bionicc.c etc.
+
+*/
+
+WRITE_HANDLER( buffer_spriteram_w )
 {
-	if (videoram10[offset] != data)
-	{
-		videoram10[offset] = data;
-		if (Machine->drv->layer[1].updatehook0) (*Machine->drv->layer[1].updatehook0)(offset);
-	}
+	memcpy(buffered_spriteram,spriteram,spriteram_size);
 }
 
-void videoram11_w(int offset,int data)
+WRITE_HANDLER( buffer_spriteram_2_w )
 {
-	if (videoram11[offset] != data)
-	{
-		videoram11[offset] = data;
-		if (Machine->drv->layer[1].updatehook1) (*Machine->drv->layer[1].updatehook1)(offset);
-	}
+	memcpy(buffered_spriteram_2,spriteram_2,spriteram_2_size);
 }
 
-void videoram12_w(int offset,int data)
+void buffer_spriteram(unsigned char *ptr,int length)
 {
-	if (videoram12[offset] != data)
-	{
-		videoram12[offset] = data;
-		if (Machine->drv->layer[1].updatehook2) (*Machine->drv->layer[1].updatehook2)(offset);
-	}
+	memcpy(buffered_spriteram,ptr,length);
 }
 
-void videoram13_w(int offset,int data)
+void buffer_spriteram_2(unsigned char *ptr,int length)
 {
-	if (videoram13[offset] != data)
-	{
-		videoram13[offset] = data;
-		if (Machine->drv->layer[1].updatehook3) (*Machine->drv->layer[1].updatehook3)(offset);
-	}
-}
-
-void videoram20_w(int offset,int data)
-{
-	if (videoram20[offset] != data)
-	{
-		videoram20[offset] = data;
-		if (Machine->drv->layer[2].updatehook0) (*Machine->drv->layer[2].updatehook0)(offset);
-	}
-}
-
-void videoram21_w(int offset,int data)
-{
-	if (videoram21[offset] != data)
-	{
-		videoram21[offset] = data;
-		if (Machine->drv->layer[2].updatehook1) (*Machine->drv->layer[2].updatehook1)(offset);
-	}
-}
-
-void videoram22_w(int offset,int data)
-{
-	if (videoram22[offset] != data)
-	{
-		videoram22[offset] = data;
-		if (Machine->drv->layer[2].updatehook2) (*Machine->drv->layer[2].updatehook2)(offset);
-	}
-}
-
-void videoram23_w(int offset,int data)
-{
-	if (videoram23[offset] != data)
-	{
-		videoram23[offset] = data;
-		if (Machine->drv->layer[2].updatehook3) (*Machine->drv->layer[2].updatehook3)(offset);
-	}
-}
-
-void videoram30_w(int offset,int data)
-{
-	if (videoram30[offset] != data)
-	{
-		videoram30[offset] = data;
-		if (Machine->drv->layer[3].updatehook0) (*Machine->drv->layer[3].updatehook0)(offset);
-	}
-}
-
-void videoram31_w(int offset,int data)
-{
-	if (videoram31[offset] != data)
-	{
-		videoram31[offset] = data;
-		if (Machine->drv->layer[3].updatehook1) (*Machine->drv->layer[3].updatehook1)(offset);
-	}
-}
-
-void videoram32_w(int offset,int data)
-{
-	if (videoram32[offset] != data)
-	{
-		videoram32[offset] = data;
-		if (Machine->drv->layer[3].updatehook2) (*Machine->drv->layer[3].updatehook2)(offset);
-	}
-}
-
-void videoram33_w(int offset,int data)
-{
-	if (videoram33[offset] != data)
-	{
-		videoram33[offset] = data;
-		if (Machine->drv->layer[3].updatehook3) (*Machine->drv->layer[3].updatehook3)(offset);
-	}
-}
-
-
-int videoram00_r(int offset)
-{
-	return videoram00[offset];
-}
-
-int videoram01_r(int offset)
-{
-	return videoram01[offset];
-}
-
-int videoram02_r(int offset)
-{
-	return videoram02[offset];
-}
-
-int videoram03_r(int offset)
-{
-	return videoram03[offset];
-}
-
-int videoram10_r(int offset)
-{
-	return videoram10[offset];
-}
-
-int videoram11_r(int offset)
-{
-	return videoram11[offset];
-}
-
-int videoram12_r(int offset)
-{
-	return videoram12[offset];
-}
-
-int videoram13_r(int offset)
-{
-	return videoram13[offset];
-}
-
-int videoram20_r(int offset)
-{
-	return videoram20[offset];
-}
-
-int videoram21_r(int offset)
-{
-	return videoram21[offset];
-}
-
-int videoram22_r(int offset)
-{
-	return videoram22[offset];
-}
-
-int videoram23_r(int offset)
-{
-	return videoram23[offset];
-}
-
-int videoram30_r(int offset)
-{
-	return videoram30[offset];
-}
-
-int videoram31_r(int offset)
-{
-	return videoram31[offset];
-}
-
-int videoram32_r(int offset)
-{
-	return videoram32[offset];
-}
-
-int videoram33_r(int offset)
-{
-	return videoram33[offset];
-}
-
-
-
-void videoram00_word_w(int offset,int data)
-{
-	int oldword = READ_WORD(&videoram00[offset]);
-	int newword = COMBINE_WORD(oldword,data);
-
-	if (oldword != newword)
-	{
-		WRITE_WORD(&videoram00[offset],newword);
-		if (Machine->drv->layer[0].updatehook0) (*Machine->drv->layer[0].updatehook0)(offset);
-	}
-}
-
-void videoram10_word_w(int offset,int data)
-{
-	int oldword = READ_WORD(&videoram10[offset]);
-	int newword = COMBINE_WORD(oldword,data);
-
-	if (oldword != newword)
-	{
-		WRITE_WORD(&videoram10[offset],newword);
-		if (Machine->drv->layer[1].updatehook0) (*Machine->drv->layer[1].updatehook0)(offset);
-	}
-}
-
-int videoram00_word_r(int offset)
-{
-	return READ_WORD(&videoram00[offset]);
-}
-
-int videoram10_word_r(int offset)
-{
-	return READ_WORD(&videoram10[offset]);
+	memcpy(buffered_spriteram_2,ptr,length);
 }

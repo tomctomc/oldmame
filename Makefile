@@ -1,277 +1,289 @@
-C	= gcc
-LD	= gcc
+# set this to mame, mess or the destination you want to build
+TARGET = mame
+# TARGET = mess
+# TARGET = neomame
+# example for a tiny compile
+# TARGET = tiny
 
-DEFS   = -DLSB_FIRST
+# uncomment next line to include the debugger
+# DEBUG = 1
 
-DEBUG_OR_OPTIMIZE=-ggdb
-STRIP_OR_NOT=
+# uncomment next line to include the symbols for symify
+# SYMBOLS = 1
 
-#DEBUG_OR_OPTIMIZE= -O3 -fomit-frame-pointer -funroll-loops
-#STRIP_OR_NOT=-s
+# uncomment next line to use Assembler 68k engine
+# currently the Psikyo games don't work with it
+# X86_ASM_68K = 1
 
-#-DX86_ASM
+# set this the operating system you're building for
+# (actually you'll probably need your own main makefile anyways)
+OS = sdl
 
-CFLAGS = ${DEBUG_OR_OPTIMIZE} -DUNIX -Isrc/sdl -Isrc -Isrc/Z80 -I/usr/include/SDL2 # -Wall -Werror
-LIBS   = -lSDL2 -lSDL2_mixer -lm
-OBJS   = obj/mame.o obj/common.o obj/usrintrf.o obj/driver.o \
-         obj/cpuintrf.o obj/memory.o obj/timer.o obj/gfxlayer.o \
-         obj/inptport.o obj/cheat.o obj/unzip.o obj/inflate.o \
-         obj/audit.o \
-         obj/sndhrdw/adpcm.o \
-         obj/sndhrdw/psg.o obj/sndhrdw/psgintf.o \
-         obj/sndhrdw/2151intf.o obj/sndhrdw/fm.o \
-         obj/sndhrdw/ym2151.o obj/sndhrdw/ym3812.o \
-		 obj/sndhrdw/tms5220.o obj/sndhrdw/5220intf.o obj/sndhrdw/vlm5030.o \
-		 obj/sndhrdw/pokey.o obj/sndhrdw/pokyintf.o obj/sndhrdw/sn76496.o \
-		 obj/sndhrdw/nes.o obj/sndhrdw/nesintf.o \
-		 obj/sndhrdw/votrax.o obj/sndhrdw/dac.o obj/sndhrdw/samples.o \
-         obj/machine/z80fmly.o obj/machine/6821pia.o \
-         obj/vidhrdw/generic.o obj/sndhrdw/generic.o \
-         obj/vidhrdw/vector.o obj/vidhrdw/avgdvg.o obj/machine/mathbox.o \
-         obj/sndhrdw/namco.o \
-         obj/machine/pacman.o obj/drivers/pacman.o \
-         obj/drivers/maketrax.o \
-         obj/machine/jrpacman.o obj/drivers/jrpacman.o obj/vidhrdw/jrpacman.o \
-         obj/vidhrdw/pengo.o obj/drivers/pengo.o \
-         obj/vidhrdw/ladybug.o obj/drivers/ladybug.o \
-         obj/vidhrdw/mrdo.o obj/drivers/mrdo.o \
-         obj/machine/docastle.o obj/vidhrdw/docastle.o obj/drivers/docastle.o \
-         obj/drivers/dowild.o \
-         obj/vidhrdw/cclimber.o obj/sndhrdw/cclimber.o obj/drivers/cclimber.o \
-         obj/drivers/ckongs.o \
-         obj/vidhrdw/seicross.o obj/drivers/seicross.o \
-         obj/vidhrdw/dkong.o obj/sndhrdw/dkong.o obj/drivers/dkong.o \
-         obj/machine/bagman.o obj/vidhrdw/bagman.o obj/drivers/bagman.o \
-         obj/machine/wow.o obj/vidhrdw/wow.o obj/sndhrdw/wow.o obj/drivers/wow.o \
-         obj/sndhrdw/gorf.o \
-         obj/vidhrdw/galaxian.o obj/drivers/galaxian.o \
-         obj/sndhrdw/mooncrst.o obj/drivers/mooncrst.o \
-         obj/vidhrdw/frogger.o obj/sndhrdw/frogger.o obj/drivers/frogger.o \
-         obj/machine/scramble.o obj/sndhrdw/scramble.o obj/drivers/scramble.o \
-         obj/drivers/scobra.o \
-         obj/vidhrdw/amidar.o obj/drivers/amidar.o \
-         obj/machine/warpwarp.o obj/vidhrdw/warpwarp.o obj/drivers/warpwarp.o \
-         obj/vidhrdw/popeye.o obj/drivers/popeye.o \
-         obj/vidhrdw/rallyx.o obj/drivers/rallyx.o \
-         obj/drivers/locomotn.o \
-         obj/vidhrdw/pooyan.o obj/drivers/pooyan.o \
-         obj/vidhrdw/timeplt.o obj/drivers/timeplt.o \
-         obj/vidhrdw/phoenix.o obj/sndhrdw/phoenix.o obj/drivers/phoenix.o \
-         obj/sndhrdw/pleiads.o \
-         obj/machine/carnival.o obj/vidhrdw/carnival.o obj/sndhrdw/carnival.o obj/drivers/carnival.o \
-         obj/machine/invaders.o obj/vidhrdw/invaders.o obj/sndhrdw/invaders.o obj/drivers/invaders.o \
-         obj/vidhrdw/mario.o obj/sndhrdw/mario.o obj/drivers/mario.o \
-         obj/vidhrdw/zaxxon.o obj/sndhrdw/zaxxon.o obj/drivers/zaxxon.o \
-         obj/vidhrdw/congo.o obj/sndhrdw/congo.o obj/drivers/congo.o \
-         obj/vidhrdw/bombjack.o obj/drivers/bombjack.o \
-         obj/machine/centiped.o obj/vidhrdw/centiped.o obj/drivers/centiped.o \
-         obj/machine/milliped.o obj/vidhrdw/milliped.o obj/drivers/milliped.o \
-         obj/machine/warlord.o obj/vidhrdw/warlord.o obj/drivers/warlord.o \
-         obj/vidhrdw/rockola.o obj/sndhrdw/rockola.o obj/drivers/rockola.o \
-         obj/vidhrdw/mpatrol.o  obj/sndhrdw/mpatrol.o obj/drivers/mpatrol.o \
-         obj/vidhrdw/travrusa.o obj/drivers/travrusa.o \
-         obj/vidhrdw/btime.o obj/drivers/btime.o \
-         obj/vidhrdw/bnj.o obj/drivers/bnj.o \
-         obj/vidhrdw/jumpbug.o obj/drivers/jumpbug.o \
-         obj/vidhrdw/gberet.o obj/drivers/gberet.o \
-         obj/vidhrdw/exidy.o obj/drivers/exidy.o \
-		 obj/sndhrdw/targ.o \
-         obj/machine/gottlieb.o obj/vidhrdw/gottlieb.o obj/sndhrdw/gottlieb.o \
-         obj/drivers/reactor.o obj/drivers/qbert.o obj/drivers/krull.o \
-         obj/drivers/qbertqub.o obj/drivers/mplanets.o obj/drivers/3stooges.o \
-         obj/machine/taito.o obj/vidhrdw/taito.o obj/drivers/taito.o \
-         obj/machine/panic.o obj/vidhrdw/panic.o obj/drivers/panic.o \
-         obj/machine/arabian.o obj/vidhrdw/arabian.o obj/drivers/arabian.o \
-         obj/vidhrdw/1942.o obj/drivers/1942.o \
-         obj/machine/vulgus.o obj/vidhrdw/vulgus.o obj/drivers/vulgus.o \
-         obj/vidhrdw/commando.o obj/drivers/commando.o \
-         obj/machine/gng.o obj/vidhrdw/gng.o obj/drivers/gng.o \
-         obj/vidhrdw/sonson.o obj/drivers/sonson.o \
-         obj/vidhrdw/exedexes.o obj/drivers/exedexes.o \
-         obj/sndhrdw/gyruss.o obj/vidhrdw/gyruss.o obj/drivers/gyruss.o \
-         obj/machine/superpac.o obj/vidhrdw/superpac.o obj/drivers/superpac.o \
-         obj/machine/galaga.o obj/vidhrdw/galaga.o obj/drivers/galaga.o \
-         obj/machine/kangaroo.o obj/vidhrdw/kangaroo.o obj/drivers/kangaroo.o \
-         obj/vidhrdw/kungfum.o obj/drivers/kungfum.o \
-         obj/machine/qix.o obj/vidhrdw/qix.o obj/drivers/qix.o \
-         obj/machine/williams.o obj/vidhrdw/williams.o obj/drivers/williams.o \
-         obj/machine/ticket.o \
-         obj/sndhrdw/starforc.o obj/vidhrdw/starforc.o obj/drivers/starforc.o \
-         obj/vidhrdw/naughtyb.o obj/drivers/naughtyb.o \
-         obj/machine/mystston.o obj/vidhrdw/mystston.o obj/drivers/mystston.o \
-         obj/vidhrdw/matmania.o obj/drivers/matmania.o \
-         obj/vidhrdw/tutankhm.o obj/drivers/tutankhm.o \
-         obj/machine/spacefb.o obj/vidhrdw/spacefb.o obj/drivers/spacefb.o \
-         obj/machine/mappy.o obj/vidhrdw/mappy.o obj/drivers/mappy.o \
-         obj/vidhrdw/ccastles.o obj/drivers/ccastles.o \
-         obj/vidhrdw/yiear.o obj/sndhrdw/yiear.o obj/drivers/yiear.o \
-         obj/machine/digdug.o obj/vidhrdw/digdug.o obj/drivers/digdug.o \
-         obj/machine/asteroid.o obj/sndhrdw/asteroid.o \
-		 obj/machine/atari_vg.o obj/drivers/asteroid.o \
-         obj/drivers/bwidow.o \
-         obj/sndhrdw/bzone.o  obj/drivers/bzone.o \
-         obj/sndhrdw/redbaron.o \
-         obj/drivers/tempest.o \
-         obj/machine/starwars.o obj/machine/swmathbx.o obj/drivers/starwars.o obj/sndhrdw/starwars.o \
-         obj/machine/mhavoc.o obj/drivers/mhavoc.o \
-         obj/machine/quantum.o obj/drivers/quantum.o \
-         obj/machine/missile.o obj/vidhrdw/missile.o obj/drivers/missile.o \
-         obj/machine/bublbobl.o obj/vidhrdw/bublbobl.o obj/drivers/bublbobl.o \
-         obj/vidhrdw/eggs.o obj/drivers/eggs.o \
-         obj/machine/bosco.o obj/sndhrdw/bosco.o obj/vidhrdw/bosco.o obj/drivers/bosco.o \
-         obj/vidhrdw/yard.o obj/drivers/yard.o \
-         obj/vidhrdw/blueprnt.o obj/drivers/blueprnt.o \
-         obj/vidhrdw/sega.o obj/sndhrdw/sega.o obj/machine/sega.o obj/drivers/sega.o \
-         obj/vidhrdw/segar.o obj/sndhrdw/segar.o obj/machine/segar.o obj/drivers/segar.o \
-         obj/sndhrdw/monsterb.o \
-         obj/drivers/omegrace.o \
-         obj/vidhrdw/xevious.o obj/machine/xevious.o obj/drivers/xevious.o \
-         obj/vidhrdw/bankp.o obj/drivers/bankp.o \
-         obj/vidhrdw/sbasketb.o obj/drivers/sbasketb.o \
-         obj/machine/mcr.o \
-         obj/vidhrdw/mcr1.o obj/vidhrdw/mcr2.o obj/vidhrdw/mcr3.o \
-         obj/drivers/mcr1.o obj/drivers/mcr2.o obj/drivers/mcr3.o \
-         obj/machine/espial.o obj/vidhrdw/espial.o obj/drivers/espial.o \
-         obj/machine/tp84.o obj/vidhrdw/tp84.o obj/drivers/tp84.o \
-         obj/vidhrdw/mikie.o obj/drivers/mikie.o \
-         obj/vidhrdw/ironhors.o obj/drivers/ironhors.o \
-         obj/vidhrdw/shaolins.o obj/drivers/shaolins.o \
-         obj/machine/rastan.o obj/vidhrdw/rastan.o obj/sndhrdw/rastan.o obj/drivers/rastan.o \
-         obj/machine/cloak.o obj/vidhrdw/cloak.o obj/drivers/cloak.o \
-         obj/machine/lwings.o obj/vidhrdw/lwings.o obj/drivers/lwings.o \
-         obj/machine/berzerk.o obj/vidhrdw/berzerk.o obj/sndhrdw/berzerk.o obj/drivers/berzerk.o \
-         obj/machine/capbowl.o obj/vidhrdw/capbowl.o obj/drivers/capbowl.o \
-         obj/vidhrdw/1943.o obj/drivers/1943.o \
-         obj/vidhrdw/gunsmoke.o obj/drivers/gunsmoke.o \
-         obj/vidhrdw/blktiger.o obj/drivers/blktiger.o \
-         obj/vidhrdw/tecmo.o obj/drivers/tecmo.o \
-         obj/vidhrdw/gaiden.o obj/drivers/gaiden.o \
-         obj/vidhrdw/sidearms.o obj/drivers/sidearms.o \
-         obj/vidhrdw/srumbler.o obj/drivers/srumbler.o \
-         obj/vidhrdw/champbas.o obj/drivers/champbas.o \
-         obj/vidhrdw/pbaction.o obj/drivers/pbaction.o \
-         obj/vidhrdw/exerion.o obj/drivers/exerion.o \
-         obj/machine/arkanoid.o obj/vidhrdw/arkanoid.o obj/drivers/arkanoid.o \
-         obj/machine/slapstic.o \
-         obj/machine/gauntlet.o obj/vidhrdw/gauntlet.o obj/drivers/gauntlet.o \
-         obj/machine/atarisy1.o obj/vidhrdw/atarisy1.o obj/drivers/atarisy1.o \
-         obj/machine/foodf.o obj/vidhrdw/foodf.o obj/drivers/foodf.o \
-         obj/vidhrdw/circus.o obj/drivers/circus.o \
-         obj/machine/konami.o obj/vidhrdw/trackfld.o obj/sndhrdw/trackfld.o obj/drivers/trackfld.o \
-         obj/vidhrdw/hyperspt.o obj/drivers/hyperspt.o \
-         obj/vidhrdw/rocnrope.o obj/drivers/rocnrope.o \
-         obj/vidhrdw/circusc.o obj/drivers/circusc.o \
-         obj/vidhrdw/pingpong.o obj/drivers/pingpong.o \
-         obj/vidhrdw/astrof.o obj/drivers/astrof.o \
-         obj/machine/sprint2.o obj/vidhrdw/sprint2.o obj/drivers/sprint2.o \
-         obj/vidhrdw/punchout.o obj/sndhrdw/punchout.o obj/drivers/punchout.o \
-         obj/vidhrdw/firetrap.o obj/drivers/firetrap.o \
-         obj/vidhrdw/jack.o obj/drivers/jack.o \
-         obj/machine/vastar.o obj/vidhrdw/vastar.o obj/drivers/vastar.o \
-         obj/vidhrdw/brkthru.o obj/drivers/brkthru.o \
-         obj/vidhrdw/citycon.o obj/drivers/citycon.o \
-         obj/machine/starfire.o obj/vidhrdw/starfire.o obj/drivers/starfire.o \
-         obj/machine/sbrkout.o obj/vidhrdw/sbrkout.o obj/drivers/sbrkout.o \
-         obj/vidhrdw/superqix.o obj/drivers/superqix.o \
-         obj/machine/jedi.o obj/vidhrdw/jedi.o obj/sndhrdw/jedi.o obj/drivers/jedi.o \
-         obj/vidhrdw/gameplan.o obj/drivers/gameplan.o \
-         obj/machine/dominos.o obj/vidhrdw/dominos.o obj/drivers/dominos.o \
-         obj/vidhrdw/jumpcoas.o obj/drivers/jumpcoas.o \
-         obj/vidhrdw/tankbatt.o obj/drivers/tankbatt.o \
-         obj/machine/rainbow.o obj/drivers/rainbow.o \
-         obj/vidhrdw/nitedrvr.o obj/machine/nitedrvr.o obj/drivers/nitedrvr.o \
-         obj/vidhrdw/lrunner.o obj/drivers/lrunner.o \
-         obj/vidhrdw/liberatr.o obj/machine/liberatr.o obj/drivers/liberatr.o \
-         obj/vidhrdw/wiz.o obj/drivers/wiz.o \
-         obj/vidhrdw/blockout.o obj/drivers/blockout.o \
-         obj/vidhrdw/fastfred.o obj/drivers/fastfred.o \
-         obj/vidhrdw/thepit.o obj/drivers/thepit.o \
-         obj/vidhrdw/bsktball.o obj/machine/bsktball.o obj/drivers/bsktball.o \
-         obj/vidhrdw/copsnrob.o obj/machine/copsnrob.o obj/drivers/copsnrob.o \
-         obj/vidhrdw/toki.o obj/sndhrdw/toki.o obj/drivers/toki.o \
-         obj/vidhrdw/snowbros.o obj/drivers/snowbros.o \
-         obj/machine/cps1.o obj/vidhrdw/cps1.o obj/drivers/cps1.o \
-         obj/vidhrdw/gundealr.o obj/drivers/gundealr.o \
-         obj/machine/tnzs.o obj/vidhrdw/tnzs.o obj/drivers/tnzs.o \
-         obj/vidhrdw/route16.o obj/drivers/route16.o \
-         obj/vidhrdw/wc90.o obj/drivers/wc90.o \
-         obj/vidhrdw/wc90b.o obj/drivers/wc90b.o \
-         obj/drivers/twincobr.o \
-         obj/machine/dec0.o obj/vidhrdw/dec0.o obj/drivers/dec0.o \
-         obj/vidhrdw/karnov.o obj/drivers/karnov.o \
-         obj/machine/toobin.o obj/vidhrdw/toobin.o obj/drivers/toobin.o \
-         obj/vidhrdw/tigeroad.o obj/drivers/tigeroad.o \
-         obj/vidhrdw/blockade.o obj/drivers/blockade.o \
-         obj/machine/leprechn.o obj/vidhrdw/leprechn.o obj/drivers/leprechn.o \
-         obj/vidhrdw/atetris.o obj/drivers/atetris.o \
-         obj/vidhrdw/dday.o obj/drivers/dday.o \
-         obj/machine/system8.o obj/drivers/system8.o \
-         obj/Z80/Z80.o obj/M6502/M6502.o obj/I86/I86.o obj/I8039/I8039.o \
-		 obj/M6809/m6809.o obj/M6808/m6808.o obj/M6805/m6805.o \
-         obj/M68000/opcode0.o obj/M68000/opcode1.o obj/M68000/opcode2.o obj/M68000/opcode3.o obj/M68000/opcode4.o obj/M68000/opcode5.o \
-         obj/M68000/opcode6.o obj/M68000/opcode7.o obj/M68000/opcode8.o obj/M68000/opcode9.o obj/M68000/opcodeb.o \
-         obj/M68000/opcodec.o obj/M68000/opcoded.o obj/M68000/opcodee.o obj/M68000/mc68kmem.o \
-         obj/M68000/cpufunc.o \
-         obj/mamedbg.o obj/asg.o obj/M6502/6502dasm.o \
-         obj/M6809/6809dasm.o obj/M6808/6808dasm.o obj/M6805/6805dasm.o \
-         obj/M68000/m68kdasm.o \
-		 obj/osdepend.o obj/sdl/stricmp.o obj/sdl/fileio.o
+# extension for executables
+EXE =
 
-#         obj/msdos/msdos.o obj/msdos/video.o obj/msdos/vector.o obj/msdos/sound.o \
-#         obj/msdos/input.o obj/msdos/fileio.o obj/msdos/config.o obj/msdos/fronthlp.o
+# CPU core include paths
+VPATH=src $(wildcard src/cpu/*)
 
-VPATH = src src/Z80
+# compiler, linker and utilities
+AR = @ar
+CC = @gcc
+LD = @gcc
+#ASM = @nasm
+ASM = nasmw
+ASMFLAGS = -f coff
 
-all: mame
+ifdef DEBUG
+NAME = $(TARGET)d
+else
+NAME = $(TARGET)
+endif
 
-obj:
-	mkdir -p $@
-	mkdir -p $@/sdl
-	mkdir -p $@/drivers
-	mkdir -p $@/machine
-	mkdir -p $@/vidhrdw
-	mkdir -p $@/sndhrdw
-	mkdir -p $@/Z80
-	mkdir -p $@/M68000
-	mkdir -p $@/M6809
-	mkdir -p $@/M6808
-	mkdir -p $@/M6805
-	mkdir -p $@/M6502
-	mkdir -p $@/I86
-	mkdir -p $@/I8039
+# build the targets in different object dirs, since mess changes
+# some structures and thus they can't be linked against each other.
+# cleantiny isn't needed anymore, because the tiny build has its
+# own object directory too.
+OBJ = $(NAME).obj
+
+EMULATOR = $(NAME)$(EXE)
+
+DEFS = -DLSB_FIRST
+
+WALL=-Wall
+WERROR=-Werror
+WALL=-w
+WERROR=
+OPTIMIZE_OR_DEBUG=-ggdb
+
+INCLUDES=-Isrc -Isrc/sdl -I$(OBJ)/cpu/m68000 -Isrc/cpu/m68000 -Isrc/sdl -I/usr/include/SDL2 -DINLINE=static
+ifdef SYMBOLS
+CFLAGS = ${INCLUDES} \
+	-pedantic ${WALL} ${WERROR} -Wno-unused ${OPTIMIZE_OR_DEBUG}
+else
+CFLAGS = ${INCLUDES} \
+	-DNDEBUG \
+	$(ARCH) ${OPTIMIZE_OR_DEBUG} -fomit-frame-pointer -fstrict-aliasing \
+	${WALL} ${WERROR} -Wno-sign-compare -Wunused \
+	-Wpointer-arith -Wbad-function-cast -Wcast-align -Waggregate-return \
+	-pedantic \
+	-Wshadow \
+	-Wstrict-prototypes
+#	-W had to remove because of the "missing initializer" warning
+#	-Wredundant-decls \
+#	-Wlarger-than-27648 \
+#	-Wcast-qual \
+#	-Wwrite-strings \
+#	-Wconversion \
+#	-Wmissing-prototypes \
+#	-Wmissing-declarations
+endif
+
+ifdef SYMBOLS
+LDFLAGS = -ggdb
+else
+#LDFLAGS = -s -Wl,--warn-common
+LDFLAGS = -ggdb
+endif
+
+LIBS   = -lSDL2 -lSDL2_mixer -lm -lz
+
+# check that the required libraries are available
+
+#if obj subdirectory doesn't exist, create the tree before proceeding
+ifeq ($(wildcard $(OBJ)),)
+noobj: maketree all
+endif
+
+all:	$(EMULATOR) extra
+
+# include the various .mak files
+include src/core.mak
+include src/$(TARGET).mak
+include src/rules.mak
+include src/$(OS)/$(OS).mak
+
+ifdef DEBUG
+DBGDEFS = -DMAME_DEBUG
+else
+DBGDEFS =
+DBGOBJS =
+endif
+
+extra: $(TEXTS)
+#$(TOOLS)
+#romcmp$(EXE)
+
+# combine the various definitions to one
+CDEFS = $(DEFS) $(COREDEFS) $(CPUDEFS) $(SOUNDDEFS) $(ASMDEFS) $(DBGDEFS)
+
+$(EMULATOR): $(OBJS) $(COREOBJS) $(OSOBJS) $(LIBS) $(DRVLIBS)
+# always recompile the version string
+	$(CC) $(CDEFS) $(CFLAGS) -c src/version.c -o $(OBJ)/version.o
+	@echo Linking $@...
+	$(LD) $(LDFLAGS) $(OBJS) $(COREOBJS) $(OSOBJS) $(LIBS) $(DRVLIBS) -o $@
+
+romcmp$(EXE): $(OBJ)/romcmp.o $(OBJ)/unzip.o
+	@echo Linking $@...
+	$(LD) $(LDFLAGS) $^ -lz -o $@
+
+$(OBJ)/%.o: src/%.c
+	@echo Compiling $<...
+	$(CC) $(CDEFS) $(CFLAGS) -c $< -o $@
+
+# compile generated C files for the 68000 emulator
+$(M68000_GENERATED_OBJS): $(OBJ)/cpu/m68000/m68kmake$(EXE)
+	@echo Compiling $(subst .o,.c,$@)...
+	$(CC) $(CDEFS) $(CFLAGS) -c $*.c -o $@
+
+# additional rule, because m68kcpu.c includes the generated m68kops.h :-/
+$(OBJ)/cpu/m68000/m68kcpu.o: $(OBJ)/cpu/m68000/m68kmake$(EXE)
+
+# generate C source files for the 68000 emulator
+$(OBJ)/cpu/m68000/m68kmake$(EXE): src/cpu/m68000/m68kmake.c
+	@echo M68K make $<...
+	$(CC) $(CDEFS) $(CFLAGS) -DDOS -o $(OBJ)/cpu/m68000/m68kmake$(EXE) $<
+	@echo Generating M68K source files...
+	$(OBJ)/cpu/m68000/m68kmake $(OBJ)/cpu/m68000 src/cpu/m68000/m68k_in.c
+
+# generate asm source files for the 68000 emulator
+$(OBJ)/cpu/m68000/68kem.asm:  src/cpu/m68000/make68k.c
+	@echo Compiling $<...
+	$(CC) $(CDEFS) $(CFLAGS) -O0 -DDOS -o $(OBJ)/cpu/m68000/make68k$(EXE) $<
+	@echo Generating $@...
+	@$(OBJ)/cpu/m68000/make68k$(EXE) $@ $(OBJ)/cpu/m68000/comptab.asm
+
+# generated asm files for the 68000 emulator
+$(OBJ)/cpu/m68000/68kem.o:  $(OBJ)/cpu/m68000/68kem.asm
+	@echo Assembling $<...
+	$(ASM) -o $@ $(ASMFLAGS) $(subst -D,-d,$(ASMDEFS)) $<
+
+$(OBJ)/%.a:
+	@echo Archiving $@...
+	$(AR) cr $@ $^
+
+makedir:
+	@echo make makedir is no longer necessary, just type make
+
+maketree:
+	@echo Making MAME object tree in $(OBJ)...
+	@mkdir $(OBJ)
+	@mkdir $(OBJ)/cpu
+	@mkdir $(OBJ)/cpu/z80
+	@mkdir $(OBJ)/cpu/z80gb
+	@mkdir $(OBJ)/cpu/m6502
+	@mkdir $(OBJ)/cpu/h6280
+	@mkdir $(OBJ)/cpu/i86
+	@mkdir $(OBJ)/cpu/nec
+	@mkdir $(OBJ)/cpu/i8039
+	@mkdir $(OBJ)/cpu/i8085
+	@mkdir $(OBJ)/cpu/m6800
+	@mkdir $(OBJ)/cpu/m6805
+	@mkdir $(OBJ)/cpu/m6809
+	@mkdir $(OBJ)/cpu/konami
+	@mkdir $(OBJ)/cpu/m68000
+	@mkdir $(OBJ)/cpu/s2650
+	@mkdir $(OBJ)/cpu/t11
+	@mkdir $(OBJ)/cpu/tms34010
+	@mkdir $(OBJ)/cpu/tms9900
+	@mkdir $(OBJ)/cpu/z8000
+	@mkdir $(OBJ)/cpu/tms32010
+	@mkdir $(OBJ)/cpu/ccpu
+	@mkdir $(OBJ)/cpu/adsp2100
+	@mkdir $(OBJ)/cpu/pdp1
+	@mkdir $(OBJ)/cpu/mips
+	@mkdir $(OBJ)/cpu/sc61860
+	@mkdir $(OBJ)/sound
+	@mkdir $(OBJ)/sdl
+	@mkdir $(OBJ)/drivers
+	@mkdir $(OBJ)/machine
+	@mkdir $(OBJ)/vidhrdw
+	@mkdir $(OBJ)/sndhrdw
+ifdef MESS
+	@echo Making MESS object tree in $(OBJ)/mess...
+	@mkdir $(OBJ)/mess
+	@mkdir $(OBJ)/mess/systems
+	@mkdir $(OBJ)/mess/machine
+	@mkdir $(OBJ)/mess/vidhrdw
+	@mkdir $(OBJ)/mess/sndhrdw
+	@mkdir $(OBJ)/mess/tools
+endif
+
+clean:
+	@echo Deleting object tree $(OBJ)...
+	rm -rf $(OBJ)
+	@echo Deleting $(EMULATOR)...
+	@rm -f $(EMULATOR)
+
+cleandebug:
+	@echo Deleting debug obj tree...
+	@rm -f $(OBJ)/*.o
+	@rm -f $(OBJ)/cpu/z80/*.o
+	@rm -f $(OBJ)/cpu/z80gb/*.o
+	@rm -f $(OBJ)/cpu/m6502/*.o
+	@rm -f $(OBJ)/cpu/h6280/*.o
+	@rm -f $(OBJ)/cpu/i86/*.o
+	@rm -f $(OBJ)/cpu/nec/*.o
+	@rm -f $(OBJ)/cpu/i8039/*.o
+	@rm -f $(OBJ)/cpu/i8085/*.o
+	@rm -f $(OBJ)/cpu/m6800/*.o
+	@rm -f $(OBJ)/cpu/m6805/*.o
+	@rm -f $(OBJ)/cpu/m6809/*.o
+	@rm -f $(OBJ)/cpu/konami/*.o
+	@rm -f $(OBJ)/cpu/m68000/*.o
+	@rm -f $(OBJ)/cpu/m68000/*.c
+	@rm -f $(OBJ)/cpu/s2650/*.o
+	@rm -f $(OBJ)/cpu/t11/*.o
+	@rm -f $(OBJ)/cpu/tms34010/*.o
+	@rm -f $(OBJ)/cpu/tms9900/*.o
+	@rm -f $(OBJ)/cpu/z8000/*.o
+	@rm -f $(OBJ)/cpu/tms32010/*.o
+	@rm -f $(OBJ)/cpu/ccpu/*.o
+	@rm -f $(OBJ)/cpu/adsp2100/*.o
+	@rm -f $(OBJ)/cpu/pdp1/*.o
+	@rm -f $(OBJ)/cpu/mips/*.o
+	@rm -f $(EMULATOR)
+
+cleanall: clean
+	rm -rf gamelist.txt obj
 
 fromdos_everything:
 	for i in `find src | grep \\\.c$$` ; do fromdos "$$i" ; done
 	for i in `find src | grep \\\.h$$` ; do fromdos "$$i" ; done
-	fromdos *.txt
+	fromdos *.txt src/*txt src/*/*txt
 
-wavtosam/wavtosam:
-	cd wavtosam; ${MAKE} wavtosam
+newfix:
+	for i in `grep -rl "GAMENAME\#\# " src`; do sed -e "s,GAMENAME\#\# ,GAMENAME ,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "\#\#name\#\#" src`; do sed -e "s,\#\#name\#\#,name##,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "\#\#paltype\#\#" src`; do sed -e "s,\#\#paltype\#\#,paltype,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
 
-mame: obj $(OBJS)
-	$(LD) ${DEBUG_OR_OPTIMIZE} ${STRIP_OR_NOT} -o $@ $(OBJS) $(LIBS)
-
-obj/osdepend.o: src/sdl/sdl.c
-	 $(CC) $(DEFS) $(CFLAGS) -Isrc/sdl -o $@ -c $<
-
-obj/%.o: src/%.c
-	 $(CC) $(DEFS) $(CFLAGS) -o $@ -c $<
-
-# dependencies
-obj/%.o:	    common.h machine.h driver.h
-obj/Z80.o:  Z80.c Z80.h Z80Codes.h Z80IO.h DAA.h
-
-
-clean:
-	rm -f obj/*.o
-	rm -f obj/Z80/*.o
-	rm -f obj/pacman/*.o
-	rm -f obj/crush/*.o
-	rm -f obj/pengo/*.o
-	rm -f obj/ladybug/*.o
-	rm -f wavtosam/wavtosam
-
-cleanall: clean
-	rm -f src/Z80/*.o src/Z80/z80dasm mame roms/*/*.dsw romcmp #dsw is dip switch settings
-	-rmdir roms/* >/dev/null 2>&1
-	rm -rf obj mame.obj
+fix:
+	rm -f src/drivers/jrcrypt.c # RAM undefined (no decryption?)
+	rm -f src/romcmp.c # msdos stuff in there
+	-mv src/sound/tms5220r.c src/sound/tms5220r.included_c # this c file is included in another.  we don't want to auto include it in our c source list, so rename it
+	for i in `grep -rl "MAX_OUTPUT.*0x7fff" src`; do sed -e "s,MAX_OUTPUT.*0x7fff,MAX_OUTPUT ((double) 0x7fff),g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+#define MAX_OUTPUT ( (double) 0x7fff )
+	for i in `grep -rl "tms5220r.c" src`; do sed -e "s,tms5220r.c,tms5220r.included_c,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "ay8910u.c" src`; do sed -e "s,ay8910u.c,ay8910u.included_c,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "sn76496u.c" src`; do sed -e "s,sn76496u.c,sn76496u.included_c,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "rda##advance" src`; do sed -e "s,rda##advance,rda advance,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "s16sprit.c" src`; do grep -v "s16sprit.c" "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Ii]8085/[Ii]8085" src`; do sed -e "s,[Ii]8085/[Ii]8085,i8085/i8085,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "I8085cpu.h" src`; do sed -e "s,[Ii]8085cpu.h,i8085cpu.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "I8085daa.h" src`; do sed -e "s,[Ii]8085daa.h,i8085daa.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Tt]11/[Tt]11.h" src`; do sed -e "s,[Tt]11/[Tt]11.h,t11/t11.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "machine/[Zz]80fmly.h" src`; do sed -e "s,machine/[Zz]80fmly.h,machine/z80fmly.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Zz]80.[Zz]80.h" src`; do sed -e "s,[Zz]80.[Zz]80.h,z80/z80.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Tt][Mm][Ss]9900/[Tt][Mm][Ss]9900" src`; do sed -e "s,[Tt][Mm][Ss]9900/[Tt][Mm][Ss]9900,tms9900/tms9900,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Tt][Mm][Ss]34010/[Tt][Mm][Ss]34010" src`; do sed -e "s,[Tt][Mm][Ss]34010/[Tt][Mm][Ss]34010,tms34010/tms34010,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Tt][Mm][Ss]34061/[Tt][Mm][Ss]34061" src`; do sed -e "s,[Tt][Mm][Ss]34061/[Tt][Mm][Ss]34061,tms34061/tms34061,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Mm]68000/[Mm]68000.h" src`; do sed -e "s,[Mm]68000/[Mm]68000.h,m68000/m68000.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Mm]6502/[Mm]6502.h" src`; do sed -e "s,[Mm]6502/[Mm]6502.h,m6502/m6502.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Mm]6805/[Mm]6805.h" src`; do sed -e "s,[Mm]6805/[Mm]6805.h,m6805/m6805.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Mm]6808/[Mm]6808.h" src`; do sed -e "s,[Mm]6808/[Mm]6808.h,m6808/m6808.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Mm]6809/[Mm]6809.h" src`; do sed -e "s,[Mm]6809/[Mm]6809.h,m6809/m6809.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Mm]68000.h" src`; do sed -e "s,[Mm]68000.h,m68000.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	for i in `grep -rl "[Mm]6809.h" src`; do sed -e "s,[Mm]6809.h,m6809.h,g" < "$$i" > /tmp/joe; mv /tmp/joe "$$i"; done
+	sed -e "s,\&\#\#,\&,g" < "src/cpuintrf.c" > /tmp/joe; mv /tmp/joe "src/cpuintrf.c"
+	grep -v M_PI src/driver.h > /tmp/joe
+	echo "#define PI M_PI" >> /tmp/joe
+	mv /tmp/joe src/driver.h

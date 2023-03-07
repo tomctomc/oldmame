@@ -1,5 +1,3 @@
-#define GFX_REGIONS 1
-
 /***************************************************************************
 
   vidhrdw.c
@@ -16,67 +14,42 @@
 extern unsigned char *tnzs_objram;
 extern unsigned char *tnzs_vdcram;
 extern unsigned char *tnzs_scrollram;
-int tnzs_objram_size;
-extern unsigned char *banked_ram_0, *banked_ram_1;
 
 
-extern unsigned char *tnzs_objectram;
-       unsigned char *tnzs_paletteram;
-extern unsigned char *tnzs_workram;
-extern int tnzs_objectram_size;
-static struct osd_bitmap *sc1bitmap;
+static struct osd_bitmap *tnzs_column[16];
+static int tnzs_dirty_map[32][16];
+static int tnzs_screenflip, old_tnzs_screenflip;
 
+/***************************************************************************
+
+  The New Zealand Story doesn't have a color PROM. It uses 1024 bytes of RAM
+  to dynamically create the palette. Each couple of bytes defines one
+  color (15 bits per pixel; the top bit of the second byte is unused).
+  Since the graphics use 4 bitplanes, hence 16 colors, this makes for 32
+  different color codes.
+
+***************************************************************************/
 
 
 /***************************************************************************
 
   Convert the color PROMs into a more useable format.
 
-  Bubble Bobble doesn't have a color PROM. It uses 512 bytes of RAM to
-  dynamically create the palette. Each couple of bytes defines one
-  color (4 bits per pixel; the low 4 bits of the second byte are unused).
-  Since the graphics use 4 bitplanes, hence 16 colors, this makes for 16
-  different color codes.
-
-  I don't know the exact values of the resistors between the RAM and the
-  RGB output. I assumed these values (the same as Commando)
-  bit 7 -- 220 ohm resistor  -- RED
-        -- 470 ohm resistor  -- RED
-        -- 1  kohm resistor  -- RED
-        -- 2.2kohm resistor  -- RED
-        -- 220 ohm resistor  -- GREEN
-        -- 470 ohm resistor  -- GREEN
-        -- 1  kohm resistor  -- GREEN
-  bit 0 -- 2.2kohm resistor  -- GREEN
-
-  bit 7 -- 220 ohm resistor  -- BLUE
-        -- 470 ohm resistor  -- BLUE
-        -- 1  kohm resistor  -- BLUE
-        -- 2.2kohm resistor  -- BLUE
-         -- unused
-        -- unused
-        -- unused
-  bit 0 -- unused
+  Arkanoid has a two 512x8 palette PROMs. The two bytes joined together
+  form 512 xRRRRRGGGGGBBBBB color values.
 
 ***************************************************************************/
-
-void tnzs_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void arkanoi2_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
-	int i;
+	int i,col;
 
-
-	/* the palette will be initialized by the game. We just set it to some */
-	/* pre-cooked values so the startup copyright notice can be displayed. */
 	for (i = 0;i < Machine->drv->total_colors;i++)
 	{
-		*(palette++) = ((i & 1) >> 0) * 0xff;
-		*(palette++) = ((i & 2) >> 1) * 0xff;
-		*(palette++) = ((i & 4) >> 2) * 0xff;
+		col = (color_prom[i]<<8)+color_prom[i+512];
+		*(palette++) =  (col & 0x7c00)>>7;	/* Red */
+		*(palette++) =  (col & 0x03e0)>>2;	/* Green */
+		*(palette++) =  (col & 0x001f)<<3;	/* Blue */
 	}
-
-	/* initialize the color table */
-	for (i = 0;i < Machine->drv->total_colors;i++)
-		colortable[i] = i;
 }
 
 
@@ -88,24 +61,24 @@ void tnzs_vh_convert_color_prom(unsigned char *palette, unsigned char *colortabl
 ***************************************************************************/
 int tnzs_vh_start(void)
 {
-	if ((sc1bitmap = osd_create_bitmap(18 * 16, 16 * 16)) == 0)
-		return 1;
-
-	/* In Bubble Bobble the video RAM and the color RAM and interleaved, */
-	/* forming a contiguous memory region 0x800 bytes long. We only need half */
-	/* that size for the dirtybuffer */
-	if ((dirtybuffer = malloc(videoram_size / 2)) == 0)
+	int column,x,y;
+	for (column=0;column<16;column++)
 	{
-		osd_free_bitmap(sc1bitmap);
-		return 1;
+		if ((tnzs_column[column] = bitmap_alloc(32,256)) == 0)
+		{
+			/* Free all the columns */
+			for (column--;column;column--)
+				bitmap_free(tnzs_column[column]);
+			return 1;
+		}
 	}
-	memset(dirtybuffer,1,videoram_size / 2);
 
-	if ((tmpbitmap = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
+	for (x=0;x<32;x++)
 	{
-		osd_free_bitmap(sc1bitmap);
-		free(dirtybuffer);
-		return 1;
+		for (y=0;y<16;y++)
+		{
+			tnzs_dirty_map[x][y] = -1;
+		}
 	}
 
 	return 0;
@@ -120,162 +93,14 @@ int tnzs_vh_start(void)
 ***************************************************************************/
 void tnzs_vh_stop(void)
 {
-	osd_free_bitmap(sc1bitmap);
-	osd_free_bitmap(tmpbitmap);
-	free(dirtybuffer);
+	int column;
+
+	/* Free all the columns */
+	for (column=0;column<16;column++)
+		bitmap_free(tnzs_column[column]);
 }
 
 
-
-void tnzs_videoram_w(int offset,int data)
-{
-	if (videoram[offset] != data)
-	{
-		dirtybuffer[offset / 2] = 1;
-		videoram[offset] = data;
-	}
-}
-
-
-
-void tnzs_objectram_w(int offset,int data)
-{
-	if (tnzs_objectram[offset] != data)
-	{
-		/* gfx bank selector for the background playfield */
-		if (offset < 0x40 && offset % 4 == 3) memset(dirtybuffer,1,videoram_size / 2);
-		tnzs_objectram[offset] = data;
-	}
-}
-
-
-
-void tnzs_paletteram_w(int offset,int data)
-{
-	int bit0,bit1,bit2,bit3;
-	int r,g,b,val;
-
-
-	tnzs_paletteram[offset] = data;
-
-	/* red component */
-	val = tnzs_paletteram[offset & ~1];
-	bit0 = (val >> 4) & 0x01;
-	bit1 = (val >> 5) & 0x01;
-	bit2 = (val >> 6) & 0x01;
-	bit3 = (val >> 7) & 0x01;
-	r = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
-
-	/* green component */
-	val = tnzs_paletteram[offset & ~1];
-	bit0 = (val >> 0) & 0x01;
-	bit1 = (val >> 1) & 0x01;
-	bit2 = (val >> 2) & 0x01;
-	bit3 = (val >> 3) & 0x01;
-	g = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
-
-	/* blue component */
-	val = tnzs_paletteram[offset | 1];
-	bit0 = (val >> 4) & 0x01;
-	bit1 = (val >> 5) & 0x01;
-	bit2 = (val >> 6) & 0x01;
-	bit3 = (val >> 7) & 0x01;
-	b = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
-
-	osd_modify_pen(Machine->pens[(offset / 2) ^ 0x0f],r,g,b);
-}
-
-
-
-void tnzs_vh_draw_background(struct osd_bitmap *bitmap,
-					  unsigned char *m)
-{
-	static int sc1map[18][16];
-	int i, b, c, x, y, sx, sy;
-
-	/* this is probably the right place */
-	sx = tnzs_scrollram[0x14]; sy = tnzs_scrollram[0x10];
-
-	/* the byte at 0x24 is 0x20 ahead of sx's value, so if sx is
-	   reading a true e0-ff, 0x24 will read a false but identical
-	   value.  so if 0x24's value is different, sx's value is
-	   false...  geddit? */
-	if (sx >= 0xe0 && tnzs_scrollram[0x24] != sx) sx += 0x20;
-	sx = -sx; sy = -sy;
-
-	for (i = 0; i < 0x20 * 9; i++)
-	{
-		if (i > 0xff) { b = m[i - 0x200 + 0x1000]; c = m[i - 0x200]; }
-		else { b = m[i + 0x1000]; c = m[i]; }
-
-		x = ((i / 32) * 2 + (i % 2)); y = ((i % 32) / 2);
-
-		if (sc1map[x][y] != 0x100*b+c)
-		{
-			sc1map[x][y] = 0x100*b+c;
-
-			drawgfx(sc1bitmap,
-					Machine->gfx[b / (32/GFX_REGIONS)],	/* bank */
-					(b%(32/GFX_REGIONS)) * 0x100 + c, /* code */
-					0, 0, 0,	/* color, flipx, flipy */
-					(2 * 288 - 16*x - 16) % 288, /* x */
-					(2 * 256 + 16*y - 16) % 256, /* y */
-					0, TRANSPARENCY_NONE, 0); /* other stuff */
-		}
-	}
-
-	copyscrollbitmap(bitmap,sc1bitmap,
-					 1,&sx,
-					 1,&sy,
-					 &Machine->drv->visible_area,
-					 TRANSPARENCY_COLOR,0);
-}
-
-void tnzs_vh_draw_foreground(struct osd_bitmap *bitmap,
-							 unsigned char *char_pointer,
-							 unsigned char *x_pointer,
-							 unsigned char *y_pointer,
-							 unsigned char *ctrl_pointer,
-							 unsigned char *vis_pointer)
-{
-	int i, c;
-
-	for (i = 0xff; i >= 0; i--)
-	{
-		c = char_pointer[i];
-#if 0
-		if (y_pointer[i] != 0xf8) /* this is either a special code
-									 meaning 'don't draw' or f8-ff
-									 just happens to be off the screen
-									 */
-#endif
-		{
-#if 0
-			if (errorlog)
-				fprintf(errorlog,
-						"show a '%c' (%02x) at %d, %d\n",
-						c, c,
-						x_pointer[i],
-						y_pointer[i]);
-#endif
-
-			if ((vis_pointer[i] & 1) == 0)
-				drawgfx(bitmap,
-						Machine->gfx[((ctrl_pointer[i] & 15) /
-									  (32/GFX_REGIONS))],
-						((ctrl_pointer[i] & 15)%
-						 (32/GFX_REGIONS)) * 0x100 + c, /* code */
-						0,			/* color */
-						ctrl_pointer[i] & 0x80, 0, /* flipx, flipy */
-						256 - 16 - (((x_pointer[i] - 16) % 256) + 16), /* x */
-						256 - y_pointer[i] - 32, /* y */
-						0,			/* clip */
-						TRANSPARENCY_PEN, /* transparency */
-						0);			/* transparent_color */
-			/* } */
-		}
-	}
-}
 
 /***************************************************************************
 
@@ -284,111 +109,230 @@ void tnzs_vh_draw_foreground(struct osd_bitmap *bitmap,
   the main emulation engine.
 
 ***************************************************************************/
-extern int number_of_credits;
-void tnzs_vh_screenrefresh(struct osd_bitmap *bitmap)
+
+void tnzs_vh_draw_background(struct osd_bitmap *bitmap,unsigned char *m)
 {
-	if (osd_key_pressed(OSD_KEY_3))
+	int i,x,y,column,tot;
+	int scrollx, scrolly;
+	unsigned int upperbits;
+
+	/* The screen is split into 16 columns.
+	   So first, update the tiles. */
+	for (i=0,column=0;column<16;column++)
 	{
-		while (osd_key_pressed(OSD_KEY_3));
-		number_of_credits++;
-	}
-
-#if 1
-	fillbitmap(bitmap, Machine->pens[0],
-			   &Machine->drv->visible_area);
-#endif
-
-	tnzs_vh_draw_background(bitmap, tnzs_objram + 0x500);
-
-#if 0							/* this is the one i've been using */
-	tnzs_vh_draw_foreground(bitmap,
-							tnzs_workram + 0x400, /* chars : e400 */
-							tnzs_workram + 0x200, /*     x : e200 */
-							tnzs_workram + 0x100, /*     y : e100 */
-							tnzs_workram + 0x500, /*  ctrl : e500 */
-							tnzs_workram + 0x300); /*  vis : e300 */
-#endif
-	tnzs_vh_draw_foreground(bitmap,
-							tnzs_objram + 0x0000, /* chars : c000 */
-							tnzs_objram + 0x0200, /*     x : c200 */
-							tnzs_vdcram + 0x0000, /*     y : f000 */
-							tnzs_objram + 0x1000, /*  ctrl : d000 */
-							tnzs_objram + 0x1200); /*  vis : d200 */
-
-#if 0
-	{
-		int fps,i,j;
-		static unsigned char *base, *basebase = NULL;
-		static int show_hex = 0;
-
-		if (basebase == NULL)
+		for (y=0;y<16;y++)
 		{
-			base = tnzs_objram;
-			basebase = tnzs_objram - 0xc000;
-		}
-		if (osd_key_pressed(OSD_KEY_C))
-		{
-			while (osd_key_pressed(OSD_KEY_C));
-			show_hex = 1 - show_hex;
-		}
-		if (osd_key_pressed(OSD_KEY_V))
-		{
-			while (osd_key_pressed(OSD_KEY_V));
-			base = banked_ram_0;
-			basebase = base - 0x8000;
-		}
-		if (osd_key_pressed(OSD_KEY_B))
-		{
-			while (osd_key_pressed(OSD_KEY_B));
-			base = banked_ram_1;
-			basebase = base - 0x8000;
-		}
-		if (osd_key_pressed(OSD_KEY_N))
-		{
-			while (osd_key_pressed(OSD_KEY_N));
-			base = tnzs_objram;
-			basebase = base - 0xc000;
-		}
-		if (osd_key_pressed(OSD_KEY_M))
-		{
-			while (osd_key_pressed(OSD_KEY_M));
-			base = tnzs_workram;
-			basebase = base - 0xe000;
-		}
-		if (show_hex)
-		{
-			if (osd_key_pressed(OSD_KEY_Z))
+			for (x=0;x<2;x++,i++)
 			{
-				while (osd_key_pressed(OSD_KEY_Z));
-				base -= 0x100;
-			}
-			if (osd_key_pressed(OSD_KEY_X))
-			{
-				while (osd_key_pressed(OSD_KEY_X));
-				base+= 0x100;
-			}
+				int tile;
 
-#define d(digit,x,y) \
-			drawgfx(bitmap,Machine->uifont,digit+(digit > 9 ? ('A'-10) : '0'),DT_COLOR_WHITE, \
-					0,0,8*(x),8*(y),0,TRANSPARENCY_NONE,0)
-				for (i = 0; i < 16; i++){
-					d(i, 0, i * 2);
-					d(0, 1, i * 2);
-				}
-			for (j = 0;j < 16*2;j++){
-				for (i = 0;i < 8;i++){
-					fps = base[i + j * 8];
+				/* Construct unique identifier for this tile/color */
+				tile = (m[i + 0x1200] << 16) | (m[i + 0x1000] << 8) | m[i];
 
-					d(fps/0x10, 3*i+4, j);
-					d(fps%0x10, 3*i+5, j);
+				if (tnzs_dirty_map[column*2+x][y] != tile)
+				{
+					int code,color,flipx,flipy,sx,sy;
+
+
+					tnzs_dirty_map[column*2+x][y] = tile;
+
+					code = m[i] + ((m[i + 0x1000] & 0x1f) << 8);
+					color = (m[i + 0x1200] & 0xf8) >> 3; /* colours at d600-d7ff */
+					sx = x*16;
+					sy = y*16;
+					flipx = m[i + 0x1000] & 0x80;
+					flipy = m[i + 0x1000] & 0x40;
+					if (tnzs_screenflip)
+					{
+						sy = 240 - sy;
+						flipx = !flipx;
+						flipy = !flipy;
+					}
+
+					drawgfx(tnzs_column[column],Machine->gfx[0],
+							code,
+							color,
+							flipx,flipy,
+							sx,sy,
+							0,TRANSPARENCY_NONE,0);
 				}
 			}
-			fps = base - basebase;
-			d((fps%0x10000)/0x1000, 28, 0);
-			d((fps%0x1000 )/0x100 , 29, 0);
-			d((fps%0x100  )/0x10  , 30, 0);
-			d((fps%0x10   )/0x1   , 31, 0);
 		}
 	}
-#endif
+
+	/* If the byte at f301 has bit 0 clear, then don't draw the
+	   background tiles -WRONG- */
+
+	/* The byte at f200 is the y-scroll value for the first column.
+	   The byte at f204 is the LSB of x-scroll value for the first column.
+
+	   The other columns follow at 16-byte intervals.
+
+	   The 9th bit of each x-scroll value is combined into 2 bytes
+	   at f302-f303 */
+
+	/* f301 seems to control how many columns are drawn but it's not clear how. */
+	/* Arkanoid 2 also uses f381, which TNZS always leaves at 00. */
+	/* Maybe it's a background / foreground thing? In Arkanoid 2, f381 contains */
+	/* the value we expect for the background stars (2E vs. 2A), while f301 the */
+	/* one we expect at the beginning of a level (2C vs. 2A). */
+	x = tnzs_scrollram[0x101] & 0xf;
+	if (x == 1) x = 16;
+	y = tnzs_scrollram[0x181] & 0xf;
+	if (y == 1) y = 16;
+	/* let's just pick the larger value... */
+	tot = x;
+	if (y > tot) tot = y;
+
+	upperbits = tnzs_scrollram[0x102] + tnzs_scrollram[0x103] * 256;
+	/* again, it's not clear why there are two areas, but Arkanoid 2 uses these */
+	/* for the end of game animation */
+	upperbits |= tnzs_scrollram[0x182] + tnzs_scrollram[0x183] * 256;
+
+	for (column = 0;column < tot;column++)
+	{
+		scrollx = tnzs_scrollram[column*16+4] - ((upperbits & 0x01) * 256);
+		if (tnzs_screenflip)
+			scrolly = tnzs_scrollram[column*16] + 1 - 256;
+		else
+			scrolly = -tnzs_scrollram[column*16] + 1;
+
+		copybitmap(bitmap,tnzs_column[column^8],0,0,scrollx,scrolly,
+				   &Machine->visible_area,TRANSPARENCY_COLOR,0);
+		copybitmap(bitmap,tnzs_column[column^8],0,0,scrollx,scrolly+(16*16),
+				   &Machine->visible_area,TRANSPARENCY_COLOR,0);
+
+		upperbits >>= 1;
+	}
+}
+
+void tnzs_vh_draw_foreground(struct osd_bitmap *bitmap,
+							 unsigned char *char_pointer,
+							 unsigned char *x_pointer,
+							 unsigned char *y_pointer,
+							 unsigned char *ctrl_pointer,
+							 unsigned char *color_pointer)
+{
+	int i;
+
+
+	/* Draw all 512 sprites */
+	for (i=0x1ff;i >= 0;i--)
+	{
+		int code,color,sx,sy,flipx,flipy;
+
+		code = char_pointer[i] + ((ctrl_pointer[i] & 0x1f) << 8);
+		color = (color_pointer[i] & 0xf8) >> 3;
+		sx = x_pointer[i] - ((color_pointer[i] & 1) << 8);
+		sy = 240 - y_pointer[i];
+		flipx = ctrl_pointer[i] & 0x80;
+		flipy = ctrl_pointer[i] & 0x40;
+		if (tnzs_screenflip)
+		{
+			sy = 240 - sy;
+			flipx = !flipx;
+			flipy = !flipy;
+			/* hack to hide Chuka Taisens grey line, top left corner */
+			if ((sy == 0) && (code == 0)) sy += 240;
+		}
+
+		drawgfx(bitmap,Machine->gfx[0],
+				code,
+				color,
+				flipx,flipy,
+				sx,sy+2,
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
+	}
+}
+
+void arkanoi2_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	int x,y;
+
+	/* If the byte at f300 has bit 6 set, flip the screen
+	   (I'm not 100% sure about this) */
+	tnzs_screenflip = (tnzs_scrollram[0x100] & 0x40) >> 6;
+	if (old_tnzs_screenflip != tnzs_screenflip)
+	{
+		for (x=0;x<32;x++)
+		{
+			for (y=0;y<16;y++)
+			{
+				tnzs_dirty_map[x][y] = -1;
+			}
+		}
+	}
+	old_tnzs_screenflip = tnzs_screenflip;
+
+
+	/* Blank the background */
+	fillbitmap(bitmap, Machine->pens[0], &Machine->visible_area);
+
+	/* Redraw the background tiles (c400-c5ff) */
+	tnzs_vh_draw_background(bitmap, tnzs_objram + 0x400);
+
+	/* Draw the sprites on top */
+	tnzs_vh_draw_foreground(bitmap,
+							tnzs_objram + 0x0000, /*  chars : c000 */
+							tnzs_objram + 0x0200, /*	  x : c200 */
+							tnzs_vdcram + 0x0000, /*	  y : f000 */
+							tnzs_objram + 0x1000, /*   ctrl : d000 */
+							tnzs_objram + 0x1200); /* color : d200 */
+}
+
+void tnzs_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	int color,code,i,offs,x,y;
+	int colmask[32];
+
+	/* Remap dynamic palette */
+	palette_init_used_colors();
+
+	for (color = 0;color < 32;color++) colmask[color] = 0;
+
+	/* See what colours the tiles need */
+	for (offs=32*16 - 1;offs >= 0;offs--)
+	{
+		code = tnzs_objram[offs + 0x400]
+			 + 0x100 * (tnzs_objram[offs + 0x1400] & 0x1f);
+		color = tnzs_objram[offs + 0x1600] >> 3;
+
+		colmask[color] |= Machine->gfx[0]->pen_usage[code];
+	}
+
+	/* See what colours the sprites need */
+	for (offs=0x1ff;offs >= 0;offs--)
+	{
+		code = tnzs_objram[offs]
+			 + 0x100 * (tnzs_objram[offs + 0x1000] & 0x1f);
+		color = tnzs_objram[offs + 0x1200] >> 3;
+
+		colmask[color] |= Machine->gfx[0]->pen_usage[code];
+	}
+
+	/* Construct colour usage table */
+	for (color=0;color<32;color++)
+	{
+		if (colmask[color] & (1 << 0))
+			palette_used_colors[16 * color] = PALETTE_COLOR_TRANSPARENT;
+		for (i=1;i<16;i++)
+		{
+			if (colmask[color] & (1 << i))
+				palette_used_colors[16 * color + i] = PALETTE_COLOR_USED;
+		}
+	}
+
+	if (palette_recalc())
+	{
+		for (x=0;x<32;x++)
+		{
+			for (y=0;y<16;y++)
+			{
+				tnzs_dirty_map[x][y] = -1;
+			}
+		}
+	}
+
+
+	arkanoi2_vh_screenrefresh(bitmap,full_refresh);
 }

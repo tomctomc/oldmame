@@ -8,25 +8,45 @@
 ***************************************************************************/
 
 #include "driver.h"
+#include "cpu/z80/z80.h"
 
-void lwings_bankswitch_w(int offset,int data)
-{
-        int bankaddress;
-        static int nOldData=0xff;
-        if (data != nOldData)
-        {
-                bankaddress = 0x10000 + (data & 0x06) * 0x1000 * 2;
-                cpu_setbank(1,&ROM[bankaddress]);
-                nOldData=data;
-        }
+
+int lwings_bank_register=0xff;
+
+WRITE_HANDLER( lwings_bankswitch_w ){
+	unsigned char *RAM = memory_region(REGION_CPU1);
+	int bank = (data>>1)&0x3;
+	cpu_setbank(1,&RAM[0x10000 + bank*0x4000]);
+
+	lwings_bank_register=data;
 }
 
-int lwings_interrupt(void)
-{
-	static int count;
-
-	count = (count + 1) % 2;
-
-	if (count) return 0x00cf;	/* RST 08h */
-	else return 0x00d7;	/* RST 10h */
+int lwings_interrupt(void){
+	return 0x00d7; /* RST 10h */
 }
+
+int avengers_interrupt( void ){ /* hack */
+	static int n;
+	if (keyboard_pressed(KEYCODE_S)){ /* test code */
+		while (keyboard_pressed(KEYCODE_S))
+		{}
+		n++;
+		n&=0x0f;
+		ADPCM_trigger(0, n);
+	}
+
+	if( lwings_bank_register & 0x08 ){ /* NMI enable */
+		static int s;
+		s=!s;
+		if( s ){
+			return interrupt();
+			//cpu_cause_interrupt(0, 0xd7);
+		}
+		else {
+			return Z80_NMI_INT;
+		}
+	}
+
+	return Z80_IGNORE_INT;
+}
+

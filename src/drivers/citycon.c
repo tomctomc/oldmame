@@ -8,12 +8,12 @@
 
 
 extern unsigned char *citycon_scroll;
-extern unsigned char *citycon_paletteram,*citycon_charlookup;
-void citycon_paletteram_w(int offset,int data);
-void citycon_charlookup_w(int offset,int data);
-void citycon_background_w(int offset,int data);
+extern unsigned char *citycon_charlookup;
+WRITE_HANDLER( citycon_charlookup_w );
+WRITE_HANDLER( citycon_background_w );
+READ_HANDLER( citycon_in_r );
 
-void citycon_vh_screenrefresh(struct osd_bitmap *bitmap);
+void citycon_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 int  citycon_vh_start(void);
 void citycon_vh_stop(void);
 
@@ -22,9 +22,9 @@ void citycon_vh_stop(void);
 static struct MemoryReadAddress readmem[] =
 {
 	{ 0x0000, 0x1fff, MRA_RAM },
-	{ 0x3000, 0x3000, input_port_0_r },
-	{ 0x3001, 0x3001, input_port_1_r },
-	{ 0x3002, 0x3002, input_port_2_r },
+	{ 0x3000, 0x3000, citycon_in_r },	/* player 1 & 2 inputs multiplexed */
+	{ 0x3001, 0x3001, input_port_2_r },
+	{ 0x3002, 0x3002, input_port_3_r },
 	{ 0x3007, 0x3007, watchdog_reset_r },	/* ? */
 	{ 0x4000, 0xffff, MRA_ROM },
 	{ -1 }  /* end of table */
@@ -40,7 +40,7 @@ static struct MemoryWriteAddress writemem[] =
 	{ 0x3001, 0x3001, soundlatch_w },
 	{ 0x3002, 0x3002, soundlatch2_w },
 	{ 0x3004, 0x3005, MWA_RAM, &citycon_scroll },
-	{ 0x3800, 0x3cff, citycon_paletteram_w, &citycon_paletteram },
+	{ 0x3800, 0x3cff, paletteram_RRRRGGGGBBBBxxxx_swap_w, &paletteram },
 	{ 0x4000, 0xffff, MWA_ROM },
 	{ -1 }  /* end of table */
 };
@@ -67,67 +67,76 @@ static struct MemoryWriteAddress writemem_sound[] =
 
 
 
-INPUT_PORTS_START( input_ports )
+INPUT_PORTS_START( citycon )
 	PORT_START	/* IN0 */
-	/* this port is correct. The other two are completely made up */
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_8WAY )
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_8WAY )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_8WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_8WAY )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_8WAY )
-	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_8WAY )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_8WAY )
 	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 )
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON2 )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START1 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_START2 )
 
 	PORT_START
-	PORT_DIPNAME( 0x03, 0x00, "Lives", IP_KEY_NONE )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_COCKTAIL )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_UNUSED )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_UNUSED )
+
+	PORT_START
+	PORT_DIPNAME( 0x03, 0x00, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x00, "3" )
 	PORT_DIPSETTING(    0x01, "4" )
 	PORT_DIPSETTING(    0x02, "5" )
-	PORT_BITX( 0,       0x03, IPT_DIPSWITCH_SETTING | IPF_CHEAT, "Infinite", IP_KEY_NONE, IP_JOY_NONE, 0 )
-	PORT_DIPNAME( 0x04, 0x00, "Unknown 3", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x04, "On" )
-	PORT_DIPNAME( 0x08, 0x00, "Unknown 4", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x08, "On" )
-	PORT_DIPNAME( 0x10, 0x00, "Unknown 5", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x10, "On" )
-	PORT_DIPNAME( 0x20, 0x00, "Demo Sounds", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x20, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x40, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Upright" )
-	PORT_DIPSETTING(    0x40, "Cocktail" )
+	PORT_BITX( 0,       0x03, IPT_DIPSWITCH_SETTING | IPF_CHEAT, "Infinite", IP_KEY_NONE, IP_JOY_NONE )
+	PORT_DIPNAME( 0x04, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( On ) )
+	PORT_DIPNAME( 0x08, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( On ) )
+	PORT_DIPNAME( 0x10, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( On ) )
+	PORT_DIPNAME( 0x20, 0x00, DEF_STR( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x40, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( Cocktail ) )
 	/* the coin input must stay low for exactly 2 frames to be consistently recognized. */
-	PORT_BITX(0x80, IP_ACTIVE_LOW, IPT_COIN1 | IPF_IMPULSE, "Coin A", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 2 )
+	PORT_BIT_IMPULSE( 0x80, IP_ACTIVE_LOW, IPT_COIN1, 2 )
 
 	PORT_START
-	PORT_DIPNAME( 0x07, 0x00, "Coinage", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x07, "5 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x06, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x05, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x04, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x00, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x01, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x02, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x03, "1 Coin/4 Credits" )
-	PORT_DIPNAME( 0x08, 0x00, "Unknown 4", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x08, "On" )
-	PORT_DIPNAME( 0x10, 0x00, "Unknown 5", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x10, "On" )
-	PORT_DIPNAME( 0x20, 0x00, "Unknown 6", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x20, "On" )
-	PORT_DIPNAME( 0x40, 0x00, "Unknown 7", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x40, "On" )
-	PORT_DIPNAME( 0x80, 0x80, "Flip Screen?", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x80, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_DIPNAME( 0x07, 0x00, DEF_STR( Coinage ) )
+	PORT_DIPSETTING(    0x07, DEF_STR( 5C_1C ) )
+	PORT_DIPSETTING(    0x06, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x05, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 1C_4C ) )
+	PORT_DIPNAME( 0x08, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( On ) )
+	PORT_DIPNAME( 0x10, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( On ) )
+	PORT_DIPNAME( 0x20, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( On ) )
+	PORT_DIPNAME( 0x40, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( On ) )
+	PORT_DIPNAME( 0x80, 0x80, "Flip Screen?" )
+	PORT_DIPSETTING(    0x80, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 INPUT_PORTS_END
 
 
@@ -169,31 +178,33 @@ static struct GfxLayout spritelayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x00000, &charlayout, 2*16*16, 32 },
-	{ 1, 0x02000, &spritelayout,     0, 16 },
-	{ 1, 0x03000, &spritelayout,     0, 16 },
-	{ 1, 0x06000, &tilelayout,   16*16, 16 },
-	{ 1, 0x07000, &tilelayout,   16*16, 16 },
-	{ 1, 0x08000, &tilelayout,   16*16, 16 },
-	{ 1, 0x09000, &tilelayout,   16*16, 16 },
-	{ 1, 0x0a000, &tilelayout,   16*16, 16 },
-	{ 1, 0x0b000, &tilelayout,   16*16, 16 },
-	{ 1, 0x0c000, &tilelayout,   16*16, 16 },
-	{ 1, 0x0d000, &tilelayout,   16*16, 16 },
-	{ 1, 0x0e000, &tilelayout,   16*16, 16 },
-	{ 1, 0x0f000, &tilelayout,   16*16, 16 },
-	{ 1, 0x10000, &tilelayout,   16*16, 16 },
-	{ 1, 0x11000, &tilelayout,   16*16, 16 },
+	{ REGION_GFX1, 0x00000, &charlayout, 512, 32 },	/* colors 512-639 */
+	{ REGION_GFX2, 0x00000, &spritelayout, 0, 16 },	/* colors 0-255 */
+	{ REGION_GFX2, 0x01000, &spritelayout, 0, 16 },
+	{ REGION_GFX3, 0x00000, &tilelayout, 256, 16 },	/* colors 256-511 */
+	{ REGION_GFX3, 0x01000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x02000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x03000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x04000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x05000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x06000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x07000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x08000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x09000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x0a000, &tilelayout, 256, 16 },
+	{ REGION_GFX3, 0x0b000, &tilelayout, 256, 16 },
 	{ -1 } /* end of array */
 };
 
 
 
+/* actually there is one AY8910 and one YM2203, but the sound core doesn't */
+/* support that so we use 2 YM2203 */
 static struct YM2203interface ym2203_interface =
 {
 	2,			/* 2 chips */
-	2000000,	/* 2.0 MHz ??? */
-	{ YM2203_VOL(128,255), YM2203_VOL(128,255) },
+	1250000,	/* 1.25 MHz */
+	{ YM2203_VOL(20,MIXERG(20,MIXER_GAIN_2x,MIXER_PAN_CENTER)), YM2203_VOL(20,MIXERG(20,MIXER_GAIN_2x,MIXER_PAN_CENTER)) },
 	{ soundlatch_r },
 	{ soundlatch2_r },
 	{ 0 },
@@ -202,21 +213,19 @@ static struct YM2203interface ym2203_interface =
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_citycon =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6809,
 			2048000,        /* 2.048 Mhz ??? */
-			0,
 			readmem,writemem,0,0,
 			interrupt,1
 		},
 		{
 			CPU_M6809 | CPU_AUDIO_CPU,
 			640000,        /* 0.640 Mhz ??? */
-			3,
 			readmem_sound,writemem_sound,0,0,
 			interrupt,1
 		}
@@ -228,10 +237,10 @@ static struct MachineDriver machine_driver =
 	/* video hardware */
 	32*8, 32*8, { 1*8, 31*8-1, 2*8, 30*8-1 },
 	gfxdecodeinfo,
-	256, 16*16+16*16+32*4,
+	640, 640,
 	0,
 
-	VIDEO_TYPE_RASTER | VIDEO_SUPPORTS_16BIT,
+	VIDEO_TYPE_RASTER | VIDEO_MODIFIES_PALETTE,
 	0,
 	citycon_vh_start,
 	citycon_vh_stop,
@@ -255,48 +264,89 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( citycon_rom )
-	ROM_REGION(0x10000)     /* 64k for code */
-	ROM_LOAD( "c10", 0x4000, 0x4000, 0x9bbcad06 )
-	ROM_LOAD( "c11", 0x8000, 0x8000, 0x36808a32 )
+ROM_START( citycon )
+	ROM_REGION( 0x10000, REGION_CPU1 )     /* 64k for code */
+	ROM_LOAD( "c10",          0x4000, 0x4000, 0xae88b53c )
+	ROM_LOAD( "c11",          0x8000, 0x8000, 0x139eb1aa )
 
-	ROM_REGION(0x1e000)    /* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "c4",  0x00000, 0x2000, 0x92aaa220 )	/* Characters */
-	ROM_LOAD( "c12", 0x02000, 0x2000, 0x14035885 )	/* Sprites    */
-	ROM_LOAD( "c13", 0x04000, 0x2000, 0x96f0b2f0 )
-	ROM_LOAD( "c9",  0x06000, 0x8000, 0xcedecdd6 )	/* Background tiles */
-	ROM_LOAD( "c8",  0x0e000, 0x4000, 0xba9bd1c5 )
-	ROM_LOAD( "c6",  0x12000, 0x8000, 0x1af35b57 )
-	ROM_LOAD( "c7",  0x1a000, 0x4000, 0x501683b4 )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "c1",           0x8000, 0x8000, 0x1fad7589 )
 
-	ROM_REGION(0xe000)
-	ROM_LOAD( "c2", 0x0000, 0x8000, 0x944dca0d )	/* background maps */
-	ROM_LOAD( "c3", 0x8000, 0x4000, 0x39ca10d4 )
-	ROM_LOAD( "c5", 0xc000, 0x2000, 0xb6988172 )	/* color codes for the background */
+	ROM_REGION( 0x02000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "c4",           0x00000, 0x2000, 0xa6b32fc6 )	/* Characters */
 
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "c1", 0x8000, 0x8000, 0x19887776 )
+	ROM_REGION( 0x04000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "c12",          0x00000, 0x2000, 0x08eaaccd )	/* Sprites    */
+	ROM_LOAD( "c13",          0x02000, 0x2000, 0x1819aafb )
+
+	ROM_REGION( 0x18000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "c9",           0x00000, 0x8000, 0x8aeb47e6 )	/* Background tiles */
+	ROM_LOAD( "c8",           0x08000, 0x4000, 0x0d7a1eeb )
+	ROM_LOAD( "c6",           0x0c000, 0x8000, 0x2246fe9d )
+	ROM_LOAD( "c7",           0x14000, 0x4000, 0xe8b97de9 )
+
+	ROM_REGION( 0xe000, REGION_GFX4 )	/* background tilemaps */
+	ROM_LOAD( "c2",           0x0000, 0x8000, 0xf2da4f23 )	/* background maps */
+	ROM_LOAD( "c3",           0x8000, 0x4000, 0x7ef3ac1b )
+	ROM_LOAD( "c5",           0xc000, 0x2000, 0xc03d8b1b )	/* color codes for the background */
+ROM_END
+
+ROM_START( citycona )
+	ROM_REGION( 0x10000, REGION_CPU1 )     /* 64k for code */
+	ROM_LOAD( "c10",          0x4000, 0x4000, 0xae88b53c )
+	ROM_LOAD( "c11b",         0x8000, 0x8000, 0xd64af468 )
+
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "c1",           0x8000, 0x8000, 0x1fad7589 )
+
+	ROM_REGION( 0x02000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "c4",           0x00000, 0x2000, 0xa6b32fc6 )	/* Characters */
+
+	ROM_REGION( 0x04000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "c12",          0x00000, 0x2000, 0x08eaaccd )	/* Sprites    */
+	ROM_LOAD( "c13",          0x02000, 0x2000, 0x1819aafb )
+
+	ROM_REGION( 0x18000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "c9",           0x00000, 0x8000, 0x8aeb47e6 )	/* Background tiles */
+	ROM_LOAD( "c8",           0x08000, 0x4000, 0x0d7a1eeb )
+	ROM_LOAD( "c6",           0x0c000, 0x8000, 0x2246fe9d )
+	ROM_LOAD( "c7",           0x14000, 0x4000, 0xe8b97de9 )
+
+	ROM_REGION( 0xe000, REGION_GFX4 )	/* background tilemaps */
+	ROM_LOAD( "c2",           0x0000, 0x8000, 0xf2da4f23 )	/* background maps */
+	ROM_LOAD( "c3",           0x8000, 0x4000, 0x7ef3ac1b )
+	ROM_LOAD( "c5",           0xc000, 0x2000, 0xc03d8b1b )	/* color codes for the background */
+ROM_END
+
+ROM_START( cruisin )
+	ROM_REGION( 0x10000, REGION_CPU1 )     /* 64k for code */
+	ROM_LOAD( "cr10",         0x4000, 0x4000, 0xcc7c52f3 )
+	ROM_LOAD( "cr11",         0x8000, 0x8000, 0x5422f276 )
+
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "c1",           0x8000, 0x8000, 0x1fad7589 )
+
+	ROM_REGION( 0x02000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "cr4",          0x00000, 0x2000, 0x8cd0308e )	/* Characters */
+
+	ROM_REGION( 0x04000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "c12",          0x00000, 0x2000, 0x08eaaccd )	/* Sprites    */
+	ROM_LOAD( "c13",          0x02000, 0x2000, 0x1819aafb )
+
+	ROM_REGION( 0x18000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "c9",           0x00000, 0x8000, 0x8aeb47e6 )	/* Background tiles */
+	ROM_LOAD( "c8",           0x08000, 0x4000, 0x0d7a1eeb )
+	ROM_LOAD( "c6",           0x0c000, 0x8000, 0x2246fe9d )
+	ROM_LOAD( "c7",           0x14000, 0x4000, 0xe8b97de9 )
+
+	ROM_REGION( 0xe000, REGION_GFX4 )	/* background tilemaps */
+	ROM_LOAD( "c2",           0x0000, 0x8000, 0xf2da4f23 )	/* background maps */
+	ROM_LOAD( "c3",           0x8000, 0x4000, 0x7ef3ac1b )
+	ROM_LOAD( "c5",           0xc000, 0x2000, 0xc03d8b1b )	/* color codes for the background */
 ROM_END
 
 
 
-struct GameDriver citycon_driver =
-{
-	"City Connection",
-	"citycon",
-	"Mirko Buffoni (MAME driver)\nNicola Salmoria (MAME driver)",
-	&machine_driver,
-
-	citycon_rom,
-	0, 0,
-	0,
-
-	0,	/* sound_prom */
-
-	input_ports,
-
-	0, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	0, 0
-};
+GAME( 1985, citycon,  0,       citycon, citycon, 0, ROT0, "Jaleco", "City Connection (set 1)" )
+GAME( 1985, citycona, citycon, citycon, citycon, 0, ROT0, "Jaleco", "City Connection (set 2)" )
+GAME( 1985, cruisin,  citycon, citycon, citycon, 0, ROT0, "Jaleco (Kitkorp license)", "Cruisin" )

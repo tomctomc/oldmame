@@ -11,8 +11,8 @@
 
 
 
-static int flipscreen[2];
-static int gfxbank,palettebank;
+static data_t gfxbank,palettebank;
+extern int arkanoid_paddle_select;
 
 
 
@@ -30,95 +30,59 @@ static int gfxbank,palettebank;
   bit 0 -- 2.2kohm resistor  -- RED/GREEN/BLUE
 
 ***************************************************************************/
-void arkanoid_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void arkanoid_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
-	int i,j,used;
-	unsigned char allocated[3*256];
+	int i;
 
 
-	/* The game has 512 colors, but we are limited to a maximum of 256. */
-	/* Luckily, many of the colors are duplicated, so the total number of */
-	/* different colors is less than 256. We select the unique colors and */
-	/* put them in our palette. */
-
-	memset(palette,0,3 * Machine->drv->total_colors);
-
-	used = 0;
-	for (i = 0;i < 512;i++)
+	for (i = 0;i < Machine->drv->total_colors;i++)
 	{
-		for (j = 0;j < used;j++)
-		{
-			if (allocated[j] == color_prom[i] &&
-					allocated[j+256] == color_prom[i+512] &&
-					allocated[j+2*256] == color_prom[i+2*512])
-				break;
-		}
-		if (j == used)
-		{
-			int bit0,bit1,bit2,bit3;
+		int bit0,bit1,bit2,bit3;
 
+		/* red component */
+		bit0 = (color_prom[0] >> 0) & 0x01;
+		bit1 = (color_prom[0] >> 1) & 0x01;
+		bit2 = (color_prom[0] >> 2) & 0x01;
+		bit3 = (color_prom[0] >> 3) & 0x01;
+		*(palette++) =  0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+		/* green component */
+		bit0 = (color_prom[Machine->drv->total_colors] >> 0) & 0x01;
+		bit1 = (color_prom[Machine->drv->total_colors] >> 1) & 0x01;
+		bit2 = (color_prom[Machine->drv->total_colors] >> 2) & 0x01;
+		bit3 = (color_prom[Machine->drv->total_colors] >> 3) & 0x01;
+		*(palette++) =  0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+		/* blue component */
+		bit0 = (color_prom[2*Machine->drv->total_colors] >> 0) & 0x01;
+		bit1 = (color_prom[2*Machine->drv->total_colors] >> 1) & 0x01;
+		bit2 = (color_prom[2*Machine->drv->total_colors] >> 2) & 0x01;
+		bit3 = (color_prom[2*Machine->drv->total_colors] >> 3) & 0x01;
+		*(palette++) =  0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
 
-			used++;
-
-			allocated[j] = color_prom[i];
-			allocated[j+256] = color_prom[i+512];
-			allocated[j+2*256] = color_prom[i+2*512];
-
-			bit0 = (color_prom[i] >> 0) & 0x01;
-			bit1 = (color_prom[i] >> 1) & 0x01;
-			bit2 = (color_prom[i] >> 2) & 0x01;
-			bit3 = (color_prom[i] >> 3) & 0x01;
-			palette[3*j] = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
-			bit0 = (color_prom[i+512] >> 0) & 0x01;
-			bit1 = (color_prom[i+512] >> 1) & 0x01;
-			bit2 = (color_prom[i+512] >> 2) & 0x01;
-			bit3 = (color_prom[i+512] >> 3) & 0x01;
-			palette[3*j + 1] = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
-			bit0 = (color_prom[i+512*2] >> 0) & 0x01;
-			bit1 = (color_prom[i+512*2] >> 1) & 0x01;
-			bit2 = (color_prom[i+512*2] >> 2) & 0x01;
-			bit3 = (color_prom[i+512*2] >> 3) & 0x01;
-			palette[3*j + 2] = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
-		}
-
-		colortable[i] = j;
+		color_prom++;
 	}
 }
 
 
 
-void arkanoid_d008_w(int offset,int data)
+WRITE_HANDLER( arkanoid_d008_w )
 {
 	/* bits 0 and 1 flip X and Y, I don't know which is which */
-	if (flipscreen[0] != (data & 0x01))
-	{
-		flipscreen[0] = data & 0x01;
-		memset(dirtybuffer,1,videoram_size);
-	}
-	if (flipscreen[1] != (data & 0x02))
-	{
-		flipscreen[1] = data & 0x02;
-		memset(dirtybuffer,1,videoram_size);
-	}
+	flip_screen_x_w(offset, data & 0x01);
+	flip_screen_y_w(offset, data & 0x02);
 
-	/* bit 2 selects the input paddle - not supported */
+	/* bit 2 selects the input paddle */
+    arkanoid_paddle_select = data & 0x04;
 
-	/* bit 3 is unknown */
+	/* bit 3 is coin lockout (but not the service coin) */
+	coin_lockout_w(0, !(data & 0x08));
+	coin_lockout_w(1, !(data & 0x08));
 
 	/* bit 4 is unknown */
 
 	/* bits 5 and 6 control gfx bank and palette bank. They are used together */
 	/* so I don't know which is which. */
-	if (gfxbank != ((data & 0x20) >> 5))
-	{
-		gfxbank = (data & 0x20) >> 5;
-		memset(dirtybuffer,1,videoram_size);
-	}
-	if (palettebank != ((data & 0x40) >> 6))
-	{
-		palettebank = (data & 0x40) >> 6;
-		memset(dirtybuffer,1,videoram_size);
-	}
+	set_vh_global_attribute(&gfxbank, (data & 0x20) >> 5);
+	set_vh_global_attribute(&palettebank, (data & 0x40) >> 6);
 
 	/* bit 7 is unknown */
 }
@@ -132,9 +96,15 @@ void arkanoid_d008_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void arkanoid_vh_screenrefresh(struct osd_bitmap *bitmap)
+void arkanoid_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
+
+
+	if (full_refresh)
+	{
+		memset(dirtybuffer,1,videoram_size);
+	}
 
 
 	/* for every character in the Video RAM, check if it has been modified */
@@ -155,22 +125,22 @@ void arkanoid_vh_screenrefresh(struct osd_bitmap *bitmap)
 			sx = offs2 % 32;
 			sy = offs2 / 32;
 
-			if (flipscreen[0]) sx = 31 - sx;
-			if (flipscreen[1]) sy = 31 - sy;
+			if (flip_screen_x) sx = 31 - sx;
+			if (flip_screen_y) sy = 31 - sy;
 
 			code = videoram[offs + 1] + ((videoram[offs] & 0x07) << 8) + 2048 * gfxbank;
 			drawgfx(tmpbitmap,Machine->gfx[0],
 					code,
 					((videoram[offs] & 0xf8) >> 3) + 32 * palettebank,
-					flipscreen[0],flipscreen[1],
+					flip_screen_x,flip_screen_y,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
 	/* copy the temporary bitmap to the screen */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 
 	/* Draw the sprites. */
@@ -181,21 +151,21 @@ void arkanoid_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 		sx = spriteram[offs];
 		sy = 248 - spriteram[offs + 1];
-		if (flipscreen[0]) sx = 248 - sx;
-		if (flipscreen[1]) sy = 248 - sy;
+		if (flip_screen_x) sx = 248 - sx;
+		if (flip_screen_y) sy = 248 - sy;
 
 		code = spriteram[offs + 3] + ((spriteram[offs + 2] & 0x03) << 8) + 1024 * gfxbank;
 		drawgfx(bitmap,Machine->gfx[0],
 				2 * code,
 				((spriteram[offs + 2] & 0xf8) >> 3) + 32 * palettebank,
-				flipscreen[0],flipscreen[1],
-				sx,sy + (flipscreen[1] ? 8 : -8),
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				flip_screen_x,flip_screen_y,
+				sx,sy + (flip_screen_y ? 8 : -8),
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
 		drawgfx(bitmap,Machine->gfx[0],
 				2 * code + 1,
 				((spriteram[offs + 2] & 0xf8) >> 3) + 32 * palettebank,
-				flipscreen[0],flipscreen[1],
+				flip_screen_x,flip_screen_y,
 				sx,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
 }

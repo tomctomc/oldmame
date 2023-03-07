@@ -10,6 +10,8 @@
 #include "vidhrdw/generic.h"
 
 
+static int flipscreen;
+
 /***************************************************************************
 
   Convert the color PROMs into a more useable format.
@@ -29,7 +31,7 @@
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void superpac_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void superpac_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 
@@ -60,13 +62,32 @@ void superpac_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 }
 
 
-void superpac_draw_sprite(struct osd_bitmap *dest,unsigned int code,unsigned int color,
-	int flipx,int flipy,int sx,int sy)
+static void superpac_draw_sprite(struct osd_bitmap *dest,unsigned int code,unsigned int color,
+						  		 int flipx,int flipy,int sx,int sy)
 {
-	drawgfx(dest,Machine->gfx[1],code,color,flipx,flipy,sx,sy,&Machine->drv->visible_area,
-		TRANSPARENCY_COLOR,16);
+	drawgfx(dest,Machine->gfx[1],code,color,flipx,flipy,sx,sy,&Machine->visible_area,
+			TRANSPARENCY_COLOR,16);
 }
 
+
+WRITE_HANDLER(superpac_flipscreen_w)
+{
+	data &= 0x01;
+
+	if (flipscreen != data)
+	{
+		memset(dirtybuffer, 1, videoram_size);
+
+		flipscreen = data;
+	}
+}
+
+READ_HANDLER(superpac_flipscreen_r)
+{
+	superpac_flipscreen_w(offset, 1);
+
+	return flipscreen;	/* return value not used */
+}
 
 /***************************************************************************
 
@@ -75,7 +96,7 @@ void superpac_draw_sprite(struct osd_bitmap *dest,unsigned int code,unsigned int
   the main emulation engine.
 
 ***************************************************************************/
-void superpac_vh_screenrefresh(struct osd_bitmap *bitmap)
+void superpac_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -88,7 +109,6 @@ void superpac_vh_screenrefresh(struct osd_bitmap *bitmap)
 		{
 			int sx,sy,mx,my;
 
-
 			dirtybuffer[offs] = 0;
 
 	/* Even if Super Pac-Man's screen is 28x36, the memory layout is 32x32. We therefore */
@@ -97,35 +117,42 @@ void superpac_vh_screenrefresh(struct osd_bitmap *bitmap)
 	/* don't map to a screen position. We don't check that here, however: range */
 	/* checking is performed by drawgfx(). */
 
-			mx = offs / 32;
-			my = offs % 32;
+			mx = offs % 32;
+			my = offs / 32;
 
-			if (mx <= 1)
+			if (my <= 1)
 			{
-				sx = 29 - my;
-				sy = mx + 34;
+				sx = my + 34;
+				sy = mx - 2;
 			}
-			else if (mx >= 30)
+			else if (my >= 30)
 			{
-				sx = 29 - my;
-				sy = mx - 30;
+				sx = my - 30;
+				sy = mx - 2;
 			}
 			else
 			{
-				sx = 29 - mx;
-				sy = my + 2;
+				sx = mx + 2;
+				sy = my - 2;
+			}
+
+			if (flipscreen)
+			{
+				sx = 35 - sx;
+				sy = 27 - sy;
 			}
 
 			drawgfx(tmpbitmap,Machine->gfx[0],
 					videoram[offs],
 					colorram[offs],
-					0,0,8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					flipscreen,flipscreen,
+					8*sx,8*sy,
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 	/* Draw the sprites. */
 	for (offs = 0;offs < spriteram_size;offs += 2)
@@ -135,76 +162,82 @@ void superpac_vh_screenrefresh(struct osd_bitmap *bitmap)
 		{
 			int sprite = spriteram[offs];
 			int color = spriteram[offs+1];
-			int x = spriteram_2[offs]-17;
-			int y = (spriteram_2[offs+1]-40) + 0x100*(spriteram_3[offs+1] & 1);
-			int flipx = spriteram_3[offs] & 2;
-			int flipy = spriteram_3[offs] & 1;
+			int x = (spriteram_2[offs+1]-40) + 0x100*(spriteram_3[offs+1] & 1);
+			int y = 28*8-spriteram_2[offs]+1;
+			int flipx = spriteram_3[offs] & 1;
+			int flipy = spriteram_3[offs] & 2;
+
+			if (flipscreen)
+			{
+				flipx = !flipx;
+				flipy = !flipy;
+			}
 
 			switch (spriteram_3[offs] & 0x0c)
 			{
-				case 0:		/* normal size */
+			case 0:		/* normal size */
+				superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,y);
+				break;
+
+			case 4:		/* 2x horizontal */
+				sprite &= ~1;
+				if (!flipx)
+				{
 					superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,y);
-					break;
+					superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x+16,y);
+				}
+				else
+				{
+					superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x+16,y);
+					superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x,y);
+				}
+				break;
 
-				case 4:		/* 2x vertical */
-					sprite &= ~1;
-					if (!flipy)
-					{
-						superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,y);
-						superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x,16+y);
-					}
-					else
-					{
-						superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,16+y);
-						superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x,y);
-					}
-					break;
+			case 8:		/* 2x vertical */
+				sprite &= ~2;
+				if (!flipy)
+				{
+					superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,x,y);
+					superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,y-16);
+				}
+				else
+				{
+					superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,y);
+					superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,x,y-16);
+				}
+				break;
 
-				case 8:		/* 2x horizontal */
-					sprite &= ~2;
-					if (!flipx)
-					{
-						superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,x,y);
-						superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,16+x,y);
-					}
-					else
-					{
-						superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,y);
-						superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,16+x,y);
-					}
-					break;
-
-				case 12:		/* 2x both ways */
-					sprite &= ~3;
-					if (!flipy && !flipx)
-					{
-						superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,x,y);
-						superpac_draw_sprite(bitmap,3+sprite,color,flipx,flipy,x,16+y);
-						superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,16+x,y);
-						superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,16+x,16+y);
-					}
-					else if (flipy && flipx)
-					{
-						superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x,y);
-						superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,16+y);
-						superpac_draw_sprite(bitmap,3+sprite,color,flipx,flipy,16+x,y);
-						superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,16+x,16+y);
-					}
-					else if (flipx)
-					{
-						superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,y);
-						superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x,16+y);
-						superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,16+x,y);
-						superpac_draw_sprite(bitmap,3+sprite,color,flipx,flipy,16+x,16+y);
-					}
-					else /* flipy */
-					{
-						superpac_draw_sprite(bitmap,3+sprite,color,flipx,flipy,x,y);
-						superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,x,16+y);
-						superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,16+x,y);
-						superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,16+x,16+y);
-					}
-					break;
+			case 12:		/* 2x both ways */
+				sprite &= ~3;
+				if (!flipx && !flipy)
+				{
+					superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,x,y);
+					superpac_draw_sprite(bitmap,3+sprite,color,flipx,flipy,x+16,y);
+					superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,y-16);
+					superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x+16,y-16);
+				}
+				else if (flipx && flipy)
+				{
+					superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x,y);
+					superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x+16,y);
+					superpac_draw_sprite(bitmap,3+sprite,color,flipx,flipy,x,y-16);
+					superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,x+16,y-16);
+				}
+				else if (flipy)
+				{
+					superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x,y);
+					superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x+16,y);
+					superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,x,y-16);
+					superpac_draw_sprite(bitmap,3+sprite,color,flipx,flipy,x+16,y-16);
+				}
+				else /* flipx */
+				{
+					superpac_draw_sprite(bitmap,3+sprite,color,flipx,flipy,x,y);
+					superpac_draw_sprite(bitmap,2+sprite,color,flipx,flipy,x+16,y);
+					superpac_draw_sprite(bitmap,1+sprite,color,flipx,flipy,x,y-16);
+					superpac_draw_sprite(bitmap,sprite,color,flipx,flipy,x+16,y-16);
+				}
+				break;
 			}
 		}
 	}

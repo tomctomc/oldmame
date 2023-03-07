@@ -31,7 +31,7 @@ static int palettebank,charbank,spriterambank;
   bit 0 -- 2.2kohm resistor  -- RED/GREEN/BLUE
 
 ***************************************************************************/
-void ironhors_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void ironhors_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -93,7 +93,7 @@ void ironhors_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 
 
 
-void ironhors_charbank_w(int offset,int data)
+WRITE_HANDLER( ironhors_charbank_w )
 {
 	if (charbank != (data & 1))
 	{
@@ -108,7 +108,7 @@ void ironhors_charbank_w(int offset,int data)
 
 
 
-void ironhors_palettebank_w(int offset,int data)
+WRITE_HANDLER( ironhors_palettebank_w )
 {
 	if (palettebank != (data & 7))
 	{
@@ -126,7 +126,7 @@ void ironhors_palettebank_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void ironhors_vh_screenrefresh(struct osd_bitmap *bitmap)
+void ironhors_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs,i;
 
@@ -163,7 +163,7 @@ void ironhors_vh_screenrefresh(struct osd_bitmap *bitmap)
 		for (i = 0;i < 32;i++)
 			scroll[i] = -(ironhors_scroll[i]);
 
-		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 
@@ -180,37 +180,72 @@ void ironhors_vh_screenrefresh(struct osd_bitmap *bitmap)
 		{
 			if (sr[offs+2])
 			{
-				int sx,sy,flipx,flipy;
+				int sx,sy,flipx,flipy,code,color;
 
 
-				sy = sr[offs+2];
 				sx = sr[offs+3];
+				sy = sr[offs+2];
 				flipx = sr[offs+4] & 0x20;
-				flipy = sr[offs+4] & 0x40;  /* not sure yet */
+				flipy = sr[offs+4] & 0x40;
+				code = (sr[offs] << 2) + ((sr[offs+1] & 0x01) << 10) + ((sr[offs+1] & 0x0c) >> 2);
+				color = ((sr[offs+1] & 0xf0)>>4) + 16 * palettebank;
 
-				if (sr[offs+4] & 0x04)    /* half sized sprite */
+				switch (sr[offs+4] & 0x0c)
 				{
-					int spritenum = sr[offs]*4+((sr[offs+1] & 8) >> 2);
-					drawgfx(bitmap,Machine->gfx[2],
-							spritenum,
-							(sr[offs+4] & 0x0f) + 16 * palettebank,
-							flipx,flipy,
-							sx,sy,
-							&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
-					drawgfx(bitmap,Machine->gfx[2],
-							spritenum+1,
-							(sr[offs+4] & 0x0f) + 16 * palettebank,
-							flipx,flipy,
-							sx+8,sy,
-							&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+					case 0x00:	/* 16x16 */
+						drawgfx(bitmap,Machine->gfx[1],
+								code/4,
+								color,
+								flipx,flipy,
+								sx,sy,
+								&Machine->visible_area,TRANSPARENCY_PEN,0);
+						break;
+
+					case 0x04:	/* 16x8 */
+						{
+							drawgfx(bitmap,Machine->gfx[2],
+									code & ~1,
+									color,
+									flipx,flipy,
+									flipx?sx+8:sx,sy,
+									&Machine->visible_area,TRANSPARENCY_PEN,0);
+							drawgfx(bitmap,Machine->gfx[2],
+									code | 1,
+									color,
+									flipx,flipy,
+									flipx?sx:sx+8,sy,
+									&Machine->visible_area,TRANSPARENCY_PEN,0);
+						}
+						break;
+
+					case 0x08:	/* 8x16 */
+						{
+							drawgfx(bitmap,Machine->gfx[2],
+									code & ~2,
+									color,
+									flipx,flipy,
+									sx,flipy?sy+8:sy,
+									&Machine->visible_area,TRANSPARENCY_PEN,0);
+							drawgfx(bitmap,Machine->gfx[2],
+									code | 2,
+									color,
+									flipx,flipy,
+									sx,flipy?sy:sy+8,
+									&Machine->visible_area,TRANSPARENCY_PEN,0);
+						}
+						break;
+
+					case 0x0c:	/* 8x8 */
+						{
+							drawgfx(bitmap,Machine->gfx[2],
+									code,
+									color,
+									flipx,flipy,
+									sx,sy,
+									&Machine->visible_area,TRANSPARENCY_PEN,0);
+						}
+						break;
 				}
-				else
-					drawgfx(bitmap,Machine->gfx[1],
-							sr[offs] + 256 * (sr[offs+1] & 1),
-							(sr[offs+4] & 0x0f) + 16 * palettebank,
-							flipx,flipy,
-							sx,sy,
-							&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
 			}
 		}
 	}

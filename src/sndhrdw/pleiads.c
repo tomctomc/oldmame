@@ -1,240 +1,671 @@
-/* Sound hardware for Pleiades, Naughty Boy and Pop Flamer. Note that it's very */
-/* similar to Phoenix. */
-
-/* some of the missing sounds are now audible,
-   but there is no modulation of any kind yet.
-   Andrew Scott (ascott@utkux.utcc.utk.edu) */
-
+/****************************************************************************
+ *
+ * Sound hardware for Pleiades, Naughty Boy and Pop Flamer.
+ *
+ * If you find errors or have suggestions, please mail me.
+ * Juergen Buchmueller <pullmoll@t-online.de>
+ *
+ ****************************************************************************/
 #include "driver.h"
 
-#define SAFREQ  1400
-#define SBFREQ  1400
-#define MAXFREQ_A 44100*7
-#define MAXFREQ_B1 44100*4
-#define MAXFREQ_B2 44100*4
+#define VMIN	0
+#define VMAX	32767
 
-/* for voice A effects */
-#define SW_INTERVAL 4
-#define MOD_RATE 0.14
-#define MOD_DEPTH 0.1
+static int channel;
 
-/* for voice B effect */
-#define SWEEP_RATE 0.14
-#define SWEEP_DEPTH 0.24
+static int sound_latch_a;
+static int sound_latch_b;
+static int sound_latch_c;	/* part of the videoreg_w latch */
 
-static int sound_play[3];
-static int sound_vol[3];
-static int sound_freq[3];
+static UINT32 *poly18 = NULL;
+static int polybit;
 
-static int noise_vol;
+/* fixed 8kHz clock */
+#define TONE1_CLOCK  8000
+
+/* some resistor and capacitor dependent values which
+   vary between the (otherwise identical) boards. */
+static double pa5_charge_time;
+static double pa5_discharge_time;
+
+static double pa6_charge_time;
+static double pa6_discharge_time;
+
+static double pb4_charge_time;
+static double pb4_discharge_time;
+
+static double pc4_charge_time;
+static double pc4_discharge_time;
+
+static double pc5_charge_time;
+static double pc5_discharge_time;
+
+static int pa5_resistor;
+static int pc5_resistor;
+
+static int tone2_max_freq;
+static int tone3_max_freq;
+static int tone4_max_freq;
 static int noise_freq;
-static int pitch_a;
-static int pitch_b1;
-static int pitch_b2;
+static int polybit_resistor;
+static int opamp_resistor;
 
-static int noisemulate;
-static int portBstatus;
-
-/* waveforms for the audio hardware */
-static unsigned char waveform1[32] =
+/*****************************************************************************
+ * Tone #1 is a fixed 8 kHz signal divided by 1 to 15.
+ *****************************************************************************/
+INLINE int tone1(int samplerate)
 {
-	/* sine-wave */
-	0x0F, 0x0F, 0x0F, 0x06, 0x06, 0x09, 0x09, 0x06, 0x06, 0x09, 0x06, 0x0D, 0x0F, 0x0F, 0x0D, 0x00,
-	0xE6, 0xDE, 0xE1, 0xE6, 0xEC, 0xE6, 0xE7, 0xE7, 0xE7, 0xEC, 0xEC, 0xEC, 0xE7, 0xE1, 0xE1, 0xE7,
-};
-static unsigned char waveform2[] =
-{
-	/* white-noise ? */
-	0x79, 0x75, 0x71, 0x72, 0x72, 0x6F, 0x70, 0x71, 0x71, 0x73, 0x75, 0x76, 0x74, 0x74, 0x78, 0x7A,
-	0x79, 0x7A, 0x7B, 0x7C, 0x7C, 0x7C, 0x7C, 0x7C, 0x7C, 0x7C, 0x7D, 0x80, 0x85, 0x88, 0x88, 0x87,
-	0x8B, 0x8B, 0x8A, 0x8A, 0x89, 0x87, 0x85, 0x87, 0x89, 0x86, 0x83, 0x84, 0x84, 0x85, 0x84, 0x84,
-	0x85, 0x86, 0x87, 0x87, 0x88, 0x88, 0x86, 0x81, 0x7E, 0x7D, 0x7F, 0x7D, 0x7C, 0x7D, 0x7D, 0x7C,
-	0x7E, 0x81, 0x7F, 0x7C, 0x7E, 0x82, 0x82, 0x82, 0x82, 0x83, 0x83, 0x84, 0x83, 0x82, 0x82, 0x83,
-	0x82, 0x84, 0x88, 0x8C, 0x8E, 0x8B, 0x8B, 0x8C, 0x8A, 0x8A, 0x8A, 0x89, 0x85, 0x86, 0x89, 0x89,
-	0x86, 0x85, 0x85, 0x85, 0x84, 0x83, 0x82, 0x83, 0x83, 0x83, 0x82, 0x83, 0x83
-};
+	static int counter, divisor, output;
 
-
-int pleiads_sh_init (const char *gamename)
-{
-	if (Machine->samples != 0 && Machine->samples->sample[0] != 0)
-		noisemulate = 0;
-	else
-		noisemulate = 1;
-
-	/* Clear all the variables */
+	if( (sound_latch_a & 15) != 15 )
 	{
-		int i;
-		for (i = 0; i < 3; i ++)
+		counter -= TONE1_CLOCK;
+		while( counter <= 0 )
 		{
-			sound_play[i] = 0;
-			sound_vol[i] = 0;
-			sound_freq[i] = SAFREQ; /* The B voices use the same constant for now */
+			counter += samplerate;
+			if( ++divisor == 16 )
+			{
+				divisor = sound_latch_a & 15;
+				output ^= 1;
+			}
 		}
-		noise_vol = 0;
-		noise_freq = 1000;
-		pitch_a = pitch_b1 = pitch_b2 = 0;
-		portBstatus = 0;
 	}
+	return output ? VMAX : -VMAX;
+}
+
+/*****************************************************************************
+ * Tones #2 and #3 are coming from the upper 556 chip
+ * It's labelled IC96 in Pop Flamer, 4D(??) in Naughty Boy.
+ * C68 controls the frequencies of tones #2 and #3 (V/C inputs)
+ *****************************************************************************/
+INLINE int update_pb4(int samplerate)
+{
+	static int counter, level;
+
+	/* bit 4 of latch B: charge 10uF (C28/C68) through 10k (R19/R25) */
+	if( sound_latch_b & 0x10 )
+	{
+		if( level < VMAX )
+		{
+			counter -= (int)((VMAX - level) / pb4_charge_time);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += n * samplerate;
+				if( (level += n) > VMAX )
+					level = VMAX;
+			}
+		}
+	}
+	else
+	{
+		if( level > VMIN )
+		{
+			counter -= (int)((level - VMIN) / pb4_discharge_time);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += n * samplerate;
+				if( (level -= n) < VMIN)
+					level = VMIN;
+			}
+		}
+	}
+	return level;
+}
+
+INLINE int tone23(int samplerate)
+{
+	static int counter2, output2, counter3, output3;
+	int level = VMAX - update_pb4(samplerate);
+	int sum = 0;
+
+	/* bit 5 = low: tone23 disabled */
+	if( (sound_latch_b & 0x20) == 0 )
+		return sum;
+
+    /* modulate timers from the upper 556 with the voltage on Cxx on PB4. */
+	if( level < VMAX )
+	{
+		counter2 -= tone2_max_freq * level / 32768;
+		if( counter2 <= 0 )
+		{
+			int n = (-counter2 / samplerate) + 1;
+			counter2 += n * samplerate;
+			output2 = (output2 + n) & 1;
+		}
+
+		counter3 -= tone3_max_freq*1/3 + tone3_max_freq*2/3 * level / 33768;
+		if( counter3 <= 0 )
+		{
+			int n = (-counter2 / samplerate) + 1;
+			counter3 += samplerate;
+			output3 = (output3 + n) & 1;
+		}
+	}
+
+	sum += (output2) ? VMAX : -VMAX;
+	sum += (output3) ? VMAX : -VMAX;
+
+	return sum / 2;
+}
+
+/*****************************************************************************
+ * Tone #4 comes from upper half of the lower 556 (IC98 in Pop Flamer)
+ * It's modulated by the voltage at C49, which is then divided between
+ * 0V or 5V, depending on the polynome output bit.
+ * The tone signal gates two signals (bits 5 of latches A and C), but
+ * these are also swept between two levels (C52 and C53 in Pop Flamer).
+ *****************************************************************************/
+INLINE int update_c_pc4(int samplerate)
+{
+	#define PC4_MIN (int)(VMAX * 7 / 50)
+
+	static int counter, level = PC4_MIN;
+
+	/* bit 4 of latch C: (part of videoreg_w) hi? */
+	if (sound_latch_c & 0x10)
+	{
+		if (level < VMAX)
+		{
+			counter -= (int)((VMAX - level) / pc4_charge_time);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += n * samplerate;
+				if( (level += n) > VMAX )
+					level = VMAX;
+			}
+		}
+	}
+	else
+	{
+		if (level > PC4_MIN)
+		{
+			counter -= (int)((level - PC4_MIN) / pc4_discharge_time);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += n * samplerate;
+				if( (level -= n) < PC4_MIN )
+					level = PC4_MIN;
+			}
+		}
+	}
+	return level;
+}
+
+INLINE int update_c_pc5(int samplerate)
+{
+	static int counter, level;
+
+	/* bit 5 of latch C: charge or discharge C52 */
+	if (sound_latch_c & 0x20)
+	{
+		if (level < VMAX)
+		{
+			counter -= (int)((VMAX - level) / pc5_charge_time);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += n * samplerate;
+				if( (level += n) > VMAX )
+					level = VMAX;
+			}
+		}
+	}
+	else
+	{
+		if (level > VMIN)
+		{
+			counter -= (int)((level - VMIN) / pc5_discharge_time);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += samplerate;
+				if( (level -= n) < VMIN )
+					level = VMIN;
+			}
+		}
+	}
+	return level;
+}
+
+INLINE int update_c_pa5(int samplerate)
+{
+	static int counter, level;
+
+	/* bit 5 of latch A: charge or discharge C63 */
+	if (sound_latch_a & 0x20)
+	{
+		if (level < VMAX)
+		{
+			counter -= (int)((VMAX - level) / pa5_charge_time);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += n * samplerate;
+				if( (level += n) > VMAX )
+					level = VMAX;
+			}
+		}
+	}
+	else
+	{
+		if (level > VMIN)
+		{
+			counter -= (int)((level - VMIN) / pa5_discharge_time);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += samplerate;
+				if( (level -= n) < VMIN )
+					level = VMIN;
+			}
+		}
+	}
+	return level;
+}
+
+INLINE int tone4(int samplerate)
+{
+	static int counter, output;
+	int level = update_c_pc4(samplerate);
+	int vpc5 = update_c_pc5(samplerate);
+	int vpa5 = update_c_pa5(samplerate);
+	int sum;
+
+	/* Two resistors divide the output voltage of the op-amp between
+	 * polybit = 0: 0V and level: x * opamp_resistor / (opamp_resistor + polybit_resistor)
+	 * polybit = 1: level and 5V: x * polybit_resistor / (opamp_resistor + polybit_resistor)
+	 */
+	if (polybit)
+		level = level + (VMAX - level) * opamp_resistor / (opamp_resistor + polybit_resistor);
+	else
+		level = level * polybit_resistor / (opamp_resistor + polybit_resistor);
+
+	counter -= tone4_max_freq * level / 32768;
+	if( counter <= 0 )
+	{
+		int n = (-counter / samplerate) + 1;
+		counter += n * samplerate;
+		output = (output + n) & 1;
+	}
+
+	/* mix the two signals */
+	sum = vpc5 * pa5_resistor / (pa5_resistor + pc5_resistor) +
+		  vpa5 * pc5_resistor / (pa5_resistor + pc5_resistor);
+
+	return (output) ? sum : -sum;
+}
+
+/*****************************************************************************
+ * Noise comes from a shift register (4006) hooked up just like in Phoenix.
+ * Difference: the clock frequecy is toggled between two values only by
+ * bit 4 of latch A. The output of the first shift register can be zapped(?)
+ * by some control line (IC87 in Pop Flamer: not yet implemented)
+ *****************************************************************************/
+INLINE int update_c_pa6(int samplerate)
+{
+	static int counter, level;
+
+	/* bit 6 of latch A: charge or discharge C63 */
+	if (sound_latch_a & 0x40)
+	{
+		if (level < VMAX)
+		{
+			counter -= (int)((VMAX - level) / pa6_charge_time);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += n * samplerate;
+				if( (level += n) > VMAX )
+					level = VMAX;
+			}
+		}
+	}
+	else
+	{
+		/* only discharge of poly bit is active */
+		if (polybit && level > VMIN)
+		{
+			/* discharge 10uF through 10k -> 0.1s */
+			counter -= (int)((level - VMIN) / 0.1);
+			if( counter <= 0 )
+			{
+				int n = (-counter / samplerate) + 1;
+				counter += n * samplerate;
+				if( (level -= n) < VMIN )
+					level = VMIN;
+			}
+		}
+	}
+	return level;
+}
+
+
+INLINE int noise(int samplerate)
+{
+	static int counter, polyoffs;
+	int c_pa6_level = update_c_pa6(samplerate);
+	int sum = 0;
+
+	/*
+	 * bit 4 of latch A: noise counter rate modulation?
+	 * CV2 input of lower 556 is connected via 2k resistor
+	 */
+	if ( sound_latch_a & 0x10 )
+		counter -= noise_freq * 2 / 3; /* ????? */
+	else
+		counter -= noise_freq * 1 / 3; /* ????? */
+
+	if( counter <= 0 )
+	{
+		int n = (-counter / samplerate) + 1;
+		counter += n * samplerate;
+		polyoffs = (polyoffs + n) & 0x3ffff;
+		polybit = (poly18[polyoffs>>5] >> (polyoffs & 31)) & 1;
+	}
+
+	/* The polynome output bit is used to gate bits 6 + 7 of
+	 * sound latch A through the upper half of a 4066 chip.
+	 * Bit 6 is sweeping a capacitor between 0V and 4.7V
+	 * while bit 7 is connected directly to the 4066.
+	 * Both outputs are then filtered, bit 7 even twice,
+	 * but it's beyond me what the filters there are doing...
+	 */
+	if (polybit)
+	{
+		sum += c_pa6_level;
+		/* bit 7 is connected directly */
+		if (sound_latch_a & 0x80)
+			sum += VMAX;
+	}
+	else
+	{
+		sum -= c_pa6_level;
+		/* bit 7 is connected directly */
+		if (sound_latch_a & 0x80)
+			sum -= VMAX;
+	}
+
+	return sum / 2;
+}
+
+static void pleiads_sound_update(int param, INT16 *buffer, int length)
+{
+	int rate = Machine->sample_rate;
+
+	while( length-- > 0 )
+	{
+		int sum = tone1(rate)/2 + tone23(rate)/2 + tone4(rate) + noise(rate);
+		*buffer++ = sum < 32768 ? sum > -32768 ? sum : -32768 : 32767;
+	}
+}
+
+WRITE_HANDLER( pleiads_sound_control_a_w )
+{
+	if (data == sound_latch_a)
+		return;
+
+	logerror("pleiads_sound_control_b_w $%02x\n", data);
+
+	stream_update(channel,0);
+	sound_latch_a = data;
+}
+
+WRITE_HANDLER( pleiads_sound_control_b_w )
+{
+	/*
+	 * pitch selects one of 4 possible clock inputs
+	 * (actually 3, because IC2 and IC3 are tied together)
+	 * write note value to TMS3615; voice b1 & b2
+	 */
+	int note = data & 15;
+	int pitch = (data >> 6) & 3;
+
+	if (data == sound_latch_b)
+		return;
+
+	logerror("pleiads_sound_control_b_w $%02x\n", data);
+
+	if (pitch == 3)
+		pitch = 2;	/* 2 and 3 are the same */
+
+	tms36xx_note_w(0, pitch, note);
+
+	stream_update(channel,0);
+	sound_latch_b = data;
+}
+
+/* two bits (4 + 5) from the videoreg_w latch go here */
+WRITE_HANDLER( pleiads_sound_control_c_w )
+{
+	if (data == sound_latch_c)
+		return;
+
+	logerror("pleiads_sound_control_c_w $%02x\n", data);
+	stream_update(channel,0);
+	sound_latch_c = data;
+}
+
+static int common_sh_start(const struct MachineSound *msound, char *name)
+{
+	int i, j;
+	UINT32 shiftreg;
+
+	poly18 = (UINT32 *)malloc((1ul << (18-5)) * sizeof(UINT32));
+
+	if( !poly18 )
+		return 1;
+
+	shiftreg = 0;
+	for( i = 0; i < (1ul << (18-5)); i++ )
+	{
+		UINT32 bits = 0;
+		for( j = 0; j < 32; j++ )
+		{
+			bits = (bits >> 1) | (shiftreg << 31);
+			if( ((shiftreg >> 16) & 1) == ((shiftreg >> 17) & 1) )
+				shiftreg = (shiftreg << 1) | 1;
+			else
+				shiftreg <<= 1;
+		}
+		poly18[i] = bits;
+	}
+
+	channel = stream_init(name, 40, Machine->sample_rate, 0, pleiads_sound_update);
+	if( channel == -1 )
+		return 1;
+
 	return 0;
 }
 
-
-void pleiads_sound_control_a_w (int offset,int data)
+int pleiads_sh_start(const struct MachineSound *msound)
 {
-	static int lastnoise;
+	/* The real values are _unknown_!
+	 * I took the ones from Naughty Boy / Pop Flamer
+	 */
 
-	/* voice a */
-	int freq = data & 0x0f;
-	int vol = (data & 0x30) >> 4;
+	/* charge 10u?? (C??) through 330K?? (R??) -> 3.3s */
+	pa5_charge_time = 3.3;
 
-	/* noise */
-	int noise = (data & 0xc0) >> 6;
+	/* discharge 10u?? (C??) through 220k?? (R??) -> 2.2s */
+	pa5_discharge_time = 2.2;
 
-	sound_freq[0] = freq;
-	sound_vol[0] = vol;
+	/* charge 2.2uF?? through 330?? -> 0.000726s */
+	pa6_charge_time = 0.000726;
 
-	if (freq != 0x0f)
-	{
-		osd_adjust_sample (0, MAXFREQ_A/(16-sound_freq[0]), 85*(3-vol));
-		sound_play[0] = 1;
-	}
-	else
-	{
-		osd_adjust_sample (0,SAFREQ,0);
-		sound_play[0] = 0;
-	}
+	/* discharge 2.2uF?? through 10k?? -> 0.22s */
+	pa6_discharge_time = 0.022;
 
-	if (noisemulate)
-	{
-		if (noise_freq != 1750*(4-noise))
-		{
-			noise_freq = 1750*(4-noise);
-			noise_vol = 85*noise;
-		}
+    /* 10k and 10uF */
+	pb4_charge_time = 0.1;
+	pb4_discharge_time = 0.1;
 
-		if (noise) osd_adjust_sample (3,noise_freq,noise_vol);
-		else
-		{
-			osd_adjust_sample (3,1000,0);
-			noise_vol = 0;
-		}
-	}
-	else
-	{
-		switch (noise)
-		{
-			case 1 :
-				if (lastnoise != noise)
-					osd_play_sample(3,Machine->samples->sample[0]->data,
-						Machine->samples->sample[0]->length,
-						Machine->samples->sample[0]->smpfreq,
-						Machine->samples->sample[0]->volume,0);
-				break;
-			case 2 :
-		 		if (lastnoise != noise)
-					osd_play_sample(3,Machine->samples->sample[1]->data,
-						Machine->samples->sample[1]->length,
-						Machine->samples->sample[1]->smpfreq,
-						Machine->samples->sample[1]->volume,0);
-				break;
-		}
-		lastnoise = noise;
-	}
-//	if (errorlog) fprintf(errorlog,"A:%X \n",data);
+	/* charge C49 (22u?) via R47 (2k?) and R48 (1k)
+	 * time constant (1000+2000) * 22e-6 = 0.066s */
+	pc4_charge_time = 0.066;
+
+	/* discharge C49 (22u?) via R48 (1k) and diode D1
+	 * time constant 1000 * 22e-6 = 0.022s */
+	pc4_discharge_time = 0.022;
+
+	/* charge 10u?? through 330 -> 0.0033s */
+	pc5_charge_time = 0.0033;
+
+	/* discharge 10u?? through ??k (R??) -> 0.1s */
+	pc5_discharge_time = 0.1;
+
+	/* both in K */
+	pa5_resistor = 33;
+	pc5_resistor = 47;
+
+	/* upper 556 upper half: Ra=10k??, Rb=200k??, C=0.01uF?? -> 351Hz */
+	tone2_max_freq = 351;
+
+	/* upper 556 lower half: Ra=47k??, Rb=100k??, C=0.01uF?? -> 582Hz */
+	tone3_max_freq = 582;
+
+	/* lower 556 upper half: Ra=33k??, Rb=100k??, C=0.0047uF??
+	   freq = 1.44 / ((33000+2*100000) * 0.0047e-6) = approx. 1315 Hz */
+	tone4_max_freq = 1315;
+
+	/* how to divide the V/C voltage for tone #4 */
+	polybit_resistor = 47;
+	opamp_resistor = 20;
+
+	/* lower 556 lower half: Ra=100k??, Rb=1k??, C=0.01uF??
+	  freq = 1.44 / ((100000+2*1000) * 0.01e-6) = approx. 1412 Hz */
+	noise_freq = 1412;	/* higher noise rate than popflame/naughtyb??? */
+
+	return common_sh_start(msound, "Custom (Pleiads)");
 }
 
-
-
-void pleiads_sound_control_b_w (int offset,int data)
+int naughtyb_sh_start(const struct MachineSound *msound)
 {
-	/* voice b1 & b2 */
-	int freq = data & 0x0f;
-	int vol = (data & 0x30) >> 4;
+	/* charge 10u??? through 330K (R??) -> 3.3s */
+	pa5_charge_time = 3.3;
 
-	/* melody - osd_play_midi anyone? */
-	/* 0 - no tune, 1 - alarm beep?, 2 - even level tune, 3 - odd level tune */
-	/*int tune = (data & 0xc0) >> 6;*/
-	/* LBO - not sure if the non-phoenix games play a tune. For example, */
-	/* Pop Flamer & Pleiades set bit 0x40 occassionally. */
+	/* discharge 10u through 220k (R??) -> 2.1s */
+	pa5_discharge_time = 2.2;
 
-	sound_freq[portBstatus + 1] = freq;
-	sound_vol[portBstatus + 1] = vol;
+	/* charge 2.2uF through 330 -> 0.000726s */
+	pa6_charge_time = 0.000726;
 
-	if (freq < 0x0e) /* LBO clip both 0xe and 0xf to get rid of whine in Pop Flamer */
-	{
-		osd_adjust_sample (portBstatus + 1, MAXFREQ_B1/(16-sound_freq[portBstatus + 1]), 85*(3-vol));
-		sound_play[portBstatus + 1] = 1;
-	}
-	else
-	{
-		osd_adjust_sample (portBstatus + 1, SBFREQ, 0);
-		sound_play[portBstatus + 1] = 0;
-	}
-	portBstatus ^= 0x01;
-	if (errorlog) fprintf(errorlog,"B:%X freq: %02x vol: %02x\n",data, data & 0x0f, (data & 0x30) >> 4);
+	/* discharge 2.2uF through 10K -> 0.022s */
+	pa6_discharge_time = 0.022;
+
+    /* 10k and 10uF */
+	pb4_charge_time = 0.1;
+	pb4_discharge_time = 0.1;
+
+	/* charge 10uF? (C??) via 3k?? (R??) and 2k?? (R28?)
+	 * time constant (3000+2000) * 10e-6 = 0.05s */
+	pc4_charge_time = 0.05 * 10;
+
+	/* discharge 10uF? (C??) via 2k?? R28??  and diode D?
+	 * time constant 2000 * 10e-6 = 0.02s */
+	pc4_discharge_time = 0.02 * 10;
+
+	/* charge 10u through 330 -> 0.0033s */
+	pc5_charge_time = 0.0033;
+
+	/* discharge 10u through ??k (R??) -> 0.1s */
+	pc5_discharge_time = 0.1;
+
+	/* both in K */
+	pa5_resistor = 100;
+	pc5_resistor = 78;
+
+	/* upper 556 upper half: 10k, 200k, 0.01uF -> 351Hz */
+	tone2_max_freq = 351;
+
+	/* upper 556 lower half: 47k, 200k, 0.01uF -> 322Hz */
+	tone3_max_freq = 322;
+
+	/* lower 556 upper half: Ra=33k, Rb=100k, C=0.0047uF
+	   freq = 1.44 / ((33000+2*100000) * 0.0047e-6) = approx. 1315 Hz */
+	tone4_max_freq = 1315;
+
+	/* how to divide the V/C voltage for tone #4 */
+	polybit_resistor = 47;
+	opamp_resistor = 20;
+
+	/* lower 556 lower half: Ra=200k, Rb=1k, C=0.01uF
+	  freq = 1.44 / ((200000+2*1000) * 0.01e-6) = approx. 713 Hz */
+	noise_freq = 713;
+
+	return common_sh_start(msound, "Custom (Naughty Boy)");
 }
 
-
-
-int pleiads_sh_start (void)
+int popflame_sh_start(const struct MachineSound *msound)
 {
-	osd_play_sample (0,waveform1,32,1000,0,1);
-	osd_play_sample (1,waveform1,32,1000,0,1);
-	osd_play_sample (2,waveform1,32,1000,0,1);
-	osd_play_sample (3,waveform2,128,1000,0,1);
-	return 0;
+	/* charge 10u (C63 in Pop Flamer) through 330K -> 3.3s */
+	pa5_charge_time = 3.3;
+
+	/* discharge 10u (C63 in Pop Flamer) through 220k -> 2.2s */
+	pa5_discharge_time = 2.2;
+
+	/* charge 2.2uF through 330 -> 0.000726s */
+	pa6_charge_time = 0.000726;
+
+	/* discharge 2.2uF through 10K -> 0.022s */
+	pa6_discharge_time = 0.022;
+
+    /* 2k and 10uF */
+	pb4_charge_time = 0.02;
+	pb4_discharge_time = 0.02;
+
+	/* charge 2.2uF (C49?) via R47 (100) and R48 (1k)
+	 * time constant (100+1000) * 2.2e-6 = 0.00242 */
+	pc4_charge_time = 0.000242;
+
+	/* discharge 2.2uF (C49?) via R48 (1k) and diode D1
+	 * time constant 1000 * 22e-6 = 0.0022s */
+	pc4_discharge_time = 0.00022;
+
+	/* charge 22u (C52 in Pop Flamer) through 10k -> 0.22s */
+	pc5_charge_time = 0.22;
+
+	/* discharge 22u (C52 in Pop Flamer) through ??k (R??) -> 0.1s */
+	pc5_discharge_time = 0.1;
+
+	/* both in K */
+	pa5_resistor = 33;
+	pc5_resistor = 47;
+
+	/* upper 556 upper half: Ra=10k, Rb=100k, C=0.01uF -> 1309Hz */
+	tone2_max_freq = 1309;
+
+	/* upper 556 lower half: Ra=10k??, Rb=120k??, C=0.01uF -> 1108Hz */
+	tone3_max_freq = 1108;
+
+	/* lower 556 upper half: Ra=33k, Rb=100k, C=0.0047uF
+	   freq = 1.44 / ((33000+2*100000) * 0.0047e-6) = approx. 1315 Hz */
+	tone4_max_freq = 1315;
+
+	/* how to divide the V/C voltage for tone #4 */
+	polybit_resistor = 20;
+	opamp_resistor = 20;
+
+	/* lower 556 lower half: Ra=200k, Rb=1k, C=0.01uF
+	  freq = 1.44 / ((200000+2*1000) * 0.01e-6) = approx. 713 Hz */
+	noise_freq = 713;
+
+	return common_sh_start(msound, "Custom (Pop Flamer)");
 }
 
-
-
-void pleiads_sh_update (void)
+void pleiads_sh_stop(void)
 {
-	pitch_a  = MAXFREQ_A/(16-sound_freq[0]);
-	pitch_b1 = MAXFREQ_B1/(16-sound_freq[1]);
-	pitch_b2 = MAXFREQ_B2/(16-sound_freq[2]);
-/*
-	if (hifreq)
-		pitch_a=pitch_a*5/4;
-
-	pitch_a+=((double)pitch_a*MOD_DEPTH*sin(t));
-
-	sound_a_sw++;
-
-	if (sound_a_sw==SW_INTERVAL)
-	{
-		hifreq=!hifreq;
-		sound_a_sw=0;
-	}
-
-	t+=MOD_RATE;
-
-	if (t>2*PI)
-		t=0;
-
-	pitch_b+=((double)pitch_b*SWEEP_DEPTH*sin(x));
-
-if (sound_b_vol==3 || (last_b_freq==15&&sound_b_freq==12) || (last_b_freq!=14&&sound_b_freq==6))
-		x=0;
-
-	x+=SWEEP_RATE;
-
-	if (x>3*PI/2)
-		x=3*PI/2;
-
-  */
-
-	if (sound_play[0])
-		osd_adjust_sample (0, pitch_a, 85*(3-sound_vol[0]));
-	if (sound_play[1])
-		osd_adjust_sample (1, pitch_b1, 85*(3-sound_vol[1]));
-	if (sound_play[2])
-		osd_adjust_sample (2, pitch_b2, 85*(3-sound_vol[2]));
-
-	if ((noise_vol) && (noisemulate))
-	{
-		osd_adjust_sample (3,noise_freq,noise_vol);
-		noise_vol-=3;
-	}
+	if( poly18 )
+		free(poly18);
+	poly18 = NULL;
 }
+
+void pleiads_sh_update(void)
+{
+	stream_update(channel, 0);
+}
+
 

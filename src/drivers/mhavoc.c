@@ -1,6 +1,9 @@
 /***************************************************************************
 
-MAJOR HAVOC (Driver) - Started 7 OCT 97 - Mike Appolo
+MAJOR HAVOC (Driver)
+
+started 7 OCT 97 - Mike Appolo
+completed by the MAME vector team
 
 Notes:
 
@@ -171,20 +174,49 @@ Every 3, add 1                  | On |Off | On |    |    |    |    |    |
 void mhavoc_init_machine(void);
 int mhavoc_alpha_interrupt (void);
 int mhavoc_gamma_interrupt (void);
-void mhavoc_rom_banksel_w (int offset, int data);
-void mhavoc_ram_banksel_w (int offset, int data);
-int mhavoc_gamma_r(int offset);
-void mhavoc_gamma_w(int offset, int data);
-int mhavoc_alpha_r(int offset);
-void mhavoc_alpha_w(int offset, int data);
-int mhavoc_port_0_r(int offset);
-int mhavoc_port_1_r(int offset);
-void mhavoc_out_0_w(int offset, int data);
-void mhavoc_out_1_w(int offset, int data);
-int mhavoc_gammaram_r(int offset);
-void mhavoc_gammaram_w(int offset, int data);
-void tempest_colorram_w(int offset, int data);
+WRITE_HANDLER( mhavoc_rom_banksel_w );
+WRITE_HANDLER( mhavoc_ram_banksel_w );
+READ_HANDLER( mhavoc_gamma_r );
+WRITE_HANDLER( mhavoc_gamma_w );
+READ_HANDLER( mhavoc_alpha_r );
+WRITE_HANDLER( mhavoc_alpha_w );
+READ_HANDLER( mhavoc_port_0_r );
+READ_HANDLER( mhavoc_port_1_r );
+WRITE_HANDLER( mhavoc_out_0_w );
+WRITE_HANDLER( mhavoc_out_1_w );
+WRITE_HANDLER( mhavoc_irqack_w );
+WRITE_HANDLER( tempest_colorram_w );
 
+
+
+static unsigned char *nvram;
+static size_t nvram_size;
+
+static void nvram_handler(void *file, int read_or_write)
+{
+	if (read_or_write)
+		osd_fwrite(file,nvram,nvram_size);
+	else
+	{
+		if (file)
+			osd_fread(file,nvram,nvram_size);
+		else
+			memset(nvram,0xff,nvram_size);
+	}
+}
+
+
+static unsigned char *gammaram;
+
+static READ_HANDLER( mhavoc_gammaram_r )
+{
+	return gammaram[offset & 0x7ff];
+}
+
+static WRITE_HANDLER( mhavoc_gammaram_w )
+{
+	gammaram[offset & 0x7ff] = data;
+}
 
 
 /* Main board Readmem */
@@ -197,7 +229,7 @@ static struct MemoryReadAddress readmem[] =
 	{ 0x1200, 0x1200, mhavoc_port_0_r },	/* Alpha Input Port 0 */
 	{ 0x1800, 0x1FFF, MRA_RAM},				/* Shared Beta Ram */
 	{ 0x2000, 0x3fff, MRA_BANK2 },			/* Paged Program ROM (32K) */
-	{ 0x4000, 0x4fff, MRA_RAM, &vectorram, &vectorram_size }, /* Vector RAM	(4K) */
+	{ 0x4000, 0x4fff, MRA_RAM }, /* Vector RAM	(4K) */
 	{ 0x5000, 0x5fff, MRA_ROM },			/* Vector ROM (4K) */
 	{ 0x6000, 0x7fff, MRA_BANK3 },			/* Paged Vector ROM (32K) */
 	{ 0x8000, 0xffff, MRA_ROM },			/* Program ROM (32K) */
@@ -214,16 +246,16 @@ static struct MemoryWriteAddress writemem[] =
 	{ 0x1200, 0x1200, MWA_NOP },			/* don't care */
 	{ 0x1400, 0x141f, mhavoc_colorram_w },	/* ColorRAM */
 	{ 0x1600, 0x1600, mhavoc_out_0_w },		/* Control Signals */
-	{ 0x1640, 0x1640, avgdvg_go },			/* Vector Generator GO */
+	{ 0x1640, 0x1640, avgdvg_go_w },			/* Vector Generator GO */
 	{ 0x1680, 0x1680, MWA_NOP },			/* Watchdog Clear */
-	{ 0x16c0, 0x16c0, avgdvg_reset },		/* Vector Generator Reset */
+	{ 0x16c0, 0x16c0, avgdvg_reset_w },		/* Vector Generator Reset */
 	{ 0x1700, 0x1700, MWA_NOP },			/* IRQ ack */
 	{ 0x1740, 0x1740, mhavoc_rom_banksel_w },/* Program ROM Page Select */
 	{ 0x1780, 0x1780, mhavoc_ram_banksel_w },/* Program RAM Page Select */
 	{ 0x17c0, 0x17c0, mhavoc_gamma_w },		/* Gamma Communication Write Port */
 	{ 0x1800, 0x1fff, MWA_RAM },			/* Shared Beta Ram */
 	{ 0x2000, 0x3fff, MWA_ROM },			/* Major Havoc writes here.*/
-	{ 0x4000, 0x4fff, MWA_RAM, &vectorram },/* Vector Generator RAM	*/
+	{ 0x4000, 0x4fff, MWA_RAM, &vectorram, &vectorram_size },/* Vector Generator RAM	*/
 	{ 0x6000, 0x7fff, MWA_ROM },
 	{ -1 }	/* end of table */
 };
@@ -247,105 +279,155 @@ static struct MemoryReadAddress gamma_readmem[] =
 static struct MemoryWriteAddress gamma_writemem[] =
 {
 	{ 0x0000, 0x07ff, MWA_RAM },			/* Program RAM (2K)	*/
-	{ 0x0800, 0x1fff, mhavoc_gammaram_w },	/* wraps to 0x000-0x7ff */
+	{ 0x0800, 0x1fff, mhavoc_gammaram_w, &gammaram },	/* wraps to 0x000-0x7ff */
 	{ 0x2000, 0x203f, quad_pokey_w },		/* Quad Pokey write	*/
-	{ 0x4000, 0x4000, MWA_NOP },			/* IRQ Acknowledge	*/
+	{ 0x4000, 0x4000, mhavoc_irqack_w },	/* IRQ Acknowledge	*/
 	{ 0x4800, 0x4800, mhavoc_out_1_w },		/* Coin Counters 	*/
 	{ 0x5000, 0x5000, mhavoc_alpha_w },		/* Alpha Comm. Write Port */
-	{ 0x6000, 0x61ff, MWA_RAM },			/* EEROM		*/
+	{ 0x6000, 0x61ff, MWA_RAM, &nvram, &nvram_size },	/* EEROM		*/
 	{ -1 }	/* end of table */
 };
 
-INPUT_PORTS_START( input_ports )
+INPUT_PORTS_START( mhavoc )
 	PORT_START	/* IN0 - alpha (player_1 = 0) */
-	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )	/* Right Coin */
-	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )	/* Left Coin Switch  */
-	PORT_BITX( 0x20, IP_ACTIVE_LOW, IPT_SERVICE, "Diag Step/Coin C", OSD_KEY_F1, IP_JOY_NONE, 0 )
-	/* PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_SERVICE, "Diag Step", OSD_KEY_T, IP_JOY_NONE, 0 ) */
-	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT ( 0x0f, IP_ACTIVE_HIGH, IPT_UNKNOWN )
+	/* PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_SERVICE, "Diag Step", KEYCODE_T, IP_JOY_NONE ) */
+	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BITX( 0x20, IP_ACTIVE_LOW, IPT_SERVICE, "Diag Step/Coin C", KEYCODE_F1, IP_JOY_NONE )
+	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )	/* Left Coin Switch  */
+	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )	/* Right Coin */
 
 	PORT_START	/* IN1 - gamma */
-	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_BUTTON1 )
-	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_BUTTON2 )
-	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER2 )
-	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER2 )
 	PORT_BIT ( 0x0f, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER2 )
+	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER2 )
+	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_BUTTON2 )
+	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_BUTTON1 )
 
 	PORT_START	/* IN2 - gamma */
-	PORT_ANALOG ( 0xff, 0x00, IPT_DIAL | IPF_REVERSE, 100, 0, 0, 0 )
+	PORT_ANALOG( 0xff, 0x00, IPT_DIAL | IPF_REVERSE, 100, 40, 0, 0 )
 
 	PORT_START /* DIP Switch at position 13/14S */
-	PORT_DIPNAME( 0xc0, 0x00, "Lives", IP_KEY_NONE )
-	PORT_DIPSETTING( 0x00, "3")
-	PORT_DIPSETTING( 0xc0, "4")
-	PORT_DIPSETTING( 0x80, "5")
-	PORT_DIPSETTING( 0x40, "6")
-	PORT_DIPNAME( 0x30, 0x00, "Difficulty", IP_KEY_NONE )
-	PORT_DIPSETTING( 0x30, "Hard")
-	PORT_DIPSETTING( 0x00, "Medium")
-	PORT_DIPSETTING( 0x10, "Easy")
-	PORT_DIPSETTING( 0x20, "Demo")
-	PORT_DIPNAME( 0x0c, 0x00, "Bonus Life", IP_KEY_NONE )
-	PORT_DIPSETTING( 0x0c, "50,000")
-	PORT_DIPSETTING( 0x00, "100,000")
-	PORT_DIPSETTING( 0x04, "200,000")
-	PORT_DIPSETTING( 0x08, "None")
-	PORT_DIPNAME( 0x02, 0x00, "Attract Mode Sound", IP_KEY_NONE )
-	PORT_DIPSETTING( 0x00, "On")
-	PORT_DIPSETTING( 0x02, "Off")
-	PORT_DIPNAME( 0x01, 0x00, "Adaptive Difficulty", IP_KEY_NONE )
-	PORT_DIPSETTING( 0x00, "On")
-	PORT_DIPSETTING( 0x01, "Off")
+	PORT_DIPNAME( 0x01, 0x00, "Adaptive Difficulty" )
+	PORT_DIPSETTING(    0x01, DEF_STR( Off ))
+	PORT_DIPSETTING(    0x00, DEF_STR( On ))
+	PORT_DIPNAME( 0x02, 0x00, DEF_STR( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( Off ))
+	PORT_DIPSETTING(    0x00, DEF_STR( On ))
+	PORT_DIPNAME( 0x0c, 0x00, DEF_STR( Bonus_Life ) )
+	PORT_DIPSETTING(    0x0c, "50000")
+	PORT_DIPSETTING(    0x00, "100000")
+	PORT_DIPSETTING(    0x04, "200000")
+	PORT_DIPSETTING(    0x08, "None")
+	PORT_DIPNAME( 0x30, 0x00, DEF_STR( Difficulty ) )
+	PORT_DIPSETTING(    0x10, "Easy")
+	PORT_DIPSETTING(    0x00, "Medium")
+	PORT_DIPSETTING(    0x30, "Hard")
+	PORT_DIPSETTING(    0x20, "Demo")
+	PORT_DIPNAME( 0xc0, 0x00, DEF_STR( Lives ) )
+	PORT_DIPSETTING(    0x00, "3 (2 in Free Play)")
+	PORT_DIPSETTING(    0xc0, "4 (3 in Free Play)")
+	PORT_DIPSETTING(    0x80, "5 (4 in Free Play)")
+	PORT_DIPSETTING(    0x40, "6 (5 in Free Play)")
 
 	PORT_START /* DIP Switch at position 8S */
-	PORT_DIPNAME( 0x03, 0x03, "Coinage", IP_KEY_NONE )
-	PORT_DIPSETTING( 0x03, "1 Coin/1 Credit" )
-	PORT_DIPSETTING( 0x02, "2 Coins/1 Credit" )
-	PORT_DIPSETTING( 0x01, "FreePlay" )
-	PORT_DIPSETTING( 0x00, "1 Coin/2 Credits" )
-	PORT_DIPNAME( 0x0c, 0x0c, "Right Coin Mechanism", IP_KEY_NONE )
-	PORT_DIPSETTING( 0x0c, "x1" )
-	PORT_DIPSETTING( 0x08, "x4" )
-	PORT_DIPSETTING( 0x04, "x5" )
-	PORT_DIPSETTING( 0x00, "x6" )
-	PORT_DIPNAME( 0x10, 0x10, "Left Coin Mechanism", IP_KEY_NONE )
-	PORT_DIPSETTING( 0x10, "x1" )
-	PORT_DIPSETTING( 0x00, "x2" )
-	PORT_DIPNAME( 0xe0, 0xe0, "Bonus Coins", IP_KEY_NONE )
-	PORT_DIPSETTING( 0xe0, "None" )
-	PORT_DIPSETTING( 0xa0, "1 each 4" )
-	PORT_DIPSETTING( 0x80, "2 each 4" )
-	PORT_DIPSETTING( 0x60, "1 each 5" )
-	PORT_DIPSETTING( 0x40, "1 each 3" )
+	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Coinage ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x0c, 0x0c, "Right Coin Mechanism" )
+	PORT_DIPSETTING(    0x0c, "x1" )
+	PORT_DIPSETTING(    0x08, "x4" )
+	PORT_DIPSETTING(    0x04, "x5" )
+	PORT_DIPSETTING(    0x00, "x6" )
+	PORT_DIPNAME( 0x10, 0x10, "Left Coin Mechanism" )
+	PORT_DIPSETTING(    0x10, "x1" )
+	PORT_DIPSETTING(    0x00, "x2" )
+	PORT_DIPNAME( 0xe0, 0xe0, "Bonus Credits" )
+	PORT_DIPSETTING(    0x80, "2 each 4" )
+	PORT_DIPSETTING(    0x40, "1 each 3" )
+	PORT_DIPSETTING(    0xa0, "1 each 4" )
+	PORT_DIPSETTING(    0x60, "1 each 5" )
+	PORT_DIPSETTING(    0xe0, "None" )
 
 	PORT_START	/* IN5 - dummy for player_1 = 1 on alpha */
-	PORT_BITX(	0x80, 0x80, IPT_DIPSWITCH_NAME | IPF_TOGGLE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0)
-	PORT_DIPSETTING(      0x00, "On" )
-	PORT_DIPSETTING(      0x80, "Off" )
-	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_UNUSED )	/* Cabinet */
 	PORT_BIT ( 0x3f, IP_ACTIVE_HIGH, IPT_UNUSED )
-
+	PORT_DIPNAME( 0x40, 0x40, "Credit to start" )
+	PORT_DIPSETTING(    0x40, "1" )
+	PORT_DIPSETTING(    0x00, "2" )
+	PORT_SERVICE( 0x80, IP_ACTIVE_LOW )
 INPUT_PORTS_END
 
-static struct GfxLayout fakelayout =
-{
-	1,1,
-	0,
-	1,
-	{ 0 },
-	{ 0 },
-	{ 0 },
-	0
-};
+INPUT_PORTS_START( mhavocp )
+	PORT_START	/* IN0 - alpha (player_1 = 0) */
+	PORT_BIT ( 0x0f, IP_ACTIVE_HIGH, IPT_UNKNOWN )
+	/* PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_SERVICE, "Diag Step", KEYCODE_T, IP_JOY_NONE ) */
+	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BITX( 0x20, IP_ACTIVE_LOW, IPT_SERVICE, "Diag Step/Coin C", KEYCODE_F1, IP_JOY_NONE )
+	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )	/* Left Coin Switch  */
+	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )	/* Right Coin */
 
-static struct GfxDecodeInfo gfxdecodeinfo[] =
-{
-	{ 0, 0,      &fakelayout,     0, 256 },
-	{ -1 } /* end of array */
-};
+	PORT_START	/* IN1 - gamma */
+	PORT_BIT ( 0x0f, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER2 )
+	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER2 )
+	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_BUTTON2 )
+	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_BUTTON1 )
 
-static unsigned char color_prom[] = { VEC_PAL_COLOR };
+	PORT_START	/* IN2 - gamma */
+	PORT_ANALOG( 0xff, 0x00, IPT_DIAL | IPF_REVERSE, 100, 40, 0, 0 )
+
+	PORT_START /* DIP Switch at position 13/14S */
+	PORT_DIPNAME( 0x03, 0x00, DEF_STR( Lives ) )
+	PORT_DIPSETTING(    0x00, "1" )
+	PORT_DIPSETTING(    0x01, "2" )
+	PORT_DIPSETTING(    0x02, "3" )
+	PORT_DIPSETTING(    0x03, "4" )
+	PORT_DIPNAME( 0x0c, 0x00, DEF_STR( Bonus_Life ) )
+	PORT_DIPSETTING(    0x0c, "50000")
+	PORT_DIPSETTING(    0x00, "100000")
+	PORT_DIPSETTING(    0x04, "200000")
+	PORT_DIPSETTING(    0x08, "None")
+	PORT_DIPNAME( 0x30, 0x00, DEF_STR( Difficulty ) )
+	PORT_DIPSETTING(    0x10, "Easy")
+	PORT_DIPSETTING(    0x00, "Medium")
+	PORT_DIPSETTING(    0x30, "Hard")
+	PORT_DIPSETTING(    0x20, "Demo")
+	PORT_DIPNAME( 0xc0, 0x00, DEF_STR( Lives ) )
+	PORT_DIPSETTING(    0x00, "3 (2 in Free Play)")
+	PORT_DIPSETTING(    0xc0, "4 (3 in Free Play)")
+	PORT_DIPSETTING(    0x80, "5 (4 in Free Play)")
+	PORT_DIPSETTING(    0x40, "6 (5 in Free Play)")
+
+	PORT_START /* DIP Switch at position 8S */
+	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Coinage ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x0c, 0x0c, "Right Coin Mechanism" )
+	PORT_DIPSETTING(    0x0c, "x1" )
+	PORT_DIPSETTING(    0x08, "x4" )
+	PORT_DIPSETTING(    0x04, "x5" )
+	PORT_DIPSETTING(    0x00, "x6" )
+	PORT_DIPNAME( 0x10, 0x10, "Left Coin Mechanism" )
+	PORT_DIPSETTING(    0x10, "x1" )
+	PORT_DIPSETTING(    0x00, "x2" )
+	PORT_DIPNAME( 0xe0, 0xe0, "Bonus Credits" )
+	PORT_DIPSETTING(    0x80, "2 each 4" )
+	PORT_DIPSETTING(    0x40, "1 each 3" )
+	PORT_DIPSETTING(    0xa0, "1 each 4" )
+	PORT_DIPSETTING(    0x60, "1 each 5" )
+	PORT_DIPSETTING(    0xe0, "None" )
+
+	PORT_START	/* IN5 - dummy for player_1 = 1 on alpha */
+	PORT_BIT ( 0x3f, IP_ACTIVE_HIGH, IPT_UNUSED )
+	PORT_DIPNAME( 0x40, 0x40, "Credit to start" )
+	PORT_DIPSETTING(    0x40, "1" )
+	PORT_DIPSETTING(    0x00, "2" )
+	PORT_SERVICE( 0x80, IP_ACTIVE_LOW )
+INPUT_PORTS_END
 
 
 
@@ -353,9 +435,7 @@ static struct POKEYinterface pokey_interface =
 {
 	4,	/* 4 chips */
 	1250000,	/* 1.25 MHz??? */
-	255,
-	POKEY_DEFAULT_GAIN/4,
-	NO_CLIP,
+	{ 25, 25, 25, 25 },
 	/* The 8 pot handlers */
 	{ 0, 0, 0, 0 },
 	{ 0, 0, 0, 0 },
@@ -371,43 +451,42 @@ static struct POKEYinterface pokey_interface =
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_mhavoc =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
 			2500000,	/* 2.5 Mhz */
-			0,
 			readmem,writemem,0,0,
-			0, 0, /* no vblank interrupt */
-			interrupt, 407 /* 2.4576 ms period */
+			interrupt,8 /* 2.4576 milliseconds period */
 		},
 		{
 			CPU_M6502,
 			1250000,	/* 1.25 Mhz */
-			2,		/* CPU #2 */
 			gamma_readmem,gamma_writemem,0,0,
 			0, 0, /* no vblank interrupt */
-			interrupt, 305 /* 3.2768 ms period */
+#if 0		/* HJB has it's own timer in machine/mhavoc now */
+			interrupt, 305 /* 3.2768 milliseconds period? */
+#endif
 		}
 	},
-	30, 0,	/* frames per second, vblank duration (vector game, so no vblank) */
+	50, 0,	/* frames per second, vblank duration (vector game, so no vblank) */
 			/* fps should be 30, but MH draws "empty" frames */
 	1,		/* 1 CPU slice. see machine.c */
 	mhavoc_init_machine,
 
 	/* video hardware */
 	400, 300, { 0, 300, 0, 260 },
-	gfxdecodeinfo,
-	256,256,
-	avg_init_colors,
+	0,
+	256,0,
+	avg_init_palette_multi,
 
 	VIDEO_TYPE_VECTOR,
 	0,
 	avg_start_mhavoc,
 	avg_stop,
-	avg_screenrefresh,
+	vector_vh_screenrefresh,
 
 	/* sound hardware */
 	0,0,0,0,
@@ -416,7 +495,9 @@ static struct MachineDriver machine_driver =
 			SOUND_POKEY,
 			&pokey_interface
 		}
-	}
+	},
+
+	nvram_handler
 };
 
 
@@ -424,186 +505,114 @@ static struct MachineDriver machine_driver =
  * Notes:
  * the R3 roms are supported as "mhavoc", the R2 roms (with a bug in gameplay)
  * are supported as "mhavoc2".
- * We'll probably add support for
- *   "Return to Vax" - Jess Askey's souped up version (errors on self test)
+ * "Return to Vax" - Jess Askey's souped up version (errors on self test)
+ * are supported as "mhavocrv".
+ * Prototype is supported as "mhavocp"
  */
 
-ROM_START( mhavoc_rom )
+ROM_START( mhavoc )
 	/* Alpha Processor ROMs */
-	ROM_REGION(0x21000)	/* 152KB for ROMs */
+	ROM_REGION( 0x21000, REGION_CPU1 )	/* 152KB for ROMs */
 	/* Vector Generator ROM */
-	ROM_LOAD( "136025.210", 0x5000, 0x1000, 0xcb9c0606 )
+	ROM_LOAD( "136025.210",   0x05000, 0x2000, 0xc67284ca )
 
 	/* Program ROM */
-	ROM_LOAD( "136025.216", 0x8000, 0x4000, 0x8e55f0f5 )
-	ROM_LOAD( "136025.217", 0xc000, 0x4000, 0x8f547076 )
+	ROM_LOAD( "136025.216",   0x08000, 0x4000, 0x522a9cc0 )
+	ROM_LOAD( "136025.217",   0x0c000, 0x4000, 0xea3d6877 )
 
 	/* Paged Program ROM */
-	ROM_LOAD( "136025.215", 0x10000, 0x4000, 0xa2b87778 )   /* page 0+1 */
-	ROM_LOAD( "136025.318", 0x14000, 0x4000, 0x59e1b0b3 )	/* page 2+3 */
+	ROM_LOAD( "136025.215",   0x10000, 0x4000, 0xa4d380ca ) /* page 0+1 */
+	ROM_LOAD( "136025.318",   0x14000, 0x4000, 0xba935067 ) /* page 2+3 */
 
 	/* Paged Vector Generator ROM */
-	ROM_LOAD( "136025.106", 0x18000, 0x4000, 0x4b8d3231 )	/* page 0+1 */
-	ROM_LOAD( "136025.107", 0x1c000, 0x4000, 0x088dcec9 )	/* page 2+3 */
-
-	ROM_REGION(0x100)	/* Dummy area to be disposed by engine */
+	ROM_LOAD( "136025.106",   0x18000, 0x4000, 0x2ca83c76 ) /* page 0+1 */
+	ROM_LOAD( "136025.107",   0x1c000, 0x4000, 0x5f81c5f3 ) /* page 2+3 */
 
 	/* Gamma Processor ROM */
-	ROM_REGION(0x10000)	/* 16k for code */
-	ROM_LOAD( "136025.108", 0x8000, 0x4000, 0xf6cceaea )
-	ROM_RELOAD(             0xc000, 0x4000 ) /* reset+interrupt vectors */
+	ROM_REGION( 0x10000, REGION_CPU2 ) /* 16k for code */
+	ROM_LOAD( "136025.108",   0x08000, 0x4000, 0x93faf210 )
+	ROM_RELOAD(               0x0c000, 0x4000 ) /* reset+interrupt vectors */
 ROM_END
 
-ROM_START( mhavoc2_rom )
+ROM_START( mhavoc2 )
 	/* Alpha Processor ROMs */
-	ROM_REGION(0x21000)
+	ROM_REGION( 0x21000, REGION_CPU1 )
 	/* Vector Generator ROM */
-	ROM_LOAD( "136025.110", 0x05000, 0x1000, 0x9a81efef )
+	ROM_LOAD( "136025.110",   0x05000, 0x2000, 0x16eef583 )
 
 	/* Program ROM */
-	ROM_LOAD( "136025.103", 0x08000, 0x4000, 0x4c7a494c )
-	ROM_LOAD( "136025.104", 0x0c000, 0x4000, 0x7dbeaaac )
+	ROM_LOAD( "136025.103",   0x08000, 0x4000, 0xbf192284 )
+	ROM_LOAD( "136025.104",   0x0c000, 0x4000, 0x833c5d4e )
 
 	/* Paged Program ROM - switched to 2000-3fff */
-	ROM_LOAD( "136025.101", 0x10000, 0x4000, 0xa8218689 ) /* page 0+1 */
-	ROM_LOAD( "136025.109", 0x14000, 0x4000, 0x110b2e2d ) /* page 2+3 */
+	ROM_LOAD( "136025.101",   0x10000, 0x4000, 0x2b3b591f ) /* page 0+1 */
+	ROM_LOAD( "136025.109",   0x14000, 0x4000, 0x4d766827 ) /* page 2+3 */
 
 	/* Paged Vector Generator ROM */
-	ROM_LOAD( "136025.106", 0x18000, 0x4000, 0x4b8d3231 ) /* page 0+1 */
-	ROM_LOAD( "136025.107", 0x1c000, 0x4000, 0x088dcec9 ) /* page 2+3 */
+	ROM_LOAD( "136025.106",   0x18000, 0x4000, 0x2ca83c76 ) /* page 0+1 */
+	ROM_LOAD( "136025.107",   0x1c000, 0x4000, 0x5f81c5f3 ) /* page 2+3 */
 
 	/* the last 0x1000 is used for the 2 RAM pages */
-	ROM_REGION(0x100)	/* Dummy area to be disposed by engine */
 
 	/* Gamma Processor ROM */
-	ROM_REGION(0x10000)	/* 16k for code */
-	ROM_LOAD( "136025.108", 0x8000, 0x4000, 0xf6cceaea )
-	ROM_RELOAD(             0xc000, 0x4000 )/* reset+interrupt vectors */
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 16k for code */
+	ROM_LOAD( "136025.108",   0x08000, 0x4000, 0x93faf210 )
+	ROM_RELOAD(               0x0c000, 0x4000 ) /* reset+interrupt vectors */
 ROM_END
 
-ROM_START( mhavoc_rv_rom )
+ROM_START( mhavocrv )
 	/* Alpha Processor ROMs */
-	ROM_REGION(0x21000)	/* 152KB for ROMs */
+	ROM_REGION( 0x21000, REGION_CPU1 )	/* 152KB for ROMs */
 	/* Vector Generator ROM */
-	ROM_LOAD( "136025.210", 0x5000, 0x1000, 0xcb9c0606 )
+	ROM_LOAD( "136025.210",   0x05000, 0x2000, 0xc67284ca )
 
 	/* Program ROM */
-	ROM_LOAD( "136025.916", 0x8000, 0x4000, 0x56c5c59f )
-	ROM_LOAD( "136025.917", 0xc000, 0x4000, 0x476bd9df )
+	ROM_LOAD( "136025.916",   0x08000, 0x4000, 0x1255bd7f )
+	ROM_LOAD( "136025.917",   0x0c000, 0x4000, 0x21889079 )
 
 	/* Paged Program ROM */
-	ROM_LOAD( "136025.915", 0x10000, 0x4000, 0x97da1e52 )   /* page 0+1 */
-	ROM_LOAD( "136025.918", 0x14000, 0x4000, 0x76d5d81d )	/* page 2+3 */
+	ROM_LOAD( "136025.915",   0x10000, 0x4000, 0x4c7235dc ) /* page 0+1 */
+	ROM_LOAD( "136025.918",   0x14000, 0x4000, 0x84735445 ) /* page 2+3 */
 
 	/* Paged Vector Generator ROM */
-	ROM_LOAD( "136025.106", 0x18000, 0x4000, 0x4b8d3231 )	/* page 0+1 */
-	ROM_LOAD( "136025.907", 0x1c000, 0x4000, 0x91d546a1 )	/* page 2+3 */
-
-	ROM_REGION(0x100)	/* Dummy area to be disposed by engine */
+	ROM_LOAD( "136025.106",   0x18000, 0x4000, 0x2ca83c76 ) /* page 0+1 */
+	ROM_LOAD( "136025.907",   0x1c000, 0x4000, 0x4deea2c9 ) /* page 2+3 */
 
 	/* Gamma Processor ROM */
-	ROM_REGION(0x10000)	/* 16k for code */
-	ROM_LOAD( "136025.908", 0x8000, 0x4000, 0x3f147884 )
-	ROM_RELOAD(             0xc000, 0x4000 ) /* reset+interrupt vectors */
+	ROM_REGION( 0x10000, REGION_CPU2 ) /* 16k for code */
+	ROM_LOAD( "136025.908",   0x08000, 0x4000, 0xc52ec664 )
+	ROM_RELOAD(               0x0c000, 0x4000 ) /* reset+interrupt vectors */
 ROM_END
 
-static int hiload(void)
-{
-	void *f;
-	/* get RAM pointer (this game is multiCPU) */
-	unsigned char *RAM = Machine->memory_region[2];
+ROM_START( mhavocp )
+	/* Alpha Processor ROMs */
+	ROM_REGION( 0x21000, REGION_CPU1 )
+	/* Vector Generator ROM */
+	ROM_LOAD( "136025.010",   0x05000, 0x2000, 0x3050c0e6 )
 
-	/* no reason to check hiscore table. It's an NV_RAM! */
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-	{
-	        osd_fread(f,&RAM[0x6000],0x200);
-	        osd_fclose(f);
-	}
-	return 1;
-}
+	/* Program ROM */
+	ROM_LOAD( "136025.016",   0x08000, 0x4000, 0x94caf6c0 )
+	ROM_LOAD( "136025.017",   0x0c000, 0x4000, 0x05cba70a )
 
-void hisave(void)
-{
-	void *f;
-	/* get RAM pointer (this game is multiCPU) */
-	unsigned char *RAM = Machine->memory_region[2];
+	/* Paged Program ROM - switched to 2000-3fff */
+	ROM_LOAD( "136025.015",   0x10000, 0x4000, 0xc567c11b )
+	ROM_LOAD( "136025.018",   0x14000, 0x4000, 0xa8c35ccd )
 
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-	        osd_fwrite(f,&RAM[0x6000],0x200);
-	        osd_fclose(f);
-	}
-}
+	/* Paged Vector Generator ROM */
+	ROM_LOAD( "136025.006",   0x18000, 0x4000, 0xe272ed41 )
+	ROM_LOAD( "136025.007",   0x1c000, 0x4000, 0xe152c9d8 )
+
+	/* the last 0x1000 is used for the 2 RAM pages */
+
+	/* Gamma Processor ROM */
+	ROM_REGION( 0x10000, REGION_CPU2 ) /* 16k for code */
+	ROM_LOAD( "136025.008",   0x8000, 0x4000, 0x22ea7399 )
+	ROM_RELOAD(               0xc000, 0x4000 )/* reset+interrupt vectors */
+ROM_END
 
 
-#define CREDITS \
-	"Mike Appolo (MAME driver)\n" \
-	"Brad Oliver (MAME driver)\n" \
-	"Neil Bradley (MAME driver)\n" \
-	"Bernd Wiebelt (MAME driver)\n" \
-	"Frank Palazzolo (technical info)\n" \
-	"Jess Askey (technical info)\n" \
-	VECTOR_TEAM
 
-struct GameDriver mhavoc_driver =
-{
-	"Major Havoc",
-	"mhavoc",
-	CREDITS,
-
-	&machine_driver,
-
-	mhavoc_rom,
-	0, 0,
-	0,
-	0,
-
-	input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	hiload,hisave
-};
-
-struct GameDriver mhavoc2_driver =
-{
-	"Major Havoc (alternate version)",
-	"mhavoc2",
-	CREDITS,
-
-	&machine_driver,
-
-	mhavoc2_rom,
-	0, 0,
-	0,
-	0,
-
-	input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	hiload,hisave
-};
-
-struct GameDriver mhavocrv_driver =
-{
-	"Major Havoc (Return to Vax)",
-	"mhavocrv",
-	CREDITS,
-
-	&machine_driver,
-
-	mhavoc_rv_rom,
-	0, 0,
-	0,
-	0,
-
-	input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	hiload,hisave
-};
+GAME( 1983, mhavoc,   0,      mhavoc, mhavoc,  0, ROT0, "Atari", "Major Havoc (rev 3)" )
+GAME( 1983, mhavoc2,  mhavoc, mhavoc, mhavoc,  0, ROT0, "Atari", "Major Havoc (rev 2)" )
+GAME( 1983, mhavocrv, mhavoc, mhavoc, mhavoc,  0, ROT0, "hack", "Major Havoc (Return to Vax)" )
+GAME( 1983, mhavocp,  mhavoc, mhavoc, mhavocp, 0, ROT0, "Atari", "Major Havoc (prototype)" )

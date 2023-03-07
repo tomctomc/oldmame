@@ -11,8 +11,6 @@
 
 
 
-unsigned char *milliped_paletteram;
-
 static struct rectangle spritevisiblearea =
 {
 	1*8, 31*8-1,
@@ -23,9 +21,7 @@ static struct rectangle spritevisiblearea =
 
 /***************************************************************************
 
-  Convert the color PROMs into a more useable format.
-
-  Actually, Millipede doesn't have a color PROM, it uses RAM.
+  Millipede doesn't have a color PROM, it uses RAM.
   The RAM seems to be conncted to the video output this way:
 
   bit 7 red
@@ -38,34 +34,13 @@ static struct rectangle spritevisiblearea =
   bit 0 blue
 
 ***************************************************************************/
-void milliped_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
-{
-	int i;
-
-
-	/* the palette will be initialized by the game. We just set it to some */
-	/* pre-cooked values so the startup copyright notice can be displayed. */
-	for (i = 0;i < Machine->drv->total_colors;i++)
-	{
-		*(palette++) = ((i & 1) >> 0) * 0xff;
-		*(palette++) = ((i & 2) >> 1) * 0xff;
-		*(palette++) = ((i & 4) >> 2) * 0xff;
-	}
-
-	/* initialize the color table */
-	for (i = 0;i < Machine->drv->color_table_len;i++)
-		colortable[i] = i;
-}
-
-
-
-void milliped_paletteram_w(int offset,int data)
+WRITE_HANDLER( milliped_paletteram_w )
 {
 	int bit0,bit1,bit2;
 	int r,g,b;
 
 
-	milliped_paletteram[offset] = data;
+	paletteram[offset] = data;
 
 	/* red component */
 	bit0 = (~data >> 5) & 0x01;
@@ -85,7 +60,7 @@ void milliped_paletteram_w(int offset,int data)
 	bit2 = (~data >> 2) & 0x01;
 	b = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
 
-	osd_modify_pen(Machine->pens[offset],r,g,b);
+	palette_change_color(offset,r,g,b);
 }
 
 
@@ -97,10 +72,13 @@ void milliped_paletteram_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void milliped_vh_screenrefresh(struct osd_bitmap *bitmap)
+void milliped_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
+
+	if (palette_recalc() || full_refresh)
+		memset (dirtybuffer, 1, videoram_size);
 
 	/* for every character in the Video RAM, check if it has been modified */
 	/* since last time and update it accordingly. */
@@ -126,25 +104,26 @@ void milliped_vh_screenrefresh(struct osd_bitmap *bitmap)
 				color = 2;
 			else color = 0;
 
-			drawgfx(tmpbitmap,Machine->gfx[0],
+			drawgfx(bitmap,Machine->gfx[0],
 					0x40 + (videoram[offs] & 0x3f) + 0x80 * bank,
 					bank + color,
 					0,0,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
-
-
-	/* copy the temporary bitmap to the screen */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
 
 
 	/* Draw the sprites */
 	for (offs = 0;offs < 0x10;offs++)
 	{
 		int spritenum,color;
+		int x, y;
+		int sx, sy;
 
+
+		x = spriteram[offs + 0x20];
+		y = 240 - spriteram[offs + 0x10];
 
 		spritenum = spriteram[offs] & 0x3f;
 		if (spritenum & 1) spritenum = spritenum / 2 + 64;
@@ -169,8 +148,30 @@ void milliped_vh_screenrefresh(struct osd_bitmap *bitmap)
 				spritenum,
 				0,
 				0,spriteram[offs] & 0x80,
-				spriteram[offs + 0x20],240 - spriteram[offs + 0x10],
+				x,y,
 				&spritevisiblearea,TRANSPARENCY_PEN,0);
+
+		/* mark tiles underneath as dirty */
+		sx = x >> 3;
+		sy = y >> 3;
+
+		{
+			int max_x = 1;
+			int max_y = 2;
+			int x2, y2;
+
+			if (x & 0x07) max_x ++;
+			if (y & 0x0f) max_y ++;
+
+			for (y2 = sy; y2 < sy + max_y; y2 ++)
+			{
+				for (x2 = sx; x2 < sx + max_x; x2 ++)
+				{
+					if ((x2 < 32) && (y2 < 32) && (x2 >= 0) && (y2 >= 0))
+						dirtybuffer[x2 + 32*y2] = 1;
+				}
+			}
+		}
 
 	}
 }

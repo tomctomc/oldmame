@@ -27,20 +27,20 @@ ask.  - Mike Balfour (mab22@po.cwru.edu)
 
 /* machine/nitedrvr.c */
 extern unsigned char *nitedrvr_ram;
-extern int nitedrvr_in0_r(int offset);
-extern int nitedrvr_in1_r(int offset);
-extern int nitedrvr_ram_r(int offset);
-extern int nitedrvr_steering_reset_r(int offset);
-extern void nitedrvr_steering_reset_w(int offset, int data);
-extern void nitedrvr_out0_w(int offset, int data);
-extern void nitedrvr_out1_w(int offset, int data);
-extern void nitedrvr_ram_w(int offset, int data);
+READ_HANDLER( nitedrvr_in0_r );
+READ_HANDLER( nitedrvr_in1_r );
+READ_HANDLER( nitedrvr_ram_r );
+READ_HANDLER( nitedrvr_steering_reset_r );
+WRITE_HANDLER( nitedrvr_steering_reset_w );
+WRITE_HANDLER( nitedrvr_out0_w );
+WRITE_HANDLER( nitedrvr_out1_w );
+WRITE_HANDLER( nitedrvr_ram_w );
 
 
 /* vidhrdw/nitedrvr.c */
 extern unsigned char *nitedrvr_hvc;
-extern void nitedrvr_hvc_w(int offset, int data);
-extern void nitedrvr_vh_screenrefresh(struct osd_bitmap *bitmap);
+WRITE_HANDLER( nitedrvr_hvc_w );
+extern void nitedrvr_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
 
 static struct MemoryReadAddress readmem[] =
@@ -79,38 +79,38 @@ static struct MemoryWriteAddress writemem[] =
 	{ -1 }	/* end of table */
 };
 
-INPUT_PORTS_START( nitedrvr_input_ports )
+INPUT_PORTS_START( nitedrvr )
 	PORT_START		/* fake port, gets mapped to Night Driver ports */
-		PORT_DIPNAME( 0x30, 0x10, "Cost", IP_KEY_NONE )
+		PORT_DIPNAME( 0x30, 0x10, "Cost" )
 		PORT_DIPSETTING(	0x00, "2 plays/coin" )
 		PORT_DIPSETTING(	0x10, "1 play/coin" )
 		PORT_DIPSETTING(	0x20, "1 play/coin" ) /* not a typo */
 		PORT_DIPSETTING(	0x30, "1 play/2 coins" )
-		PORT_DIPNAME( 0xC0, 0x80, "Seconds", IP_KEY_NONE )
+		PORT_DIPNAME( 0xC0, 0x80, "Seconds" )
 		PORT_DIPSETTING(	0x00, "50" )
 		PORT_DIPSETTING(	0x40, "75" )
 		PORT_DIPSETTING(	0x80, "100" )
 		PORT_DIPSETTING(	0xC0, "125" )
 
 	PORT_START		/* fake port, gets mapped to Night Driver ports */
-		PORT_DIPNAME( 0x10, 0x00, "Track Set", IP_KEY_NONE )
+		PORT_DIPNAME( 0x10, 0x00, "Track Set" )
 		PORT_DIPSETTING(	0x00, "Normal" )
 		PORT_DIPSETTING(	0x10, "Reverse" )
-		PORT_DIPNAME( 0x20, 0x20, "Bonus Time Allowed", IP_KEY_NONE )
+		PORT_DIPNAME( 0x20, 0x20, "Bonus Time Allowed" )
 		PORT_DIPSETTING(	0x00, "None" )
 		PORT_DIPSETTING(	0x20, "Score=350" )
 		PORT_BIT (0x40, IP_ACTIVE_HIGH, IPT_VBLANK )
-		PORT_BITX(0x80, IP_ACTIVE_LOW, IPT_SERVICE | IPF_TOGGLE, "Self Test", OSD_KEY_F2, IP_JOY_NONE, 0 )
+		PORT_BITX(0x80, IP_ACTIVE_LOW, IPT_SERVICE | IPF_TOGGLE, "Self Test", KEYCODE_F2, IP_JOY_NONE )
 
 	PORT_START		/* fake port, gets mapped to Night Driver ports */
-		PORT_BITX(0x10, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN | IPF_PLAYER2, "1st gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-		PORT_BITX(0x20, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT | IPF_PLAYER2, "2nd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-		PORT_BITX(0x40, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT | IPF_PLAYER2, "3rd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-		PORT_BITX(0x80, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP | IPF_PLAYER2, "4th gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
+		PORT_BITX(0x10, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN | IPF_PLAYER2, "1st gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+		PORT_BITX(0x20, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT | IPF_PLAYER2, "2nd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+		PORT_BITX(0x40, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT | IPF_PLAYER2, "3rd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+		PORT_BITX(0x80, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP | IPF_PLAYER2, "4th gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
 
 	PORT_START		/* fake port, gets mapped to Night Driver ports */
 		PORT_BIT (0x10, IP_ACTIVE_HIGH, IPT_UNKNOWN )	/* Spare */
-		PORT_DIPNAME( 0x20, 0x00, "Difficult Bonus", IP_KEY_NONE )
+		PORT_DIPNAME( 0x20, 0x00, "Difficult Bonus" )
 		PORT_DIPSETTING(	0x00, "Normal" )
 		PORT_DIPSETTING(	0x20, "Difficult" )
 		PORT_BIT (0x40, IP_ACTIVE_HIGH, IPT_UNKNOWN )
@@ -120,14 +120,14 @@ INPUT_PORTS_START( nitedrvr_input_ports )
 		PORT_BIT (0x01, IP_ACTIVE_LOW, IPT_COIN1 )
 		PORT_BIT (0x02, IP_ACTIVE_LOW, IPT_COIN2 )
 		PORT_BIT (0x04, IP_ACTIVE_LOW, IPT_START1 )
-		PORT_BITX(0x08, IP_ACTIVE_LOW, IPT_BUTTON1, "Gas", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-		PORT_BITX(0x10, IP_ACTIVE_HIGH, IPT_BUTTON2, "Novice Track", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-		PORT_BITX(0x20, IP_ACTIVE_HIGH, IPT_BUTTON3, "Expert Track", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-		PORT_BITX(0x40, IP_ACTIVE_HIGH, IPT_BUTTON4, "Pro Track", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
+		PORT_BITX(0x08, IP_ACTIVE_LOW, IPT_BUTTON1, "Gas", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+		PORT_BITX(0x10, IP_ACTIVE_HIGH, IPT_BUTTON2, "Novice Track", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+		PORT_BITX(0x20, IP_ACTIVE_HIGH, IPT_BUTTON3, "Expert Track", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+		PORT_BITX(0x40, IP_ACTIVE_HIGH, IPT_BUTTON4, "Pro Track", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
 		PORT_BIT (0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )	/* Alternating signal? */
 
 	PORT_START		/* fake port used for steering */
-		PORT_ANALOG ( 0xff, 0x00, IPT_DIAL, 100, 0, 0, 0 )
+		PORT_ANALOG( 0xff, 0x00, IPT_DIAL, 100, 10, 0, 0 )
 
 INPUT_PORTS_END
 
@@ -145,7 +145,7 @@ static struct GfxLayout charlayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout, 0x00, 0x02 }, /* offset into colors, # of colors */
+	{ REGION_GFX1, 0, &charlayout, 0x00, 0x02 }, /* offset into colors, # of colors */
 	{ -1 } /* end of array */
 };
 
@@ -156,35 +156,38 @@ static unsigned char palette[] =
 	0x55,0x55,0x55, /* DK GREY - for MAME text only */
 	0x80,0x80,0x80, /* LT GREY - for MAME text only */
 };
-
-static unsigned char colortable[] =
+static unsigned short colortable[] =
 {
 	0x00, 0x01,
 	0x01, 0x00,
 };
+static void init_palette(unsigned char *game_palette, unsigned short *game_colortable,const unsigned char *color_prom)
+{
+	memcpy(game_palette,palette,sizeof(palette));
+	memcpy(game_colortable,colortable,sizeof(colortable));
+}
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_nitedrv =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
 			1000000,	   /* 1 MHz ???? */
-			0,
 			readmem,writemem,0,0,
 			interrupt,1
 		}
 	},
-	60, DEFAULT_REAL_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
+	57, DEFAULT_REAL_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
 	1,	/* single CPU, no need for interleaving */
 	0,
 
 	/* video hardware */
 	32*8, 32*8, { 0*8, 32*8-1, 0*8, 32*8-1 },
 	gfxdecodeinfo,
-	sizeof(palette)/3,sizeof(colortable),
-	0,
+	sizeof(palette) / sizeof(palette[0]) / 3, sizeof(colortable) / sizeof(colortable[0]),
+	init_palette,
 
 	VIDEO_TYPE_RASTER,
 	0,
@@ -207,44 +210,16 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( nitedrvr_rom )
-	ROM_REGION(0x10000) /* 64k for code */
-		ROM_LOAD( "6569-01.D2", 0x9000, 0x0800, 0x456431b6 )
-		ROM_LOAD( "6570-01.F2", 0x9800, 0x0800, 0xa868be6c )
-		ROM_RELOAD( 			0xF800, 0x0800 )
+ROM_START( nitedrvr )
+	ROM_REGION( 0x10000, REGION_CPU1 ) /* 64k for code */
+	ROM_LOAD( "6569-01.d2",   0x9000, 0x0800, 0x7afa7542 )
+	ROM_LOAD( "6570-01.f2",   0x9800, 0x0800, 0xbf5d77b1 )
+	ROM_RELOAD( 			  0xf800, 0x0800 )
 
-		ROM_REGION(0x200)	  /* 0.5k for graphics */
-		ROM_LOAD( "6568-01.P2", 0x0000, 0x0200, 0x2ef2021e )
-
+	ROM_REGION( 0x0200, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "6568-01.p2",   0x0000, 0x0200, 0xf80d8889 )
 ROM_END
 
-/***************************************************************************
 
-  Hi Score Routines
 
-***************************************************************************/
-
-/***************************************************************************
-
-  Game driver(s)
-
-***************************************************************************/
-
-struct GameDriver nitedrvr_driver =
-{
-	"Night Driver",
-	"nitedrvr",
-	"Mike Balfour",
-	&machine_driver,
-
-	nitedrvr_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	nitedrvr_input_ports,
-
-	0, palette, colortable,
-	ORIENTATION_DEFAULT,
-	0,0
-};
+GAMEX( 1976, nitedrvr, 0, nitedrv, nitedrvr, 0, ROT0, "Atari", "Night Driver", GAME_NO_SOUND )

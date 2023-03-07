@@ -15,7 +15,7 @@
 #define BIGSPRITE_HEIGHT 128
 
 unsigned char *cclimber_bsvideoram;
-int cclimber_bsvideoram_size;
+size_t cclimber_bsvideoram_size;
 unsigned char *cclimber_bigspriteram;
 unsigned char *cclimber_column_scroll;
 static unsigned char *bsdirtybuffer;
@@ -23,6 +23,7 @@ static struct osd_bitmap *bsbitmap;
 static int flipscreen[2];
 static int palettebank;
 static int sidepanel_enabled;
+static int bgpen;
 
 
 /***************************************************************************
@@ -42,7 +43,7 @@ static int sidepanel_enabled;
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void cclimber_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void cclimber_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -77,7 +78,11 @@ void cclimber_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 	/* character and sprite lookup table */
 	/* they use colors 0-63 */
 	for (i = 0;i < TOTAL_COLORS(0);i++)
-		COLOR(0,i) = i;
+	{
+		/* pen 0 always uses color 0 (background in River Patrol and Silver Land) */
+		if (i % 4 == 0) COLOR(0,i) = 0;
+		else COLOR(0,i) = i;
+	}
 
 	/* big sprite lookup table */
 	/* it uses colors 64-95 */
@@ -86,6 +91,8 @@ void cclimber_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 		if (i % 4 == 0) COLOR(2,i) = 0;
 		else COLOR(2,i) = i + 64;
 	}
+
+	bgpen = 0;
 }
 
 
@@ -95,149 +102,141 @@ void cclimber_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 
   Swimmer has two 256x4 char/sprite palette PROMs and one 32x8 big sprite
   palette PROM.
-  I don't know for sure how the palette PROMs are connected to the RGB
-  output, but it's probably the usual:
+  The palette PROMs are connected to the RGB output this way:
+  (the 500 and 250 ohm resistors are made of 1 kohm resistors in parallel)
 
-  bit 3 -- 220 ohm resistor  -- BLUE
-        -- 470 ohm resistor  -- BLUE
-        -- 220 ohm resistor  -- GREEN
-  bit 0 -- 470 ohm resistor  -- GREEN
+  bit 3 -- 250 ohm resistor  -- BLUE
+        -- 500 ohm resistor  -- BLUE
+        -- 250 ohm resistor  -- GREEN
+  bit 0 -- 500 ohm resistor  -- GREEN
   bit 3 -- 1  kohm resistor  -- GREEN
-        -- 220 ohm resistor  -- RED
-        -- 470 ohm resistor  -- RED
+        -- 250 ohm resistor  -- RED
+        -- 500 ohm resistor  -- RED
   bit 0 -- 1  kohm resistor  -- RED
 
-  bit 7 -- 220 ohm resistor  -- BLUE
-        -- 470 ohm resistor  -- BLUE
-        -- 220 ohm resistor  -- GREEN
-        -- 470 ohm resistor  -- GREEN
+  bit 7 -- 250 ohm resistor  -- BLUE
+        -- 500 ohm resistor  -- BLUE
+        -- 250 ohm resistor  -- GREEN
+        -- 500 ohm resistor  -- GREEN
         -- 1  kohm resistor  -- GREEN
-        -- 220 ohm resistor  -- RED
-        -- 470 ohm resistor  -- RED
+        -- 250 ohm resistor  -- RED
+        -- 500 ohm resistor  -- RED
   bit 0 -- 1  kohm resistor  -- RED
+
+  Additionally, the background color of the score panel is determined by
+  these resistors:
+
+                  /--- tri-state --  470 -- BLUE
+  +5V -- 1kohm ------- tri-state --  390 -- GREEN
+                  \--- tri-state -- 1000 -- RED
 
 ***************************************************************************/
-void swimmer_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+
+#define BGPEN (256+32)
+#define SIDEPEN (256+32+1)
+
+void swimmer_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
-	int i,j,used,realcnt;
-	unsigned char allocated[256];
+	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
 	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + (offs)])
 
 
-	/* The game has 256+32 colors, plus the river background, but we are */
-	/* limited to a maximum of 256. */
-	/* Luckily, many of the colors are duplicated, so the total number of */
-	/* different colors is less than 256. We select the unique colors and */
-	/* put them in our palette. */
-
-	memset(palette,0,3 * Machine->drv->total_colors);
-
-	/* transparent black */
-	allocated[0] = 0;
-	palette[0] = 0;
-	palette[1] = 0;
-	palette[2] = 0;
-	/* non transparent black */
-	allocated[1] = 0;
-	palette[3] = 0;
-	palette[4] = 0;
-	palette[5] = 0;
-	used = 2;
-
-	realcnt = TOTAL_COLORS(0) / 2;
-	for (i = 0;i < realcnt;i++)
+	for (i = 0;i < 256;i++)
 	{
-		for (j = 0;j < used;j++)
-		{
-			if (allocated[j] == (color_prom[i] & 0x0f) + 16 * (color_prom[i+256] & 0x0f))
-				break;
-		}
-		if (j == used)
-		{
-			int bit0,bit1,bit2;
+		int bit0,bit1,bit2;
 
 
-			used++;
+		/* red component */
+		bit0 = (color_prom[i] >> 0) & 0x01;
+		bit1 = (color_prom[i] >> 1) & 0x01;
+		bit2 = (color_prom[i] >> 2) & 0x01;
+		*(palette++) = 0x20 * bit0 + 0x40 * bit1 + 0x80 * bit2;
+		/* green component */
+		bit0 = (color_prom[i] >> 3) & 0x01;
+		bit1 = (color_prom[i+256] >> 0) & 0x01;
+		bit2 = (color_prom[i+256] >> 1) & 0x01;
+		*(palette++) = 0x20 * bit0 + 0x40 * bit1 + 0x80 * bit2;
+		/* blue component */
+		bit0 = 0;
+		bit1 = (color_prom[i+256] >> 2) & 0x01;
+		bit2 = (color_prom[i+256] >> 3) & 0x01;
+		*(palette++) = 0x20 * bit0 + 0x40 * bit1 + 0x80 * bit2;
 
-			allocated[j] = (color_prom[i] & 0x0f) + 16 * (color_prom[i+256] & 0x0f);
-
-			/* red component */
-			bit0 = (color_prom[i] >> 0) & 0x01;
-			bit1 = (color_prom[i] >> 1) & 0x01;
-			bit2 = (color_prom[i] >> 2) & 0x01;
-			palette[3*j] = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-			/* green component */
-			bit0 = (color_prom[i] >> 3) & 0x01;
-			bit1 = (color_prom[i+256] >> 0) & 0x01;
-			bit2 = (color_prom[i+256] >> 1) & 0x01;
-			palette[3*j + 1] = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-			/* blue component */
-			bit0 = 0;
-			bit1 = (color_prom[i+256] >> 2) & 0x01;
-			bit2 = (color_prom[i+256] >> 3) & 0x01;
-			palette[3*j + 2] = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-		}
-
-		COLOR(0,i) = j;
-
-		// Black background for the side panel
+		/* side panel */
 		if (i % 8)
 		{
-		    COLOR(0,i+realcnt) = j;
+			COLOR(0,i) = i;
+		    COLOR(0,i+256) = i;
 		}
 		else
 		{
-		    // Opaque black
-		    COLOR(0,i+realcnt) = 1;
+			/* background */
+			COLOR(0,i) = BGPEN;
+			COLOR(0,i+256) = SIDEPEN;
 		}
 	}
 
 	color_prom += 2 * 256;
 
-	for (i = 0;i < TOTAL_COLORS(2);i++)
+	/* big sprite */
+	for (i = 0;i < 32;i++)
 	{
-		for (j = 0;j < used;j++)
-		{
-			if (allocated[j] == color_prom[i])
-				break;
-		}
-		if (j == used)
-		{
-			int bit0,bit1,bit2;
+		int bit0,bit1,bit2;
 
 
-			used++;
+		/* red component */
+		bit0 = (color_prom[i] >> 0) & 0x01;
+		bit1 = (color_prom[i] >> 1) & 0x01;
+		bit2 = (color_prom[i] >> 2) & 0x01;
+		*(palette++) = 0x20 * bit0 + 0x40 * bit1 + 0x80 * bit2;
+		/* green component */
+		bit0 = (color_prom[i] >> 3) & 0x01;
+		bit1 = (color_prom[i] >> 4) & 0x01;
+		bit2 = (color_prom[i] >> 5) & 0x01;
+		*(palette++) = 0x20 * bit0 + 0x40 * bit1 + 0x80 * bit2;
+		/* blue component */
+		bit0 = 0;
+		bit1 = (color_prom[i] >> 6) & 0x01;
+		bit2 = (color_prom[i] >> 7) & 0x01;
+		*(palette++) = 0x20 * bit0 + 0x40 * bit1 + 0x80 * bit2;
 
-			allocated[j] = color_prom[i];
-
-			/* red component */
-			bit0 = (color_prom[i] >> 0) & 0x01;
-			bit1 = (color_prom[i] >> 1) & 0x01;
-			bit2 = (color_prom[i] >> 2) & 0x01;
-			palette[3*j] = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-			/* green component */
-			bit0 = (color_prom[i] >> 3) & 0x01;
-			bit1 = (color_prom[i] >> 4) & 0x01;
-			bit2 = (color_prom[i] >> 5) & 0x01;
-			palette[3*j + 1] = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-			/* blue component */
-			bit0 = 0;
-			bit1 = (color_prom[i] >> 6) & 0x01;
-			bit2 = (color_prom[i] >> 7) & 0x01;
-			palette[3*j + 2] = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-		}
-
-		if (i % 8 == 0) j = 0;  /* enforce transparency */
-		else if (j == 0) j = 1; /* avoid undesired transparency */
-
-		COLOR(2,i) = j;
+		if (i % 8 == 0) COLOR(2,i) = BGPEN;  /* enforce transparency */
+		else COLOR(2,i) = i+256;
 	}
+
+	/* background */
+	*(palette++) = 0;
+	*(palette++) = 0;
+	*(palette++) = 0;
+	/* side panel background color */
+	*(palette++) = 0x24;
+	*(palette++) = 0x5d;
+	*(palette++) = 0x4e;
+
+	palette_transparent_color = BGPEN; /* background color */
+	bgpen = BGPEN;
 }
 
 
 
-void swimmer_bgcolor_w(int offset,int data)
+/***************************************************************************
+
+  Swimmer can directly set the background color.
+  The latch is connected to the RGB output this way:
+  (the 500 and 250 ohm resistors are made of 1 kohm resistors in parallel)
+
+  bit 7 -- 250 ohm resistor  -- RED
+        -- 500 ohm resistor  -- RED
+        -- 250 ohm resistor  -- GREEN
+        -- 500 ohm resistor  -- GREEN
+        -- 1  kohm resistor  -- GREEN
+        -- 250 ohm resistor  -- BLUE
+        -- 500 ohm resistor  -- BLUE
+  bit 0 -- 1  kohm resistor  -- BLUE
+
+***************************************************************************/
+WRITE_HANDLER( swimmer_bgcolor_w )
 {
 	int bit0,bit1,bit2;
 	int r,g,b;
@@ -247,21 +246,21 @@ void swimmer_bgcolor_w(int offset,int data)
 	bit0 = 0;
 	bit1 = (data >> 6) & 0x01;
 	bit2 = (data >> 7) & 0x01;
-	r = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+	r = 0x20 * bit0 + 0x40 * bit1 + 0x80 * bit2;
 
 	/* green component */
 	bit0 = (data >> 3) & 0x01;
 	bit1 = (data >> 4) & 0x01;
 	bit2 = (data >> 5) & 0x01;
-	g = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+	g = 0x20 * bit0 + 0x40 * bit1 + 0x80 * bit2;
 
 	/* blue component */
 	bit0 = (data >> 0) & 0x01;
 	bit1 = (data >> 1) & 0x01;
 	bit2 = (data >> 2) & 0x01;
-	b = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+	b = 0x20 * bit0 + 0x40 * bit1 + 0x80 * bit2;
 
-	osd_modify_pen(Machine->pens[0],r,g,b);
+	palette_change_color(BGPEN,r,g,b);
 }
 
 
@@ -283,7 +282,7 @@ int cclimber_vh_start(void)
 	}
 	memset(bsdirtybuffer,1,cclimber_bsvideoram_size);
 
-	if ((bsbitmap = osd_create_bitmap(BIGSPRITE_WIDTH,BIGSPRITE_HEIGHT)) == 0)
+	if ((bsbitmap = bitmap_alloc(BIGSPRITE_WIDTH,BIGSPRITE_HEIGHT)) == 0)
 	{
 		free(bsdirtybuffer);
 		generic_vh_stop();
@@ -302,14 +301,14 @@ int cclimber_vh_start(void)
 ***************************************************************************/
 void cclimber_vh_stop(void)
 {
-	osd_free_bitmap(bsbitmap);
+	bitmap_free(bsbitmap);
 	free(bsdirtybuffer);
 	generic_vh_stop();
 }
 
 
 
-void cclimber_flipscreen_w(int offset,int data)
+WRITE_HANDLER( cclimber_flipscreen_w )
 {
 	if (flipscreen[offset] != (data & 1))
 	{
@@ -320,7 +319,7 @@ void cclimber_flipscreen_w(int offset,int data)
 
 
 
-void cclimber_colorram_w(int offset,int data)
+WRITE_HANDLER( cclimber_colorram_w )
 {
 	if (colorram[offset] != data)
 	{
@@ -339,7 +338,7 @@ void cclimber_colorram_w(int offset,int data)
 
 
 
-void cclimber_bigsprite_videoram_w(int offset,int data)
+WRITE_HANDLER( cclimber_bigsprite_videoram_w )
 {
 	if (cclimber_bsvideoram[offset] != data)
 	{
@@ -351,7 +350,7 @@ void cclimber_bigsprite_videoram_w(int offset,int data)
 
 
 
-void swimmer_palettebank_w(int offset,int data)
+WRITE_HANDLER( swimmer_palettebank_w )
 {
 	if (palettebank != (data & 1))
 	{
@@ -362,7 +361,7 @@ void swimmer_palettebank_w(int offset,int data)
 
 
 
-void swimmer_sidepanel_enable_w(int offset,int data)
+WRITE_HANDLER( swimmer_sidepanel_enable_w )
 {
     if (data != sidepanel_enabled)
     {
@@ -404,23 +403,23 @@ static void drawbigsprite(struct osd_bitmap *bitmap)
 	copybitmap(bitmap,bsbitmap,
 			flipx,flipy,
 			sx,sy,
-			&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+			&Machine->visible_area,TRANSPARENCY_COLOR,bgpen);
 	copybitmap(bitmap,bsbitmap,
 			flipx,flipy,
 			sx-256,sy,
-			&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+			&Machine->visible_area,TRANSPARENCY_COLOR,bgpen);
 	copybitmap(bitmap,bsbitmap,
 			flipx,flipy,
 			sx-256,sy-256,
-			&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+			&Machine->visible_area,TRANSPARENCY_COLOR,bgpen);
 	copybitmap(bitmap,bsbitmap,
 			flipx,flipy,
 			sx,sy-256,
-			&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+			&Machine->visible_area,TRANSPARENCY_COLOR,bgpen);
 }
 
 
-void cclimber_vh_screenrefresh(struct osd_bitmap *bitmap)
+void cclimber_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -469,18 +468,24 @@ void cclimber_vh_screenrefresh(struct osd_bitmap *bitmap)
 		int scroll[32];
 
 
-		if (flipscreen[1])
+		if (flipscreen[0])
 		{
 			for (offs = 0;offs < 32;offs++)
-				scroll[offs] = cclimber_column_scroll[31 - offs];
+			{
+				scroll[offs] = -cclimber_column_scroll[31 - offs];
+				if (flipscreen[1]) scroll[offs] = -scroll[offs];
+			}
 		}
 		else
 		{
 			for (offs = 0;offs < 32;offs++)
+			{
 				scroll[offs] = -cclimber_column_scroll[offs];
+				if (flipscreen[1]) scroll[offs] = -scroll[offs];
+			}
 		}
 
-		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 
@@ -549,7 +554,7 @@ void cclimber_vh_screenrefresh(struct osd_bitmap *bitmap)
 				spriteram[offs + 1] & 0x0f,
 				flipx,flipy,
 				sx,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
 
 
@@ -560,10 +565,16 @@ void cclimber_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 
 
-void swimmer_vh_screenrefresh(struct osd_bitmap *bitmap)
+void swimmer_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
+
+	if (palette_recalc())
+	{
+		memset(dirtybuffer,1,videoram_size);
+		memset(bsdirtybuffer,1,cclimber_bsvideoram_size);
+	}
 
 	/* for every character in the Video RAM, check if it has been modified */
 	/* since last time and update it accordingly. */
@@ -626,7 +637,7 @@ void swimmer_vh_screenrefresh(struct osd_bitmap *bitmap)
 				scroll[offs] = -cclimber_column_scroll[offs];
 		}
 
-		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 
@@ -696,7 +707,7 @@ void swimmer_vh_screenrefresh(struct osd_bitmap *bitmap)
 				(spriteram[offs + 1] & 0x0f) + 0x10 * palettebank,
 				flipx,flipy,
 				sx,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
 
 

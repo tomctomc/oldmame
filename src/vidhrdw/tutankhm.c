@@ -13,63 +13,9 @@
 #include "driver.h"
 #include "vidhrdw/generic.h"
 
-unsigned char tutankhm_paletteram[16];
+
 unsigned char *tutankhm_scrollx;
 static int flipscreen[2];
-
-
-
-/***************************************************************************
-
-  Tutankhm doesn't have a color PROM, it uses RAM palette registers.
-  This routine sets up the color tables to simulate it.
-
-***************************************************************************/
-void tutankhm_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
-{
-	int i;
-	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
-	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
-
-
-	/* the palette will be initialized by the game. We just set it to some */
-	/* pre-cooked values so the startup copyright notice can be displayed. */
-	for (i = 0;i < Machine->drv->total_colors;i++)
-	{
-		*(palette++) = ((i & 1) >> 0) * 0xff;
-		*(palette++) = ((i & 2) >> 1) * 0xff;
-		*(palette++) = ((i & 4) >> 2) * 0xff;
-	}
-}
-
-
-
-void tutankhm_palette_w(int offset,int data)
-{
-	int r, g, b;
-	int bit0,bit1,bit2;
-
-
-	tutankhm_paletteram[offset] = data;
-
-	/* red component */
-	bit0 = (data >> 0) & 0x01;
-	bit1 = (data >> 1) & 0x01;
-	bit2 = (data >> 2) & 0x01;
-	r = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-	/* green component */
-	bit0 = (data >> 3) & 0x01;
-	bit1 = (data >> 4) & 0x01;
-	bit2 = (data >> 5) & 0x01;
-	g = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-	/* blue component */
-	bit0 = 0;
-	bit1 = (data >> 6) & 0x01;
-	bit2 = (data >> 7) & 0x01;
-	b = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-
-	osd_modify_pen(Machine->pens[offset], r, g, b);
-}
 
 
 
@@ -94,47 +40,21 @@ static void videowrite(int offset,int data)
 		y2 = 255 - y2;
 	}
 
-	if (Machine->orientation & ORIENTATION_SWAP_XY)
-	{
-		int temp;
-
-
-		temp = x1;
-		x1 = y1;
-		y1 = temp;
-		temp = x2;
-		x2 = y2;
-		y2 = temp;
-	}
-	if (Machine->orientation & ORIENTATION_FLIP_X)
-	{
-		x1 = 255 - x1;
-		x2 = 255 - x2;
-	}
-	if (Machine->orientation & ORIENTATION_FLIP_Y)
-	{
-		y1 = 255 - y1;
-		y2 = 255 - y2;
-	}
-
-	tmpbitmap->line[y1][x1] = Machine->pens[data & 0x0f];
-	tmpbitmap->line[y2][x2] = Machine->pens[data >> 4];
+	plot_pixel(tmpbitmap,x1,y1,Machine->pens[data & 0x0f]);
+	plot_pixel(tmpbitmap,x2,y2,Machine->pens[data >> 4]);
 }
 
 
 
-void tutankhm_videoram_w(int offset,int data)
+WRITE_HANDLER( tutankhm_videoram_w )
 {
-	if (videoram[offset] != data)
-	{
-		videoram[offset] = data;
-		videowrite(offset,data);
-	}
+	videoram[offset] = data;
+	videowrite(offset,data);
 }
 
 
 
-void tutankhm_flipscreen_w(int offset,int data)
+WRITE_HANDLER( tutankhm_flipscreen_w )
 {
 	if (flipscreen[offset] != (data & 1))
 	{
@@ -157,8 +77,16 @@ void tutankhm_flipscreen_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void tutankhm_vh_screenrefresh(struct osd_bitmap *bitmap)
+void tutankhm_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
+	if (palette_recalc())
+	{
+		int offs;
+
+		for (offs = 0;offs < videoram_size;offs++)
+			tutankhm_videoram_w(offs,videoram[offs]);
+	}
+
 	/* copy the temporary bitmap to the screen */
 	{
 		int scroll[32], i;
@@ -185,6 +113,107 @@ void tutankhm_vh_screenrefresh(struct osd_bitmap *bitmap)
 				scroll[i] = 0;
 		}
 
-		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->visible_area,TRANSPARENCY_NONE,0);
+	}
+}
+
+
+
+/* Juno First Blitter Hardware emulation
+
+	Juno First can blit a 16x16 graphics which comes from un-memory mapped graphics roms
+
+	$8070->$8071 specifies the destination NIBBLE address
+	$8072->$8073 specifies the source NIBBLE address
+
+	Depending on bit 0 of the source address either the source pixels will be copied to
+	the destination address, or a zero will be written.
+	This allows the game to quickly clear the sprites from the screen
+
+	A lookup table is used to swap the source nibbles as they are the wrong way round in the
+	source data.
+
+	Bugs -
+
+		Currently only the even pixels will be written to. This is to speed up the blit routine
+		as it does not have to worry about shifting the source data.
+		This means that all destination X values will be rounded to even values.
+		In practice no one actaully notices this.
+
+		The clear works properly.
+*/
+
+WRITE_HANDLER( junofrst_blitter_w )
+{
+	static unsigned char blitterdata[4];
+
+
+	blitterdata[offset] = data;
+
+	/* Blitter is triggered by $8073 */
+	if (offset==3)
+	{
+		int i;
+		unsigned long srcaddress;
+		unsigned long destaddress;
+		unsigned char srcflag;
+		unsigned char destflag;
+		unsigned char *JunoBLTRom = memory_region(REGION_GFX1);
+
+		srcaddress = (blitterdata[0x2]<<8) | (blitterdata[0x3]);
+		srcflag = srcaddress & 1;
+		srcaddress >>= 1;
+		srcaddress &= 0x7FFE;
+		destaddress = (blitterdata[0x0]<<8)  | (blitterdata[0x1]);
+
+		destflag = destaddress & 1;
+
+		destaddress >>= 1;
+		destaddress &= 0x7fff;
+
+		if (srcflag) {
+			for (i=0;i<16;i++) {
+
+#define JUNOBLITPIXEL(x)									\
+	if (JunoBLTRom[srcaddress+x])							\
+		tutankhm_videoram_w( destaddress+x,					\
+			((JunoBLTRom[srcaddress+x] & 0xf0) >> 4)		\
+			| ((JunoBLTRom[srcaddress+x] & 0x0f) << 4));
+
+				JUNOBLITPIXEL(0);
+				JUNOBLITPIXEL(1);
+				JUNOBLITPIXEL(2);
+				JUNOBLITPIXEL(3);
+				JUNOBLITPIXEL(4);
+				JUNOBLITPIXEL(5);
+				JUNOBLITPIXEL(6);
+				JUNOBLITPIXEL(7);
+
+				destaddress += 128;
+				srcaddress += 8;
+			}
+		} else {
+			for (i=0;i<16;i++) {
+
+#define JUNOCLEARPIXEL(x) 						\
+	if ((JunoBLTRom[srcaddress+x] & 0xF0)) 		\
+		tutankhm_videoram_w( destaddress+x,		\
+			videoram[destaddress+x] & 0xF0);	\
+	if ((JunoBLTRom[srcaddress+x] & 0x0F))		\
+		tutankhm_videoram_w( destaddress+x,		\
+			videoram[destaddress+x] & 0x0F);
+
+				JUNOCLEARPIXEL(0);
+				JUNOCLEARPIXEL(1);
+				JUNOCLEARPIXEL(2);
+				JUNOCLEARPIXEL(3);
+				JUNOCLEARPIXEL(4);
+				JUNOCLEARPIXEL(5);
+				JUNOCLEARPIXEL(6);
+				JUNOCLEARPIXEL(7);
+				destaddress += 128;
+				srcaddress+= 8;
+			}
+		}
 	}
 }

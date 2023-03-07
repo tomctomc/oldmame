@@ -1,6 +1,6 @@
 /***************************************************************************
 
-  majhavoc.c (machine)
+  mhavoc.c (machine)
 
   Functions to emulate general aspects of the machine
   (RAM, ROM, interrupts, I/O ports)
@@ -8,35 +8,42 @@
 ***************************************************************************/
 #include "driver.h"
 #include "vidhrdw/avgdvg.h"
-#include "M6502/M6502.h"
+#include "cpu/m6502/m6502.h"
 
-int gamma_data;
-int alpha_data;
-int alpha_rcvd;
-int alpha_xmtd;
-int gamma_rcvd;
-int gamma_xmtd;
+static int gamma_data;
+static int alpha_data;
+static int alpha_rcvd;
+static int alpha_xmtd;
+static int gamma_rcvd;
+static int gamma_xmtd;
 
-int bank_select;
-int player_1;
-int bank1;
+static int bank_select;
+static int player_1;
 
-void mhavoc_ram_banksel_w (int offset,int data)
+#define LS161_CLOCK 2*5000
+
+static void *gamma_timer = NULL;
+static void mhavoc_gamma_irq(int param);
+
+WRITE_HANDLER( mhavoc_ram_banksel_w )
 {
 	static int bank[2] = { 0x20200, 0x20800 };
+	unsigned char *RAM = memory_region(REGION_CPU1);
 
 	data&=0x01;
-	if (errorlog) fprintf (errorlog, "Alpha RAM select: %02x\n",data);
+	logerror("Alpha RAM select: %02x\n",data);
 	cpu_setbank (1, &RAM[bank[data]]);
 }
 
-void mhavoc_rom_banksel_w (int offset,int data)
+WRITE_HANDLER( mhavoc_rom_banksel_w )
 {
 	static int bank[4] = { 0x10000, 0x12000, 0x14000, 0x16000 };
+	unsigned char *RAM = memory_region(REGION_CPU1);
+
 
 	data &= 0x03;
 
-	if (errorlog) fprintf (errorlog, "Alpha ROM select: %02x\n",data);
+	logerror("Alpha ROM select: %02x\n",data);
 	cpu_setbank (2, &RAM[bank[data]]);
 }
 
@@ -53,54 +60,53 @@ void mhavoc_init_machine (void)
 	gamma_rcvd=0;
 	gamma_xmtd=0;
 	player_1 = 0;
+	if (gamma_timer)
+			timer_remove(gamma_timer);
+	gamma_timer = timer_pulse(TIME_IN_HZ(LS161_CLOCK/16), 0, mhavoc_gamma_irq);
 }
 
 /* Read from the gamma processor */
-int mhavoc_gamma_r (int offset)
+READ_HANDLER( mhavoc_gamma_r )
 {
-	if (errorlog)
-		fprintf (errorlog, "  reading from gamma processor: %02x\n", gamma_data);
+	logerror("  reading from gamma processor: %02x (%d %d)\n", gamma_data, alpha_rcvd, gamma_xmtd);
 	alpha_rcvd=1;
 	gamma_xmtd=0;
 	return gamma_data;
 }
 
 /* Read from the alpha processor */
-int mhavoc_alpha_r (int offset)
+READ_HANDLER( mhavoc_alpha_r )
 {
-	if (errorlog)
-		fprintf (errorlog, "\t\t\t\t\treading from alpha processor: %02x\n", alpha_data);
+	logerror("\t\t\t\t\treading from alpha processor: %02x (%d %d)\n", alpha_data, gamma_rcvd, alpha_xmtd);
 	gamma_rcvd=1;
 	alpha_xmtd=0;
 	return alpha_data;
 }
 
 /* Write to the gamma processor */
-void mhavoc_gamma_w (int offset, int data)
+WRITE_HANDLER( mhavoc_gamma_w )
 {
-	if (errorlog)
-		fprintf (errorlog, "  writing to gamma processor: %02x\n", data);
+	logerror("  writing to gamma processor: %02x (%d %d)\n", data, gamma_rcvd, alpha_xmtd);
 	gamma_rcvd=0;
 	alpha_xmtd=1;
 	alpha_data = data;
-	cpu_cause_interrupt (1, INT_NMI);
+	cpu_cause_interrupt (1, M6502_INT_NMI);
 
-	/* the sound CPU needs to reply in 250ms (according to Neil Bradley) */
+	/* the sound CPU needs to reply in 250microseconds (according to Neil Bradley) */
 	timer_set (TIME_IN_USEC(250), 0, 0);
 }
 
 /* Write to the alpha processor */
-void mhavoc_alpha_w (int offset, int data)
+WRITE_HANDLER( mhavoc_alpha_w )
 {
-	if (errorlog)
-		fprintf (errorlog, "\t\t\t\t\twriting to alpha processor: %02x\n", data);
+	logerror("\t\t\t\t\twriting to alpha processor: %02x %d %d\n", data, alpha_rcvd, gamma_xmtd);
 	alpha_rcvd=0;
 	gamma_xmtd=1;
 	gamma_data = data;
 }
 
 /* Simulates frequency and vector halt */
-int mhavoc_port_0_r(int offset)
+READ_HANDLER( mhavoc_port_0_r )
 {
 	int res;
 
@@ -132,7 +138,7 @@ int mhavoc_port_0_r(int offset)
 	return (res & 0xff);
 }
 
-int mhavoc_port_1_r(int offset)
+READ_HANDLER( mhavoc_port_1_r )
 {
 	int res;
 
@@ -151,13 +157,12 @@ int mhavoc_port_1_r(int offset)
 	return (res & 0xff);
 }
 
-void mhavoc_out_0_w (int offset, int data)
+WRITE_HANDLER( mhavoc_out_0_w )
 {
 	if (!(data & 0x08))
 	{
-		if (errorlog)
-			fprintf (errorlog, "\t\t\t\t*** resetting gamma processor. ***\n");
-		cpu_reset(1);
+		logerror("\t\t\t\t*** resetting gamma processor. ***\n");
+		cpu_set_reset_line(1,PULSE_LINE);
 		alpha_rcvd=0;
 		alpha_xmtd=0;
 		gamma_rcvd=0;
@@ -168,18 +173,19 @@ void mhavoc_out_0_w (int offset, int data)
 	osd_led_w (2, data & 0x01);
 }
 
-void mhavoc_out_1_w (int offset, int data)
+WRITE_HANDLER( mhavoc_out_1_w )
 {
 	osd_led_w (1, data & 0x01);
 	osd_led_w (0, (data & 0x02)>>1);
 }
 
-int mhavoc_gammaram_r (int offset)
+static void mhavoc_gamma_irq(int param)
 {
-	return RAM[offset & 0x7ff];
+	cpu_set_irq_line(1,0,HOLD_LINE);
 }
 
-void mhavoc_gammaram_w (int offset, int data)
+WRITE_HANDLER( mhavoc_irqack_w )
 {
-	RAM[offset & 0x7ff] = data;
+	timer_reset( gamma_timer, TIME_IN_HZ(LS161_CLOCK/16));
+	cpu_set_irq_line(1,0,CLEAR_LINE);
 }

@@ -6,29 +6,22 @@ Based on drivers from Juno First emulator by Chris Hardy (chrish@kcbbs.gen.nz)
 
 #include "driver.h"
 #include "vidhrdw/generic.h"
-#include "M6809/m6809.h"
+#include "cpu/m6809/m6809.h"
 
 
+void konami1_decode(void);
 
 extern unsigned char *circusc_spritebank;
 extern unsigned char *circusc_scroll;
 
-void circusc_flipscreen_w(int offset,int data);
-void circusc_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
-void circusc_sprite_bank_select_w(int offset, int data);
-void circusc_vh_screenrefresh(struct osd_bitmap *bitmap);
-
-unsigned char KonamiDecode( unsigned char opcode, unsigned short address );
+WRITE_HANDLER( circusc_flipscreen_w );
+void circusc_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
+WRITE_HANDLER( circusc_sprite_bank_select_w );
+void circusc_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
 
 
-void circusc_init_machine(void)
-{
-	/* Set optimization flags for M6809 */
-	m6809_Flags = M6809_FAST_S | M6809_FAST_U;
-}
-
-int circusc_sh_timer_r(int offset)
+READ_HANDLER( circusc_sh_timer_r )
 {
 	int clock;
 #define CIRCUSCHALIE_TIMER_RATE (14318180/6144)
@@ -38,12 +31,12 @@ int circusc_sh_timer_r(int offset)
 	return clock & 0xF;
 }
 
-void circusc_sh_irqtrigger_w(int offset,int data)
+WRITE_HANDLER( circusc_sh_irqtrigger_w )
 {
 	cpu_cause_interrupt(1,0xff);
 }
 
-void circusc_dac_w(int offset,int data)
+WRITE_HANDLER( circusc_dac_w )
 {
 	DAC_data_w(0,data);
 }
@@ -66,8 +59,7 @@ static struct MemoryWriteAddress writemem[] =
 {
 	{ 0x0000, 0x0000, circusc_flipscreen_w },
 	{ 0x0001, 0x0001, interrupt_enable_w },
-	{ 0x0003, 0x0003, MWA_NOP },  /* Coin counter 1 */
-	{ 0x0004, 0x0004, MWA_NOP },  /* Coin counter 2 */
+	{ 0x0003, 0x0004, coin_counter_w },  /* Coin counters */
 	{ 0x0005, 0x0005, MWA_RAM, &circusc_spritebank },
 	{ 0x0400, 0x0400, watchdog_reset_w },
 	{ 0x0800, 0x0800, soundlatch_w },
@@ -89,28 +81,28 @@ static struct MemoryReadAddress sound_readmem[] =
 	{ 0x4000, 0x43ff, MRA_RAM },
 	{ 0x6000, 0x6000, soundlatch_r },
 	{ 0x8000, 0x8000, circusc_sh_timer_r },
-	{ -1 }	/* end of table */
+	{ -1 }  /* end of table */
 };
 
 static struct MemoryWriteAddress sound_writemem[] =
 {
 	{ 0x0000, 0x3fff, MWA_ROM },
 	{ 0x4000, 0x43ff, MWA_RAM },
-	{ 0xa000, 0xa000, MWA_NOP },	/* latch command for the 76496. We should buffer this */
+	{ 0xa000, 0xa000, MWA_NOP },    /* latch command for the 76496. We should buffer this */
 									/* command and send it to the chip, but we just use */
 									/* the triggers below because the program always writes */
 									/* the same number here and there. */
-	{ 0xa001, 0xa001, SN76496_0_w },	/* trigger the 76496 to read the latch */
-	{ 0xa002, 0xa002, SN76496_1_w },	/* trigger the 76496 to read the latch */
+	{ 0xa001, 0xa001, SN76496_0_w },        /* trigger the 76496 to read the latch */
+	{ 0xa002, 0xa002, SN76496_1_w },        /* trigger the 76496 to read the latch */
 	{ 0xa003, 0xa003, circusc_dac_w },
-	{ 0xa004, 0xa004, MWA_NOP },		/* ??? */
-	{ 0xa07c, 0xa07c, MWA_NOP },		/* ??? */
-	{ -1 }	/* end of table */
+	{ 0xa004, 0xa004, MWA_NOP },            /* ??? */
+	{ 0xa07c, 0xa07c, MWA_NOP },            /* ??? */
+	{ -1 }  /* end of table */
 };
 
 
 
-INPUT_PORTS_START( input_ports )
+INPUT_PORTS_START( circusc )
 	PORT_START      /* IN0 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_COIN1 )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_COIN2 )
@@ -142,84 +134,84 @@ INPUT_PORTS_START( input_ports )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_START      /* DSW0 */
 
-	PORT_DIPNAME( 0x0f, 0x0f, "Coin A", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x05, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x08, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x04, "3 Coins/2 Credits" )
-	PORT_DIPSETTING(    0x01, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x0f, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x03, "3 Coins/4 Credits" )
-	PORT_DIPSETTING(    0x07, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x0e, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x06, "2 Coins/5 Credits" )
-	PORT_DIPSETTING(    0x0d, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x0c, "1 Coin/4 Credits" )
-	PORT_DIPSETTING(    0x0b, "1 Coin/5 Credits" )
-	PORT_DIPSETTING(    0x0a, "1 Coin/6 Credits" )
-	PORT_DIPSETTING(    0x09, "1 Coin/7 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
-	PORT_DIPNAME( 0xf0, 0xf0, "Coin B", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x20, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x50, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x80, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x40, "3 Coins/2 Credits" )
-	PORT_DIPSETTING(    0x10, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0xf0, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x30, "3 Coins/4 Credits" )
-	PORT_DIPSETTING(    0x70, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0xe0, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x60, "2 Coins/5 Credits" )
-	PORT_DIPSETTING(    0xd0, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0xc0, "1 Coin/4 Credits" )
-	PORT_DIPSETTING(    0xb0, "1 Coin/5 Credits" )
-	PORT_DIPSETTING(    0xa0, "1 Coin/6 Credits" )
-	PORT_DIPSETTING(    0x90, "1 Coin/7 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
+	PORT_DIPNAME( 0x0f, 0x0f, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x05, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 3C_2C ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0x0f, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 3C_4C ) )
+	PORT_DIPSETTING(    0x07, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0x0e, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x06, DEF_STR( 2C_5C ) )
+	PORT_DIPSETTING(    0x0d, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0x0b, DEF_STR( 1C_5C ) )
+	PORT_DIPSETTING(    0x0a, DEF_STR( 1C_6C ) )
+	PORT_DIPSETTING(    0x09, DEF_STR( 1C_7C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0xf0, 0xf0, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x50, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( 3C_2C ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0xf0, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x30, DEF_STR( 3C_4C ) )
+	PORT_DIPSETTING(    0x70, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0xe0, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x60, DEF_STR( 2C_5C ) )
+	PORT_DIPSETTING(    0xd0, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0xc0, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0xb0, DEF_STR( 1C_5C ) )
+	PORT_DIPSETTING(    0xa0, DEF_STR( 1C_6C ) )
+	PORT_DIPSETTING(    0x90, DEF_STR( 1C_7C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
 
 	PORT_START      /* DSW1 */
-	PORT_DIPNAME( 0x03, 0x03, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x03, "3" )
 	PORT_DIPSETTING(    0x02, "4" )
 	PORT_DIPSETTING(    0x01, "5" )
 	PORT_DIPSETTING(    0x00, "7" )
-	PORT_DIPNAME( 0x04, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Upright" )
-	PORT_DIPSETTING(    0x04, "Cocktail" )
-	PORT_DIPNAME( 0x08, 0x08, "Bonus Life", IP_KEY_NONE )
+	PORT_DIPNAME( 0x04, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( Cocktail ) )
+	PORT_DIPNAME( 0x08, 0x08, DEF_STR( Bonus_Life ) )
 	PORT_DIPSETTING(    0x08, "20000 70000" )
 	PORT_DIPSETTING(    0x00, "30000 80000" )
-	PORT_DIPNAME( 0x10, 0x10, "Dip Sw2 5", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x10, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x20, 0x20, "Dip Sw2 6", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x20, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x40, 0x40, "Dip Sw2 7", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x40, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x80, 0x00, "Demo Sounds", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x80, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_DIPNAME( 0x10, 0x10, "Dip Sw2 5" )
+	PORT_DIPSETTING(    0x10, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x20, 0x20, "Dip Sw2 6" )
+	PORT_DIPSETTING(    0x20, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x40, 0x40, "Dip Sw2 7" )
+	PORT_DIPSETTING(    0x40, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x80, 0x00, DEF_STR( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 INPUT_PORTS_END
 
 
 
 static struct GfxLayout charlayout =
 {
-	8,8,	/* 8*8 characters */
-	512,	/* 512 characters */
-	4,	/* 4 bits per pixel */
-	{ 0, 1, 2, 3 },	/* the four bitplanes are packed in one nibble */
+	8,8,    /* 8*8 characters */
+	512,    /* 512 characters */
+	4,      /* 4 bits per pixel */
+	{ 0, 1, 2, 3 }, /* the four bitplanes are packed in one nibble */
 	{ 0*4, 1*4, 2*4, 3*4, 4*4, 5*4, 6*4, 7*4 },
 	{ 0*32, 1*32, 2*32, 3*32, 4*32, 5*32, 6*32, 7*32 },
-	32*8	/* every char takes 8 consecutive bytes */
+	32*8    /* every char takes 8 consecutive bytes */
 };
 
 static struct GfxLayout spritelayout =
 {
 	16,16,  /* 16*16 sprites */
-	384,	/* 384 sprites */
+	384,    /* 384 sprites */
 	4,      /* 4 bits per pixel */
 	{ 0, 1, 2, 3 },        /* the bitplanes are packed */
 	{ 0*4, 1*4, 2*4, 3*4, 4*4, 5*4, 6*4, 7*4,
@@ -231,95 +223,48 @@ static struct GfxLayout spritelayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout,       0, 16 },
-	{ 1, 0x4000, &spritelayout, 16*16, 16 },
+	{ REGION_GFX1, 0, &charlayout,       0, 16 },
+	{ REGION_GFX2, 0, &spritelayout, 16*16, 16 },
 	{ -1 } /* end of array */
-};
-
-
-
-static unsigned char color_prom[] =
-{
-	/* A02_J18.BIN - palette */
-	0x00,0xAD,0x05,0xF6,0xE7,0xC6,0xC5,0x7F,0x17,0xD9,0xF0,0xA6,0xAF,0x3D,0x20,0xFF,
-	0x00,0xFF,0x53,0x07,0x3F,0xE8,0xC0,0xEE,0xA4,0xA5,0xC5,0xAF,0x94,0xE7,0x28,0x60,
-	/* C10_J16.BIN - sprite lookup table */
-	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x02,0x00,0x00,0x00,0x00,0x02,0x07,0x08,0x0F,0x0F,0x00,0x0D,0x0C,0x0F,
-	0x00,0x01,0x02,0x07,0x08,0x00,0x00,0x05,0x07,0x08,0x00,0x0F,0x0F,0x0D,0x0E,0x0F,
-	0x00,0x07,0x07,0x07,0x07,0x08,0x08,0x08,0x07,0x08,0x00,0x08,0x08,0x00,0x00,0x08,
-	0x00,0x07,0x07,0x08,0x08,0x07,0x07,0x08,0x07,0x00,0x08,0x00,0x08,0x08,0x00,0x08,
-	0x00,0x07,0x08,0x07,0x08,0x07,0x08,0x07,0x07,0x00,0x08,0x08,0x08,0x00,0x08,0x00,
-	0x00,0x06,0x02,0x05,0x0F,0x03,0x01,0x00,0x07,0x02,0x01,0x0B,0x0C,0x0A,0x02,0x04,
-	0x00,0x01,0x02,0x03,0x03,0x07,0x09,0x00,0x00,0x00,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x02,0x03,0x00,0x00,0x00,0x07,0x03,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x08,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x00,0x0B,0x0C,0x07,0x08,0x0F,
-	0x00,0x00,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x08,0x0B,0x0C,0x08,0x07,0x0F,
-	0x00,0x01,0x01,0x03,0x03,0x08,0x0F,0x00,0x00,0x00,0x00,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x00,0x03,0x00,0x00,0x00,0x01,0x03,0x08,0x0F,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x09,0x03,0x0A,0x08,0x01,0x00,0x00,0x00,0x00,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x00,0x03,0x00,0x00,0x00,0x09,0x0A,0x08,0x01,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x02,0x03,0x0F,0x05,0x06,0x07,0x07,0x02,0x0A,0x0B,0x0C,0x0A,0x06,0x04,
-	/* B07_J17.BIN - character lookup table */
-	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x08,0x04,0x06,0x01,0x0E,0x07,0x08,0x05,0x0A,0x09,0x0C,0x0D,0x03,0x0E,
-	0x00,0x01,0x05,0x06,0x0E,0x08,0x03,0x0D,0x07,0x0D,0x0A,0x09,0x0C,0x05,0x04,0x03,
-	0x00,0x01,0x0D,0x0E,0x03,0x07,0x04,0x05,0x0D,0x07,0x0A,0x09,0x0C,0x08,0x06,0x04,
-	0x00,0x01,0x07,0x08,0x0D,0x0D,0x05,0x08,0x05,0x08,0x0A,0x09,0x0C,0x07,0x0E,0x0F,
-	0x00,0x0E,0x0E,0x03,0x04,0x05,0x06,0x07,0x08,0x03,0x0A,0x04,0x0D,0x04,0x0E,0x0F,
-	0x00,0x08,0x08,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x03,0x04,0x03,0x0E,0x0F,
-	0x00,0x01,0x02,0x03,0x0E,0x04,0x04,0x07,0x08,0x0A,0x0A,0x00,0x0A,0x07,0x0E,0x0F,
-	0x00,0x01,0x02,0x03,0x00,0x00,0x06,0x00,0x00,0x09,0x0A,0x0B,0x0D,0x00,0x00,0x00,
-	0x00,0x01,0x05,0x03,0x04,0x05,0x00,0x07,0x08,0x0A,0x0A,0x05,0x0D,0x07,0x0E,0x03,
-	0x00,0x01,0x02,0x03,0x04,0x03,0x06,0x0D,0x07,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x02,0x03,0x04,0x09,0x06,0x05,0x0D,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x02,0x03,0x07,0x0F,0x06,0x08,0x0D,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x08,
-	0x00,0x01,0x02,0x03,0x07,0x0A,0x06,0x08,0x0D,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x08,
-	0x00,0x01,0x02,0x03,0x04,0x02,0x06,0x08,0x07,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x01,0x02,0x03,0x04,0x0E,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F
 };
 
 
 
 static struct SN76496interface sn76496_interface =
 {
-	2,	/* 2 chips */
-	14318180/8,	/*  1.7897725 Mhz */
-	{ 255*2, 255*2 }
+	2,      /* 2 chips */
+	{ 14318180/8, 14318180/8 },     /*  1.7897725 Mhz */
+	{ 100, 100 }
 };
 
 static struct DACinterface dac_interface =
 {
 	1,
-	441000,
-	{ 255,255 },
-	{  1,  1 }
+	{ 100 }
 };
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_circusc =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6809,
 			2048000,        /* 2 Mhz */
-			0,
 			readmem,writemem,0,0,
 			interrupt,1
 		},
 		{
 			CPU_Z80 | CPU_AUDIO_CPU,
-			14318180/4,	/* Z80 Clock is derived from a 14.31818 Mhz crystal */
-			2,	/* memory region #2 */
+			14318180/4,     /* Z80 Clock is derived from a 14.31818 Mhz crystal */
 			sound_readmem,sound_writemem,0,0,
-			ignore_interrupt,1	/* interrupts are triggered by the main CPU */
+			ignore_interrupt,1      /* interrupts are triggered by the main CPU */
 		}
 	},
-	60, DEFAULT_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
-	1,	/* 1 CPU slice per frame - interleaving is forced when a sound command is written */
-	circusc_init_machine,
+	60, DEFAULT_60HZ_VBLANK_DURATION,       /* frames per second, vblank duration */
+	1,      /* 1 CPU slice per frame - interleaving is forced when a sound command is written */
+	0,
 
 	/* video hardware */
 	32*8, 32*8, { 0*8, 32*8-1, 2*8, 30*8-1 },
@@ -354,153 +299,135 @@ static struct MachineDriver machine_driver =
   Game driver(s)
 
 ***************************************************************************/
-ROM_START( circusc_rom )
-	ROM_REGION(0x10000)     /* 64k for code */
-	ROM_LOAD( "h03_r05.bin", 0x6000, 0x2000, 0x014a2838 )
-	ROM_LOAD( "h04_n04.bin", 0x8000, 0x2000, 0x1a708c52 )
-	ROM_LOAD( "h05_n03.bin", 0xA000, 0x2000, 0x624a16a2 )
-	ROM_LOAD( "h06_n02.bin", 0xC000, 0x2000, 0xcc30b1b8 )
-	ROM_LOAD( "h07_n01.bin", 0xE000, 0x2000, 0x59c0afce )
 
-	ROM_REGION(0x10000)    /* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "a04_j12.bin", 0x0000, 0x2000, 0xb87e4276 )
-	ROM_LOAD( "a05_k13.bin", 0x2000, 0x2000, 0x91e42b1a )
-	ROM_LOAD( "e11_j06.bin", 0x4000, 0x2000, 0xf8dad4f2 )
-	ROM_LOAD( "e12_j07.bin", 0x6000, 0x2000, 0x4a3b8c93 )
-	ROM_LOAD( "e13_j08.bin", 0x8000, 0x2000, 0xeebecdd0 )
-	ROM_LOAD( "e14_j09.bin", 0xa000, 0x2000, 0xb0fe94f2 )
-	ROM_LOAD( "e15_j10.bin", 0xc000, 0x2000, 0xef7e6bc0 )
-	ROM_LOAD( "e16_j11.bin", 0xe000, 0x2000, 0xc68c2584 )
+ROM_START( circusc )
+	ROM_REGION( 2*0x10000, REGION_CPU1 )     /* 64k for code + 64k for decrypted opcodes */
+	ROM_LOAD( "s05",          0x6000, 0x2000, 0x48feafcf )
+	ROM_LOAD( "q04",          0x8000, 0x2000, 0xc283b887 )
+	ROM_LOAD( "q03",          0xa000, 0x2000, 0xe90c0e86 )
+	ROM_LOAD( "q02",          0xc000, 0x2000, 0x4d847dc6 )
+	ROM_LOAD( "q01",          0xe000, 0x2000, 0x18c20adf )
 
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "cd05_l14.bin", 0x0000, 0x2000, 0x7d613615 )
-	ROM_LOAD( "cd07_l15.bin", 0x2000, 0x2000, 0x12edc96d )
+	ROM_REGION( 0x10000, REGION_CPU2 )     /* 64k for the audio CPU */
+	ROM_LOAD( "cd05_l14.bin", 0x0000, 0x2000, 0x607df0fb )
+	ROM_LOAD( "cd07_l15.bin", 0x2000, 0x2000, 0xa6ad30e1 )
+
+	ROM_REGION( 0x04000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "a04_j12.bin",  0x0000, 0x2000, 0x56e5b408 )
+	ROM_LOAD( "a05_k13.bin",  0x2000, 0x2000, 0x5aca0193 )
+
+	ROM_REGION( 0x0c000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "e11_j06.bin",  0x0000, 0x2000, 0xdf0405c6 )
+	ROM_LOAD( "e12_j07.bin",  0x2000, 0x2000, 0x23dfe3a6 )
+	ROM_LOAD( "e13_j08.bin",  0x4000, 0x2000, 0x3ba95390 )
+	ROM_LOAD( "e14_j09.bin",  0x6000, 0x2000, 0xa9fba85a )
+	ROM_LOAD( "e15_j10.bin",  0x8000, 0x2000, 0x0532347e )
+	ROM_LOAD( "e16_j11.bin",  0xa000, 0x2000, 0xe1725d24 )
+
+	ROM_REGION( 0x0220, REGION_PROMS )
+	ROM_LOAD( "a02_j18.bin",  0x0000, 0x020, 0x10dd4eaa ) /* palette */
+	ROM_LOAD( "c10_j16.bin",  0x0020, 0x100, 0xc244f2aa ) /* character lookup table */
+	ROM_LOAD( "b07_j17.bin",  0x0120, 0x100, 0x13989357 ) /* sprite lookup table */
 ROM_END
 
-ROM_START( circusc2_rom )
-	ROM_REGION(0x10000)     /* 64k for code */
-	ROM_LOAD( "s05", 0x6000, 0x2000, 0x215f0a8f )
-	ROM_LOAD( "q04", 0x8000, 0x2000, 0x7911c25b )
-	ROM_LOAD( "q03", 0xA000, 0x2000, 0xf1ddab95 )
-	ROM_LOAD( "q02", 0xC000, 0x2000, 0xf2760124 )
-	ROM_LOAD( "q01", 0xE000, 0x2000, 0x331c99ea )
+ROM_START( circusc2 )
+	ROM_REGION( 2*0x10000, REGION_CPU1 )     /* 64k for code + 64k for decrypted opcodes */
+	ROM_LOAD( "h03_r05.bin",  0x6000, 0x2000, 0xed52c60f )
+	ROM_LOAD( "h04_n04.bin",  0x8000, 0x2000, 0xfcc99e33 )
+	ROM_LOAD( "h05_n03.bin",  0xa000, 0x2000, 0x5ef5b3b5 )
+	ROM_LOAD( "h06_n02.bin",  0xc000, 0x2000, 0xa5a5e796 )
+	ROM_LOAD( "h07_n01.bin",  0xe000, 0x2000, 0x70d26721 )
 
-	ROM_REGION(0x10000)    /* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "j12", 0x0000, 0x2000, 0xb87e4276 )
-	ROM_LOAD( "k13", 0x2000, 0x2000, 0x91e42b1a )
-	ROM_LOAD( "j06", 0x4000, 0x2000, 0xf8dad4f2 )
-	ROM_LOAD( "j07", 0x6000, 0x2000, 0x4a3b8c93 )
-	ROM_LOAD( "j08", 0x8000, 0x2000, 0xeebecdd0 )
-	ROM_LOAD( "j09", 0xa000, 0x2000, 0xb0fe94f2 )
-	ROM_LOAD( "j10", 0xc000, 0x2000, 0xef7e6bc0 )
-	ROM_LOAD( "j11", 0xe000, 0x2000, 0xc68c2584 )
+	ROM_REGION( 0x10000, REGION_CPU2 )     /* 64k for the audio CPU */
+	ROM_LOAD( "cd05_l14.bin", 0x0000, 0x2000, 0x607df0fb )
+	ROM_LOAD( "cd07_l15.bin", 0x2000, 0x2000, 0xa6ad30e1 )
 
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "l14", 0x0000, 0x2000, 0x7d613615 )
-	ROM_LOAD( "l15", 0x2000, 0x2000, 0x12edc96d )
+	ROM_REGION( 0x04000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "a04_j12.bin",  0x0000, 0x2000, 0x56e5b408 )
+	ROM_LOAD( "a05_k13.bin",  0x2000, 0x2000, 0x5aca0193 )
+
+	ROM_REGION( 0x0c000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "e11_j06.bin",  0x0000, 0x2000, 0xdf0405c6 )
+	ROM_LOAD( "e12_j07.bin",  0x2000, 0x2000, 0x23dfe3a6 )
+	ROM_LOAD( "e13_j08.bin",  0x4000, 0x2000, 0x3ba95390 )
+	ROM_LOAD( "e14_j09.bin",  0x6000, 0x2000, 0xa9fba85a )
+	ROM_LOAD( "e15_j10.bin",  0x8000, 0x2000, 0x0532347e )
+	ROM_LOAD( "e16_j11.bin",  0xa000, 0x2000, 0xe1725d24 )
+
+	ROM_REGION( 0x0220, REGION_PROMS )
+	ROM_LOAD( "a02_j18.bin",  0x0000, 0x020, 0x10dd4eaa ) /* palette */
+	ROM_LOAD( "c10_j16.bin",  0x0020, 0x100, 0xc244f2aa ) /* character lookup table */
+	ROM_LOAD( "b07_j17.bin",  0x0120, 0x100, 0x13989357 ) /* sprite lookup table */
 ROM_END
 
-static void circusc_decode(void)
+ROM_START( circuscc )
+	ROM_REGION( 2*0x10000, REGION_CPU1 )     /* 64k for code + 64k for decrypted opcodes */
+	ROM_LOAD( "cc_u05.h3",    0x6000, 0x2000, 0x964c035a )
+	ROM_LOAD( "p04",          0x8000, 0x2000, 0xdd0c0ee7 )
+	ROM_LOAD( "p03",          0xa000, 0x2000, 0x190247af )
+	ROM_LOAD( "p02",          0xc000, 0x2000, 0x7e63725e )
+	ROM_LOAD( "p01",          0xe000, 0x2000, 0xeedaa5b2 )
+
+	ROM_REGION( 0x10000, REGION_CPU2 )     /* 64k for the audio CPU */
+	ROM_LOAD( "cd05_l14.bin", 0x0000, 0x2000, 0x607df0fb )
+	ROM_LOAD( "cd07_l15.bin", 0x2000, 0x2000, 0xa6ad30e1 )
+
+	ROM_REGION( 0x04000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "a04_j12.bin",  0x0000, 0x2000, 0x56e5b408 )
+	ROM_LOAD( "a05_k13.bin",  0x2000, 0x2000, 0x5aca0193 )
+
+	ROM_REGION( 0x0c000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "e11_j06.bin",  0x0000, 0x2000, 0xdf0405c6 )
+	ROM_LOAD( "e12_j07.bin",  0x2000, 0x2000, 0x23dfe3a6 )
+	ROM_LOAD( "e13_j08.bin",  0x4000, 0x2000, 0x3ba95390 )
+	ROM_LOAD( "e14_j09.bin",  0x6000, 0x2000, 0xa9fba85a )
+	ROM_LOAD( "e15_j10.bin",  0x8000, 0x2000, 0x0532347e )
+	ROM_LOAD( "e16_j11.bin",  0xa000, 0x2000, 0xe1725d24 )
+
+	ROM_REGION( 0x0220, REGION_PROMS )
+	ROM_LOAD( "a02_j18.bin",  0x0000, 0x020, 0x10dd4eaa ) /* palette */
+	ROM_LOAD( "c10_j16.bin",  0x0020, 0x100, 0xc244f2aa ) /* character lookup table */
+	ROM_LOAD( "b07_j17.bin",  0x0120, 0x100, 0x13989357 ) /* sprite lookup table */
+ROM_END
+
+ROM_START( circusce )
+	ROM_REGION( 2*0x10000, REGION_CPU1 )     /* 64k for code + 64k for decrypted opcodes */
+	ROM_LOAD( "p05",          0x6000, 0x2000, 0x7ca74494 )
+	ROM_LOAD( "p04",          0x8000, 0x2000, 0xdd0c0ee7 )
+	ROM_LOAD( "p03",          0xa000, 0x2000, 0x190247af )
+	ROM_LOAD( "p02",          0xc000, 0x2000, 0x7e63725e )
+	ROM_LOAD( "p01",          0xe000, 0x2000, 0xeedaa5b2 )
+
+	ROM_REGION( 0x10000, REGION_CPU2 )     /* 64k for the audio CPU */
+	ROM_LOAD( "cd05_l14.bin", 0x0000, 0x2000, 0x607df0fb )
+	ROM_LOAD( "cd07_l15.bin", 0x2000, 0x2000, 0xa6ad30e1 )
+
+	ROM_REGION( 0x04000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "a04_j12.bin",  0x0000, 0x2000, 0x56e5b408 )
+	ROM_LOAD( "a05_k13.bin",  0x2000, 0x2000, 0x5aca0193 )
+
+	ROM_REGION( 0x0c000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "e11_j06.bin",  0x0000, 0x2000, 0xdf0405c6 )
+	ROM_LOAD( "e12_j07.bin",  0x2000, 0x2000, 0x23dfe3a6 )
+	ROM_LOAD( "e13_j08.bin",  0x4000, 0x2000, 0x3ba95390 )
+	ROM_LOAD( "e14_j09.bin",  0x6000, 0x2000, 0xa9fba85a )
+	ROM_LOAD( "e15_j10.bin",  0x8000, 0x2000, 0x0532347e )
+	ROM_LOAD( "e16_j11.bin",  0xa000, 0x2000, 0xe1725d24 )
+
+	ROM_REGION( 0x0220, REGION_PROMS )
+	ROM_LOAD( "a02_j18.bin",  0x0000, 0x020, 0x10dd4eaa ) /* palette */
+	ROM_LOAD( "c10_j16.bin",  0x0020, 0x100, 0xc244f2aa ) /* character lookup table */
+	ROM_LOAD( "b07_j17.bin",  0x0120, 0x100, 0x13989357 ) /* sprite lookup table */
+ROM_END
+
+
+static void init_circusc(void)
 {
-	int A;
-
-
-	for (A = 0x6000;A < 0x10000;A++)
-	{
-		ROM[A] = KonamiDecode(RAM[A],A);
-	}
+	konami1_decode();
 }
 
 
-
-static int hiload(void)
-{
-	/* get RAM pointer (this game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
-
-	if (memcmp(&RAM[0x2163],"CBR",3) == 0 &&
-		memcmp(&RAM[0x20A6],"\x01\x98\x30",3) == 0 &&
-		memcmp(&RAM[0x3627],"\x01",1) == 0)
-	{
-		void *f;
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0x2160],0x32);
-			RAM[0x20A6] = RAM[0x2160];
-			RAM[0x20A7] = RAM[0x2161];
-			RAM[0x20A8] = RAM[0x2162];
-
-			/* Copy high score to videoram */
-			RAM[0x35A7] = RAM[0x2162] & 0x0F;
-			RAM[0x35C7] = (RAM[0x2162] & 0xF0) >> 4;
-			RAM[0x35E7] = RAM[0x2161] & 0x0F;
-			RAM[0x3607] = (RAM[0x2161] & 0xF0) >> 4;
-			RAM[0x3627] = RAM[0x2160] & 0x0F;
-			if ((RAM[0x2160] & 0xF0) != 0)
-				RAM[0x3647] = (RAM[0x2160] & 0xF0) >> 4;
-
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;  /* we can't load the hi scores yet */
-}
-
-static void hisave(void)
-{
-	/* get RAM pointer (this game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
-	void *f;
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0x2160],0x32);
-		osd_fclose(f);
-	}
-}
-
-
-
-struct GameDriver circusc_driver =
-{
-	"Circus Charlie",
-	"circusc",
-	"Chris Hardy (MAME driver)\nValerio Verrando (high score save)\nPaul Swan (color info)",
-	&machine_driver,
-
-	circusc_rom,
-	0, circusc_decode,
-	0,
-	0,	/* sound_prom */
-
-	input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_ROTATE_90,
-
-	hiload, hisave
-};
-
-struct GameDriver circusc2_driver =
-{
-	"Circus Charlie (level select)",
-	"circusc2",
-	"Chris Hardy (MAME driver)\nValerio Verrando (high score save)\nPaul Swan (color info)",
-	&machine_driver,
-
-	circusc2_rom,
-	0, circusc_decode,
-	0,
-	0,	/* sound_prom */
-
-	input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_ROTATE_90,
-
-	hiload, hisave
-};
+GAME( 1984, circusc,  0,       circusc, circusc, circusc, ROT90, "Konami", "Circus Charlie" )
+GAME( 1984, circusc2, circusc, circusc, circusc, circusc, ROT90, "Konami", "Circus Charlie (no level select)" )
+GAME( 1984, circuscc, circusc, circusc, circusc, circusc, ROT90, "Konami (Centuri licence)", "Circus Charlie (Centuri)" )
+GAME( 1984, circusce, circusc, circusc, circusc, circusc, ROT90, "Konami (Centuri licence)", "Circus Charlie (Centuri, earlier)" )

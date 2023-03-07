@@ -12,44 +12,11 @@
 
 
 static int gfxbank;
-static unsigned char *superqix_palette;
-static unsigned char *superqix_bitmapram,*superqix_bitmapram2;
-
-
-
-/***************************************************************************
-
-  Convert the color PROMs into a more useable format.
-
-  Super Qix doesn't have colors PROMs, it uses RAM. The meaning of the bits are
-  bit 7 -- Blue
-        -- Blue
-        -- Green
-        -- Green
-        -- Red
-        -- Red
-        -- Intensity
-  bit 0 -- Intensity
-
-***************************************************************************/
-void superqix_vh_convert_color_prom(unsigned char *palette,unsigned char *colortable,const unsigned char *color_prom)
-{
-	int i;
-
-
-	/* the palette will be initialized by the game. We just set it to some */
-	/* pre-cooked values so the startup copyright notice can be displayed. */
-	for (i = 0;i < Machine->drv->total_colors;i++)
-	{
-		*(palette++) = ((i & 1) >> 0) * 0xff;
-		*(palette++) = ((i & 2) >> 1) * 0xff;
-		*(palette++) = ((i & 4) >> 2) * 0xff;
-	}
-
-	/* initialize the color table */
-	for (i = 0;i < Machine->drv->total_colors;i++)
-		colortable[i] = i;
-}
+static unsigned char *superqix_bitmapram,*superqix_bitmapram2,*superqix_bitmapram_dirty,*superqix_bitmapram2_dirty;
+static struct osd_bitmap *tmpbitmap2;
+int sqix_minx,sqix_maxx,sqix_miny,sqix_maxy;
+int sqix_last_bitmap;
+int sqix_current_bitmap;
 
 
 
@@ -63,7 +30,9 @@ int superqix_vh_start(void)
 	if (generic_vh_start() != 0)
 		return 1;
 
-	if ((superqix_palette = malloc(256 * sizeof(unsigned char))) == 0)
+	/* palette RAM is accessed thorough I/O ports, so we have to */
+	/* allocate it ourselves */
+	if ((paletteram = malloc(256 * sizeof(unsigned char))) == 0)
 	{
 		generic_vh_stop();
 		return 1;
@@ -71,7 +40,7 @@ int superqix_vh_start(void)
 
 	if ((superqix_bitmapram = malloc(0x7000 * sizeof(unsigned char))) == 0)
 	{
-		free(superqix_palette);
+		free(paletteram);
 		generic_vh_stop();
 		return 1;
 	}
@@ -79,10 +48,45 @@ int superqix_vh_start(void)
 	if ((superqix_bitmapram2 = malloc(0x7000 * sizeof(unsigned char))) == 0)
 	{
 		free(superqix_bitmapram);
-		free(superqix_palette);
+		free(paletteram);
 		generic_vh_stop();
 		return 1;
 	}
+
+	if ((superqix_bitmapram_dirty = malloc(0x7000 * sizeof(unsigned char))) == 0)
+	{
+		free(superqix_bitmapram2);
+		free(superqix_bitmapram);
+		free(paletteram);
+		generic_vh_stop();
+		return 1;
+	}
+	memset(superqix_bitmapram_dirty,1,0x7000);
+
+	if ((superqix_bitmapram2_dirty = malloc(0x7000 * sizeof(unsigned char))) == 0)
+	{
+		free(superqix_bitmapram_dirty);
+		free(superqix_bitmapram2);
+		free(superqix_bitmapram);
+		free(paletteram);
+		generic_vh_stop();
+		return 1;
+	}
+	memset(superqix_bitmapram2_dirty,1,0x7000);
+
+	if ((tmpbitmap2 = bitmap_alloc(256, 256)) == 0)
+	{
+		free(superqix_bitmapram2_dirty);
+		free(superqix_bitmapram_dirty);
+		free(superqix_bitmapram2);
+		free(superqix_bitmapram);
+		free(paletteram);
+		generic_vh_stop();
+		return 1;
+	}
+
+	sqix_minx=0;sqix_maxx=127;sqix_miny=0;sqix_maxy=223;
+	sqix_last_bitmap=0;
 
 	return 0;
 }
@@ -98,65 +102,64 @@ void superqix_vh_stop(void)
 {
 	free(superqix_bitmapram2);
 	free(superqix_bitmapram);
-	free(superqix_palette);
+	free(superqix_bitmapram_dirty);
+	free(superqix_bitmapram2_dirty);
+	bitmap_free (tmpbitmap2);
+	free(paletteram);
 	generic_vh_stop();
 }
 
 
 
-int superqix_palette_r(int offset)
-{
-	return superqix_palette[offset];
-}
-
-void superqix_palette_w(int offset,int data)
-{
-	int bits,intensity,r,g,b;
-
-
-	superqix_palette[offset] = data;
-
-	intensity = (data >> 0) & 0x03;
-	/* red component */
-	bits = (data >> 2) & 0x03;
-	r = 0x44 * bits + 0x11 * intensity;
-	/* green component */
-	bits = (data >> 4) & 0x03;
-	g = 0x44 * bits + 0x11 * intensity;
-	/* blue component */
-	bits = (data >> 6) & 0x03;
-	b = 0x44 * bits + 0x11 * intensity;
-
-	osd_modify_pen(Machine->pens[offset],r,g,b);
-}
-
-
-
-int superqix_bitmapram_r(int offset)
+READ_HANDLER( superqix_bitmapram_r )
 {
 	return superqix_bitmapram[offset];
 }
 
-void superqix_bitmapram_w(int offset,int data)
+
+WRITE_HANDLER( superqix_bitmapram_w )
 {
-	superqix_bitmapram[offset] = data;
+	if(data != superqix_bitmapram[offset])
+	{
+		int x,y;
+		superqix_bitmapram[offset] = data;
+		superqix_bitmapram_dirty[offset] = 1;
+		x=offset%128;
+		y=offset/128;
+		if(x<sqix_minx) sqix_minx=x;
+		if(x>sqix_maxx) sqix_maxx=x;
+		if(y<sqix_miny) sqix_miny=y;
+		if(y>sqix_maxy) sqix_maxy=y;
+	}
 }
 
-int superqix_bitmapram2_r(int offset)
+READ_HANDLER( superqix_bitmapram2_r )
 {
 	return superqix_bitmapram2[offset];
 }
 
-void superqix_bitmapram2_w(int offset,int data)
+WRITE_HANDLER( superqix_bitmapram2_w )
 {
-	superqix_bitmapram2[offset] = data;
+	if(data != superqix_bitmapram2[offset])
+	{
+		int x,y;
+		superqix_bitmapram2[offset] = data;
+		superqix_bitmapram2_dirty[offset] = 1;
+		x=offset%128;
+		y=offset/128;
+		if(x<sqix_minx) sqix_minx=x;
+		if(x>sqix_maxx) sqix_maxx=x;
+		if(y<sqix_miny) sqix_miny=y;
+		if(y>sqix_maxy) sqix_maxy=y;
+	}
 }
 
 
 
-void superqix_0410_w(int offset,int data)
+WRITE_HANDLER( superqix_0410_w )
 {
 	int bankaddress;
+	unsigned char *RAM = memory_region(REGION_CPU1);
 
 
 	/* bits 0-1 select the tile bank */
@@ -164,6 +167,16 @@ void superqix_0410_w(int offset,int data)
 	{
 		gfxbank = data & 0x03;
 		memset(dirtybuffer,1,videoram_size);
+	}
+
+	/* bit 2 controls bitmap 1/2 */
+	sqix_current_bitmap=data&4;
+	if(sqix_current_bitmap !=sqix_last_bitmap)
+	{
+		sqix_last_bitmap=sqix_current_bitmap;
+		memset(superqix_bitmapram_dirty,1,0x7000);
+		memset(superqix_bitmapram2_dirty,1,0x7000);
+		sqix_minx=0;sqix_maxx=127;sqix_miny=0;sqix_maxy=223;
 	}
 
 	/* bit 3 enables NMI */
@@ -183,9 +196,20 @@ void superqix_0410_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void superqix_vh_screenrefresh(struct osd_bitmap *bitmap)
+void superqix_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
-	int offs;
+	int offs,i;
+	unsigned char pens[16];
+
+
+	/* recalc the palette if necessary */
+	if (palette_recalc())
+	{
+		memset(dirtybuffer,1,videoram_size);
+		memset(superqix_bitmapram_dirty,1,0x7000);
+		memset(superqix_bitmapram2_dirty,1,0x7000);
+		sqix_minx=0;sqix_maxx=127;sqix_miny=0;sqix_maxy=223;
+	}
 
 
 	/* for every character in the Video RAM, check if it has been modified */
@@ -207,86 +231,78 @@ void superqix_vh_screenrefresh(struct osd_bitmap *bitmap)
 					(colorram[offs] & 0xf0) >> 4,
 					0,0,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
 	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
-{
-	int x,y;
+	for(i=1;i<16;i++)
+		pens[i]=Machine->pens[i];
+	pens[0]=palette_transparent_pen;
 
-
-	for (y = 0;y < 224;y++)
+	if(sqix_current_bitmap==0)		/* Bitmap 1 */
 	{
-		for (x = 0;x < 128;x++)
+		int x,y;
+
+		for (y = sqix_miny;y <= sqix_maxy;y++)
 		{
-			int sx,sy,d;
-
-
-			d = superqix_bitmapram[y*128+x];
-			/* TODO: bitmapram2 is used for player 2 in cocktail mode */
-
-			if (d & 0xf0)
+			for (x = sqix_minx;x <= sqix_maxx;x++)
 			{
-				sx = 2*x;
-				sy = y+16;
-				if (Machine->orientation & ORIENTATION_SWAP_XY)
+				int sx,sy,d;
+
+				if(superqix_bitmapram_dirty[y*128+x])
 				{
-					int temp;
+					superqix_bitmapram_dirty[y*128+x]=0;
+					d = superqix_bitmapram[y*128+x];
 
+					sx = 2*x;
+					sy = y+16;
 
-					temp = sx;
-					sx = sy;
-					sy = temp;
+					plot_pixel(tmpbitmap2, sx    , sy, pens[d >> 4]);
+					plot_pixel(tmpbitmap2, sx + 1, sy, pens[d & 0x0f]);
 				}
-				if (Machine->orientation & ORIENTATION_FLIP_X)
-					sx = bitmap->width - 1 - sx;
-				if (Machine->orientation & ORIENTATION_FLIP_Y)
-					sy = bitmap->height - 1 - sy;
-
-				bitmap->line[sy][sx] = Machine->pens[d >> 4];
-			}
-
-			if (d & 0x0f)
-			{
-				sx = 2*x + 1;
-				sy = y+16;
-				if (Machine->orientation & ORIENTATION_SWAP_XY)
-				{
-					int temp;
-
-
-					temp = sx;
-					sx = sy;
-					sy = temp;
-				}
-				if (Machine->orientation & ORIENTATION_FLIP_X)
-					sx = bitmap->width - 1 - sx;
-				if (Machine->orientation & ORIENTATION_FLIP_Y)
-					sy = bitmap->height - 1 - sy;
-
-				bitmap->line[sy][sx] = Machine->pens[d & 0x0f];
 			}
 		}
 	}
-}
+	else		/* Bitmap 2 */
+	{
+		int x,y;
 
+		for (y = sqix_miny;y <= sqix_maxy;y++)
+		{
+			for (x = sqix_minx;x <= sqix_maxx;x++)
+			{
+				int sx,sy,d;
+
+				if(superqix_bitmapram2_dirty[y*128+x])
+				{
+					superqix_bitmapram2_dirty[y*128+x]=0;
+					d = superqix_bitmapram2[y*128+x];
+
+					sx = 2*x;
+					sy = y+16;
+
+					plot_pixel(tmpbitmap2, sx    , sy, pens[d >> 4]);
+					plot_pixel(tmpbitmap2, sx + 1, sy, pens[d & 0x0f]);
+				}
+			}
+		}
+	}
+	copybitmap(bitmap,tmpbitmap2,0,0,0,0,&Machine->visible_area,TRANSPARENCY_PEN,palette_transparent_pen);
 
 	/* Draw the sprites. Note that it is important to draw them exactly in this */
 	/* order, to have the correct priorities. */
 	for (offs = 0;offs < spriteram_size;offs += 4)
 	{
-		/* TODO: I haven't looked for the flip bits, but they are there, and used e.g. */
-		/* in the animation at the end of round 5 */
 		drawgfx(bitmap,Machine->gfx[5],
 				spriteram[offs] + 256 * (spriteram[offs + 3] & 0x01),
 				(spriteram[offs + 3] & 0xf0) >> 4,
-				0,0,
+				spriteram[offs + 3] & 0x04,spriteram[offs + 3] & 0x08,
 				spriteram[offs + 1],spriteram[offs + 2],
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
 
 
@@ -306,7 +322,9 @@ void superqix_vh_screenrefresh(struct osd_bitmap *bitmap)
 					(colorram[offs] & 0xf0) >> 4,
 					0,0,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
 		}
 	}
+
+	sqix_minx=1000;sqix_maxx=-1;sqix_miny=1000;sqix_maxy=-1;
 }

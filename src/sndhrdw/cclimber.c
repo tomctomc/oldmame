@@ -1,91 +1,91 @@
 #include "driver.h"
 
 
-#ifdef SIGNED_SAMPLES
-	#define AUDIO_CONV(a) ((a)-0x80)
-#else
-	#define AUDIO_CONV(a) (a)
-#endif
+/* macro to convert 4-bit unsigned samples to 8-bit signed samples */
+#define SAMPLE_CONV4(a) (0x11*((a&0x0f))-0x80)
 
 #define SND_CLOCK 3072000	/* 3.072 Mhz */
 
 
-static signed char *samples;	/* 16k for samples */
-static int sample_freq,sample_volume;
-static int porta;
+static signed char *samplebuf;	/* buffer to decode samples at run time */
 static int channel;
 
 
-void cclimber_portA_w(int offset,int data)
+
+int cclimber_sh_start(const struct MachineSound *msound)
 {
-	porta = data;
-}
+	channel = mixer_allocate_channel(50);
+	mixer_set_name(channel,"Samples");
 
-
-
-int cclimber_sh_start(void)
-{
-	int i;
-	unsigned char bits;
-
-
-	channel = get_play_channels(1);
-
-	samples = malloc (0x4000);
-	if (!samples)
-		return 1;
-
-	/* decode the rom samples */
-	for (i = 0;i < 0x2000;i++)
+	samplebuf = 0;
+	if (memory_region(REGION_SOUND1))
 	{
-		bits = Machine->memory_region[2][i] & 0xf0;
-		samples[2 * i] = AUDIO_CONV((bits | (bits >> 4)));
-
-		bits = Machine->memory_region[2][i] & 0x0f;
-		samples[2 * i + 1] = AUDIO_CONV(((bits << 4) | bits));
+		samplebuf = malloc(2*memory_region_length(REGION_SOUND1));
+		if (!samplebuf)
+			return 1;
 	}
 
 	return 0;
 }
 
-
 void cclimber_sh_stop(void)
 {
-	if (samples)
-		free(samples);
-	samples = NULL;
+	if (samplebuf)
+		free(samplebuf);
+	samplebuf = NULL;
 }
 
 
-void cclimber_sample_rate_w(int offset,int data)
+
+static void cclimber_play_sample(int start,int freq,int volume)
+{
+	int len;
+	const UINT8 *rom = memory_region(REGION_SOUND1);
+
+
+	if (!rom) return;
+
+	/* decode the rom samples */
+	len = 0;
+	while (start + len < memory_region_length(REGION_SOUND1) && rom[start+len] != 0x70)
+	{
+		int sample;
+
+		sample = (rom[start + len] & 0xf0) >> 4;
+		samplebuf[2*len] = SAMPLE_CONV4(sample) * volume / 31;
+
+		sample = rom[start + len] & 0x0f;
+		samplebuf[2*len + 1] = SAMPLE_CONV4(sample) * volume / 31;
+
+		len++;
+	}
+
+	mixer_play_sample(channel,samplebuf,2 * len,freq,0);
+}
+
+
+static int sample_num,sample_freq,sample_volume;
+
+WRITE_HANDLER( cclimber_sample_select_w )
+{
+	sample_num = data;
+}
+
+WRITE_HANDLER( cclimber_sample_rate_w )
 {
 	/* calculate the sampling frequency */
 	sample_freq = SND_CLOCK / 4 / (256 - data);
 }
 
-
-
-void cclimber_sample_volume_w(int offset,int data)
+WRITE_HANDLER( cclimber_sample_volume_w )
 {
 	sample_volume = data & 0x1f;	/* range 0-31 */
 }
 
-
-
-void cclimber_sample_trigger_w(int offset,int data)
+WRITE_HANDLER( cclimber_sample_trigger_w )
 {
-	int start,end;
-
-
 	if (data == 0 || Machine->sample_rate == 0)
 		return;
 
-	start = 64 * porta;
-	end = start;
-
-	/* find end of sample */
-	while (end < 0x4000 && (samples[end] != AUDIO_CONV(0x77) || samples[end+1] != AUDIO_CONV(0x00)))
-		end += 2;
-
-	osd_play_sample(channel,samples + start,end - start,sample_freq,sample_volume*4,0);
+	cclimber_play_sample(32 * sample_num,sample_freq,sample_volume);
 }

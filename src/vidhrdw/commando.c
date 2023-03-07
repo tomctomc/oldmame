@@ -12,11 +12,10 @@
 
 
 unsigned char *commando_bgvideoram,*commando_bgcolorram;
-int commando_bgvideoram_size;
+size_t commando_bgvideoram_size;
 unsigned char *commando_scrollx,*commando_scrolly;
 static unsigned char *dirtybuffer2;
 static struct osd_bitmap *tmpbitmap2;
-static int flipscreen;
 
 
 
@@ -33,12 +32,12 @@ static int flipscreen;
   bit 0 -- 2.2kohm resistor  -- RED/GREEN/BLUE
 
 ***************************************************************************/
-void commando_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void commando_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 
 
-	for (i = 0;i < 256;i++)
+	for (i = 0;i < Machine->drv->total_colors;i++)
 	{
 		int bit0,bit1,bit2,bit3;
 
@@ -48,29 +47,17 @@ void commando_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 		bit2 = (color_prom[i] >> 2) & 0x01;
 		bit3 = (color_prom[i] >> 3) & 0x01;
 		palette[3*i] = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
-		bit0 = (color_prom[i+256] >> 0) & 0x01;
-		bit1 = (color_prom[i+256] >> 1) & 0x01;
-		bit2 = (color_prom[i+256] >> 2) & 0x01;
-		bit3 = (color_prom[i+256] >> 3) & 0x01;
+		bit0 = (color_prom[i+Machine->drv->total_colors] >> 0) & 0x01;
+		bit1 = (color_prom[i+Machine->drv->total_colors] >> 1) & 0x01;
+		bit2 = (color_prom[i+Machine->drv->total_colors] >> 2) & 0x01;
+		bit3 = (color_prom[i+Machine->drv->total_colors] >> 3) & 0x01;
 		palette[3*i + 1] = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
-		bit0 = (color_prom[i+256*2] >> 0) & 0x01;
-		bit1 = (color_prom[i+256*2] >> 1) & 0x01;
-		bit2 = (color_prom[i+256*2] >> 2) & 0x01;
-		bit3 = (color_prom[i+256*2] >> 3) & 0x01;
+		bit0 = (color_prom[i+2*Machine->drv->total_colors] >> 0) & 0x01;
+		bit1 = (color_prom[i+2*Machine->drv->total_colors] >> 1) & 0x01;
+		bit2 = (color_prom[i+2*Machine->drv->total_colors] >> 2) & 0x01;
+		bit3 = (color_prom[i+2*Machine->drv->total_colors] >> 3) & 0x01;
 		palette[3*i + 2] = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
 	}
-
-	/* characters use colors 192-255 */
-	for (i = 0;i < 16*4;i++)
-		colortable[i] = i + 192;
-
-	/* sprites use colors 128-191 */
-	for (i = 16*4;i < 16*4+4*16;i++)
-		colortable[i] = i - 16*4 + 128;
-
-	/* background tiles use colors 0-127 */
-	for (i = 16*4+4*16;i < 16*4+4*16+16*8;i++)
-		colortable[i] = i - (16*4+4*16);
 }
 
 
@@ -92,11 +79,8 @@ int commando_vh_start(void)
 	}
 	memset(dirtybuffer2,1,commando_bgvideoram_size);
 
-	if (generic_vh_start() != 0)
-		return 1;
-
 	/* the background area is twice as tall and twice as large as the screen */
-	if ((tmpbitmap2 = osd_create_bitmap(2*Machine->drv->screen_width,2*Machine->drv->screen_height)) == 0)
+	if ((tmpbitmap2 = bitmap_alloc(2*Machine->drv->screen_width,2*Machine->drv->screen_height)) == 0)
 	{
 		free(dirtybuffer2);
 		generic_vh_stop();
@@ -115,14 +99,14 @@ int commando_vh_start(void)
 ***************************************************************************/
 void commando_vh_stop(void)
 {
-	osd_free_bitmap(tmpbitmap2);
+	bitmap_free(tmpbitmap2);
 	free(dirtybuffer2);
 	generic_vh_stop();
 }
 
 
 
-void commando_bgvideoram_w(int offset,int data)
+WRITE_HANDLER( commando_bgvideoram_w )
 {
 	if (commando_bgvideoram[offset] != data)
 	{
@@ -134,7 +118,7 @@ void commando_bgvideoram_w(int offset,int data)
 
 
 
-void commando_bgcolorram_w(int offset,int data)
+WRITE_HANDLER( commando_bgcolorram_w )
 {
 	if (commando_bgcolorram[offset] != data)
 	{
@@ -146,35 +130,33 @@ void commando_bgcolorram_w(int offset,int data)
 
 
 
-void commando_spriteram_w(int offset,int data)
+WRITE_HANDLER( commando_spriteram_w )
 {
-if (errorlog && data != spriteram[offset] && offset % 4 == 2)
-	fprintf(errorlog,"%04x: sprite %d X offset (old = %d new = %d) scanline %d\n",
-			cpu_getpc(),offset/4,spriteram[offset],data,255 - (cpu_getfcount() * 256 / cpu_getfperiod()));
-if (errorlog && data != spriteram[offset] && offset % 4 == 3)
-	fprintf(errorlog,"%04x: sprite %d Y offset (old = %d new = %d) scanline %d\n",
-			cpu_getpc(),offset/4,spriteram[offset],data,255 - (cpu_getfcount() * 256 / cpu_getfperiod()));
-if (errorlog && data != spriteram[offset] && offset % 4 == 0)
-	fprintf(errorlog,"%04x: sprite %d code (old = %d new = %d) scanline %d\n",
-			cpu_getpc(),offset/4,spriteram[offset],data,255 - (cpu_getfcount() * 256 / cpu_getfperiod()));
+	if (data != spriteram[offset] && offset % 4 == 2)
+		logerror("%04x: sprite %d X offset (old = %d new = %d) scanline %d\n",
+				cpu_get_pc(),offset/4,spriteram[offset],data,255 - (cpu_getfcount() * 256 / cpu_getfperiod()));
+	if (data != spriteram[offset] && offset % 4 == 3)
+		logerror("%04x: sprite %d Y offset (old = %d new = %d) scanline %d\n",
+				cpu_get_pc(),offset/4,spriteram[offset],data,255 - (cpu_getfcount() * 256 / cpu_getfperiod()));
+	if (data != spriteram[offset] && offset % 4 == 0)
+		logerror("%04x: sprite %d code (old = %d new = %d) scanline %d\n",
+				cpu_get_pc(),offset/4,spriteram[offset],data,255 - (cpu_getfcount() * 256 / cpu_getfperiod()));
 
 	spriteram[offset] = data;
 }
 
 
 
-void commando_c804_w(int offset,int data)
+WRITE_HANDLER( commando_c804_w )
 {
-	/* bits 0 and 1 are for coin counters - we ignore them */
+	/* bits 0 and 1 are coin counters */
+	coin_counter_w(0, data & 0x01);
+	coin_counter_w(1, data & 0x02);
 
 	/* bit 4 resets the sound CPU - we ignore it */
 
 	/* bit 7 flips screen */
-	if (flipscreen != (~data & 0x80))
-	{
-		flipscreen = ~data & 0x80;
-		memset(dirtybuffer2,1,commando_bgvideoram_size);
-	}
+	flip_screen_w(offset, ~data & 0x80);
 }
 
 
@@ -186,9 +168,15 @@ void commando_c804_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void commando_vh_screenrefresh(struct osd_bitmap *bitmap)
+void commando_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
+
+
+	if (full_refresh)
+	{
+		memset(dirtybuffer2,1,commando_bgvideoram_size);
+	}
 
 
 	for (offs = commando_bgvideoram_size - 1;offs >= 0;offs--)
@@ -204,7 +192,7 @@ void commando_vh_screenrefresh(struct osd_bitmap *bitmap)
 			sy = offs % 32;
 			flipx = commando_bgcolorram[offs] & 0x10;
 			flipy = commando_bgcolorram[offs] & 0x20;
-			if (flipscreen)
+			if (flip_screen)
 			{
 				sx = 31 - sx;
 				sy = 31 - sy;
@@ -229,13 +217,13 @@ void commando_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 		scrollx = -(commando_scrolly[0] + 256 * commando_scrolly[1]);
 		scrolly = -(commando_scrollx[0] + 256 * commando_scrollx[1]);
-		if (flipscreen)
+		if (flip_screen)
 		{
 			scrollx = 256 - scrollx;
 			scrolly = 256 - scrolly;
 		}
 
-		copyscrollbitmap(bitmap,tmpbitmap2,1,&scrollx,1,&scrolly,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap2,1,&scrollx,1,&scrolly,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 
@@ -254,7 +242,7 @@ void commando_vh_screenrefresh(struct osd_bitmap *bitmap)
 		flipy = spriteram[offs + 1] & 0x08;
 		bank = (spriteram[offs + 1] & 0xc0) >> 6;
 
-		if (flipscreen)
+		if (flip_screen)
 		{
 			sx = 240 - sx;
 			sy = 240 - sy;
@@ -268,7 +256,7 @@ void commando_vh_screenrefresh(struct osd_bitmap *bitmap)
 					(spriteram[offs + 1] & 0x30) >> 4,
 					flipx,flipy,
 					sx,sy,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,15);
+					&Machine->visible_area,TRANSPARENCY_PEN,15);
 	}
 
 
@@ -283,7 +271,7 @@ void commando_vh_screenrefresh(struct osd_bitmap *bitmap)
 		flipx = colorram[offs] & 0x10;
 		flipy = colorram[offs] & 0x20;
 
-		if (flipscreen)
+		if (flip_screen)
 		{
 			sx = 31 - sx;
 			sy = 31 - sy;
@@ -296,6 +284,6 @@ void commando_vh_screenrefresh(struct osd_bitmap *bitmap)
 				colorram[offs] & 0x0f,
 				flipx,flipy,
 				8*sx,8*sy,
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,3);
+				&Machine->visible_area,TRANSPARENCY_PEN,3);
 	}
 }

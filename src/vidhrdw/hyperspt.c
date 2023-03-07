@@ -33,7 +33,7 @@ static int flipscreen;
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void hyperspt_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void hyperspt_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -90,7 +90,7 @@ int hyperspt_vh_start(void)
 	memset(dirtybuffer,1,videoram_size);
 
 	/* Hyper Sports has a virtual screen twice as large as the visible screen */
-	if ((tmpbitmap = osd_create_bitmap(2 * Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
+	if ((tmpbitmap = bitmap_alloc(2 * Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 	{
 		free(dirtybuffer);
 		return 1;
@@ -109,12 +109,12 @@ int hyperspt_vh_start(void)
 void hyperspt_vh_stop(void)
 {
 	free(dirtybuffer);
-	osd_free_bitmap(tmpbitmap);
+	bitmap_free(tmpbitmap);
 }
 
 
 
-void hyperspt_flipscreen_w(int offset,int data)
+WRITE_HANDLER( hyperspt_flipscreen_w )
 {
 	if (flipscreen != (data & 1))
 	{
@@ -132,7 +132,7 @@ void hyperspt_flipscreen_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void hyperspt_vh_screenrefresh(struct osd_bitmap *bitmap)
+void hyperspt_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -186,7 +186,7 @@ void hyperspt_vh_screenrefresh(struct osd_bitmap *bitmap)
 				scroll[offs] = -(hyperspt_scroll[2*offs] + 256 * (hyperspt_scroll[2*offs+1] & 1));
 		}
 
-		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 	}
 
@@ -216,7 +216,7 @@ void hyperspt_vh_screenrefresh(struct osd_bitmap *bitmap)
 				spriteram[offs] & 0x0f,
 				flipx,flipy,
 				sx,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+				&Machine->visible_area,TRANSPARENCY_COLOR,0);
 
 		/* redraw with wraparound */
 		drawgfx(bitmap,Machine->gfx[1],
@@ -224,7 +224,7 @@ void hyperspt_vh_screenrefresh(struct osd_bitmap *bitmap)
 				spriteram[offs] & 0x0f,
 				flipx,flipy,
 				sx-256,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+				&Machine->visible_area,TRANSPARENCY_COLOR,0);
 	}
 }
 
@@ -232,7 +232,7 @@ void hyperspt_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 /* Only difference with Hyper Sports is the way tiles are selected (1536 tiles */
 /* instad of 1024). Plus, it has 256 sprites instead of 512. */
-void roadf_vh_screenrefresh(struct osd_bitmap *bitmap)
+void roadf_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -286,7 +286,7 @@ void roadf_vh_screenrefresh(struct osd_bitmap *bitmap)
 				scroll[offs] = -(hyperspt_scroll[2*offs] + 256 * (hyperspt_scroll[2*offs+1] & 1));
 		}
 
-		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 	}
 
@@ -316,7 +316,7 @@ void roadf_vh_screenrefresh(struct osd_bitmap *bitmap)
 				spriteram[offs] & 0x0f,
 				flipx,flipy,
 				sx,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+				&Machine->visible_area,TRANSPARENCY_COLOR,0);
 
 		/* redraw with wraparound (actually not needed in Road Fighter) */
 		drawgfx(bitmap,Machine->gfx[1],
@@ -324,6 +324,6 @@ void roadf_vh_screenrefresh(struct osd_bitmap *bitmap)
 				spriteram[offs] & 0x0f,
 				flipx,flipy,
 				sx-256,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+				&Machine->visible_area,TRANSPARENCY_COLOR,0);
 	}
 }

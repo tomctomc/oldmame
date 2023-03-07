@@ -1,7 +1,7 @@
 #include "driver.h"
 #include "vidhrdw/generic.h"
 
-unsigned char *wc90b_shared, *wc90b_palette;
+unsigned char *wc90b_shared;
 
 unsigned char *wc90b_tile_colorram, *wc90b_tile_videoram;
 unsigned char *wc90b_tile_colorram2, *wc90b_tile_videoram2;
@@ -10,10 +10,8 @@ unsigned char *wc90b_scroll2xlo, *wc90b_scroll2xhi;
 unsigned char *wc90b_scroll1ylo, *wc90b_scroll1yhi;
 unsigned char *wc90b_scroll2ylo, *wc90b_scroll2yhi;
 
-int wc90b_tile_videoram_size;
-int wc90b_tile_videoram_size2;
-
-static int palettedirty = 1;
+size_t wc90b_tile_videoram_size;
+size_t wc90b_tile_videoram_size2;
 
 static unsigned char *dirtybuffer1 = 0, *dirtybuffer2 = 0;
 static struct osd_bitmap *tmpbitmap1 = 0,*tmpbitmap2 = 0;
@@ -29,14 +27,14 @@ int wc90b_vh_start( void ) {
 
 	memset( dirtybuffer1, 1, wc90b_tile_videoram_size );
 
-	if ( ( tmpbitmap1 = osd_new_bitmap(4*Machine->drv->screen_width,2*Machine->drv->screen_height,Machine->scrbitmap->depth ) ) == 0 ){
+	if ( ( tmpbitmap1 = bitmap_alloc(4*Machine->drv->screen_width,2*Machine->drv->screen_height) ) == 0 ){
 		free( dirtybuffer1 );
 		generic_vh_stop();
 		return 1;
 	}
 
 	if ( ( dirtybuffer2 = malloc( wc90b_tile_videoram_size2 ) ) == 0 ) {
-		osd_free_bitmap(tmpbitmap1);
+		bitmap_free(tmpbitmap1);
 		free(dirtybuffer1);
 		generic_vh_stop();
 		return 1;
@@ -44,8 +42,8 @@ int wc90b_vh_start( void ) {
 
 	memset( dirtybuffer2, 1, wc90b_tile_videoram_size2 );
 
-	if ( ( tmpbitmap2 = osd_new_bitmap( 4*Machine->drv->screen_width,2*Machine->drv->screen_height,Machine->scrbitmap->depth ) ) == 0 ){
-		osd_free_bitmap(tmpbitmap1);
+	if ( ( tmpbitmap2 = bitmap_alloc( 4*Machine->drv->screen_width,2*Machine->drv->screen_height ) ) == 0 ){
+		bitmap_free(tmpbitmap1);
 		free(dirtybuffer1);
 		free(dirtybuffer2);
 		generic_vh_stop();
@@ -55,9 +53,9 @@ int wc90b_vh_start( void ) {
 	// Free the generic bitmap and allocate one twice as wide
 	free( tmpbitmap );
 
-	if ( ( tmpbitmap = osd_new_bitmap( 2*Machine->drv->screen_width,Machine->drv->screen_height,Machine->scrbitmap->depth ) ) == 0 ){
-		osd_free_bitmap(tmpbitmap1);
-		osd_free_bitmap(tmpbitmap2);
+	if ( ( tmpbitmap = bitmap_alloc( 2*Machine->drv->screen_width,Machine->drv->screen_height ) ) == 0 ){
+		bitmap_free(tmpbitmap1);
+		bitmap_free(tmpbitmap2);
 		free(dirtybuffer);
 		free(dirtybuffer1);
 		free(dirtybuffer2);
@@ -71,62 +69,61 @@ int wc90b_vh_start( void ) {
 void wc90b_vh_stop ( void ) {
 	free( dirtybuffer1 );
 	free( dirtybuffer2 );
-	osd_free_bitmap( tmpbitmap1 );
-	osd_free_bitmap( tmpbitmap2 );
+	bitmap_free( tmpbitmap1 );
+	bitmap_free( tmpbitmap2 );
 	generic_vh_stop();
 }
 
-int wc90b_tile_videoram_r ( int offset ) {
+READ_HANDLER( wc90b_tile_videoram_r ) {
 	return wc90b_tile_videoram[offset];
 }
 
-void wc90b_tile_videoram_w( int offset, int v ) {
-	dirtybuffer1[offset] = 1;
-	wc90b_tile_videoram[offset] = v;
+WRITE_HANDLER( wc90b_tile_videoram_w ) {
+	if ( wc90b_tile_videoram[offset] != data ) {
+		dirtybuffer1[offset] = 1;
+		wc90b_tile_videoram[offset] = data;
+	}
 }
 
-int wc90b_tile_colorram_r ( int offset ) {
+READ_HANDLER( wc90b_tile_colorram_r ) {
 	return wc90b_tile_colorram[offset];
 }
 
-void wc90b_tile_colorram_w( int offset, int v ) {
-	dirtybuffer1[offset] = 1;
-	wc90b_tile_colorram[offset] = v;
+WRITE_HANDLER( wc90b_tile_colorram_w ) {
+	if ( wc90b_tile_colorram[offset] != data ) {
+		dirtybuffer1[offset] = 1;
+		wc90b_tile_colorram[offset] = data;
+	}
 }
 
-int wc90b_tile_videoram2_r ( int offset ) {
+READ_HANDLER( wc90b_tile_videoram2_r ) {
 	return wc90b_tile_videoram2[offset];
 }
 
-void wc90b_tile_videoram2_w( int offset, int v ) {
-	dirtybuffer2[offset] = 1;
-	wc90b_tile_videoram2[offset] = v;
+WRITE_HANDLER( wc90b_tile_videoram2_w ) {
+	if ( wc90b_tile_videoram2[offset] != data ) {
+		dirtybuffer2[offset] = 1;
+		wc90b_tile_videoram2[offset] = data;
+	}
 }
 
-int wc90b_tile_colorram2_r ( int offset ) {
+READ_HANDLER( wc90b_tile_colorram2_r ) {
 	return wc90b_tile_colorram2[offset];
 }
 
-void wc90b_tile_colorram2_w( int offset, int v ) {
-	dirtybuffer2[offset] = 1;
-	wc90b_tile_colorram2[offset] = v;
+WRITE_HANDLER( wc90b_tile_colorram2_w ) {
+	if ( wc90b_tile_colorram2[offset] != data ) {
+		dirtybuffer2[offset] = 1;
+		wc90b_tile_colorram2[offset] = data;
+	}
 }
 
-int wc90b_shared_r ( int offset ) {
+READ_HANDLER( wc90b_shared_r ) {
 	return wc90b_shared[offset];
 }
 
-void wc90b_shared_w( int offset, int v ) {
-	wc90b_shared[offset] = v;
-}
-
-int wc90b_palette_r ( int offset ) {
-	return wc90b_palette[offset];
-}
-
-void wc90b_palette_w( int offset, int v ) {
-	palettedirty = 1;
-	wc90b_palette[offset] = v;
+WRITE_HANDLER( wc90b_shared_w ) {
+	wc90b_shared[offset] = data;
 }
 
 static void wc90b_draw_sprites( struct osd_bitmap *bitmap, int priority ){
@@ -152,36 +149,94 @@ static void wc90b_draw_sprites( struct osd_bitmap *bitmap, int priority ){
 						bank&2, /* flipy */
 						spriteram[offs + 2], /* sx */
 						240 - spriteram[offs + 1], /* sy */
-						&Machine->drv->visible_area,TRANSPARENCY_PEN,0 );
+						&Machine->visible_area,TRANSPARENCY_PEN,15 );
 			}
 		}
 	}
 }
 
-void wc90b_vh_screenrefresh(struct osd_bitmap *bitmap)
+void wc90b_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs, i;
 	int scrollx, scrolly;
 
-	if ( palettedirty ) {
-		for (i = 0;i < 4*16*16;i++)
-		{
-			int blue = wc90b_palette[ 2*i ] & 0x0f;
-			int green = (wc90b_palette[2*i+1] & 0xf0) >> 4;
-			int red = wc90b_palette[2*i+1] & 0x0f;
 
-			red = ( red << 4 ) + red;
-			green = ( green << 4 ) + green;
-			blue = ( blue << 4 ) + blue;
 
-			if ( !red && !green && !blue && ( i %16 ) != 15 ) red = 0x20;
+	/* compute palette usage */
+	{
+		unsigned short palette_map[4 * 16];
+		int tile, gfx, cram;
 
-			setgfxcolorentry (Machine->gfx[17], i, red, green, blue);
+		memset (palette_map, 0, sizeof (palette_map));
+
+		for ( offs = wc90b_tile_videoram_size2 - 1; offs >= 0; offs-- ) {
+			tile = wc90b_tile_videoram2[offs];
+			cram = wc90b_tile_colorram2[offs];
+			gfx = 9 + ( cram & 3 ) + ( ( cram >> 1 ) & 4 );
+			palette_map[3*16 + (cram >> 4)] |= Machine->gfx[gfx]->pen_usage[tile];
 		}
-		palettedirty = 0;
+		for ( offs = wc90b_tile_videoram_size - 1; offs >= 0; offs-- ) {
+			tile = wc90b_tile_videoram[offs];
+			cram = wc90b_tile_colorram[offs];
+			gfx = 1 + ( cram & 3 ) + ( ( cram >> 1 ) & 4 );
+			palette_map[2*16 + (cram >> 4)] |= Machine->gfx[gfx]->pen_usage[tile];
+		}
+		for ( offs = videoram_size - 1; offs >= 0; offs-- ) {
+			cram = colorram[offs];
+			tile = videoram[offs] + ( ( cram & 0x07 ) << 8 );
+			palette_map[1*16 + (cram >> 4)] |= Machine->gfx[0]->pen_usage[tile];
+		}
+		for ( offs = spriteram_size - 8;offs >= 0;offs -= 8 ){
+			if ( spriteram[offs+1] > 16 ) { /* visible */
+				int flags = spriteram[offs+4];
+				palette_map[0*16 + (flags >> 4)] |= 0xfffe;
+			}
+		}
+
+		/* expand the results */
+		for (i = 0; i < 1*16; i++)
+		{
+			int usage = palette_map[i], j;
+			if (usage)
+			{
+				palette_used_colors[i * 16 + 0] = PALETTE_COLOR_TRANSPARENT;
+				for (j = 1; j < 16; j++)
+					if (usage & (1 << j))
+						palette_used_colors[i * 16 + j] = PALETTE_COLOR_USED;
+					else
+						palette_used_colors[i * 16 + j] = PALETTE_COLOR_UNUSED;
+			}
+			else
+				memset (&palette_used_colors[i * 16 + 0], PALETTE_COLOR_UNUSED, 16);
+		}
+		for (i = 1*16; i < 4*16; i++)
+		{
+			int usage = palette_map[i], j;
+			if (usage)
+			{
+				for (j = 0; j < 15; j++)
+					if (usage & (1 << j))
+						palette_used_colors[i * 16 + j] = PALETTE_COLOR_USED;
+					else
+						palette_used_colors[i * 16 + j] = PALETTE_COLOR_UNUSED;
+				palette_used_colors[i * 16 + 15] = PALETTE_COLOR_TRANSPARENT;
+			}
+			else
+				memset (&palette_used_colors[i * 16 + 0], PALETTE_COLOR_UNUSED, 16);
+		}
+
+		if (palette_recalc ())
+		{
+			memset( dirtybuffer,  1, videoram_size );
+			memset( dirtybuffer1, 1, wc90b_tile_videoram_size );
+			memset( dirtybuffer2, 1, wc90b_tile_videoram_size2 );
+		}
 	}
 
+/* commented out -- if we copyscrollbitmap below with TRANSPARENCY_NONE, we shouldn't waste our
+   time here:
 	wc90b_draw_sprites( bitmap, 3 );
+*/
 
 	for ( offs = wc90b_tile_videoram_size2 - 1; offs >= 0; offs-- ) {
 		int sx, sy, tile, gfx;
@@ -208,7 +263,7 @@ void wc90b_vh_screenrefresh(struct osd_bitmap *bitmap)
 	scrollx = -wc90b_scroll2xlo[0] - 256 * ( wc90b_scroll2xhi[0] & 3 );
 	scrolly = -wc90b_scroll2ylo[0] - 256 * ( wc90b_scroll2yhi[0] & 1 );
 
-	copyscrollbitmap(bitmap,tmpbitmap2,1,&scrollx,1,&scrolly,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copyscrollbitmap(bitmap,tmpbitmap2,1,&scrollx,1,&scrolly,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 	wc90b_draw_sprites( bitmap, 2 );
 
@@ -237,7 +292,7 @@ void wc90b_vh_screenrefresh(struct osd_bitmap *bitmap)
 	scrollx = -wc90b_scroll1xlo[0] - 256 * ( wc90b_scroll1xhi[0] & 3 );
 	scrolly = -wc90b_scroll1ylo[0] - 256 * ( wc90b_scroll1yhi[0] & 1 );
 
-	copyscrollbitmap(bitmap,tmpbitmap1,1,&scrollx,1,&scrolly,&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+	copyscrollbitmap(bitmap,tmpbitmap1,1,&scrollx,1,&scrolly,&Machine->visible_area,TRANSPARENCY_PEN,palette_transparent_pen);
 
 	wc90b_draw_sprites( bitmap, 1 );
 
@@ -259,7 +314,7 @@ void wc90b_vh_screenrefresh(struct osd_bitmap *bitmap)
 		}
 	}
 
-	copybitmap( bitmap, tmpbitmap, 0, 0, 0, 0,&Machine->drv->visible_area, TRANSPARENCY_COLOR, 0 );
+	copybitmap( bitmap, tmpbitmap, 0, 0, 0, 0,&Machine->visible_area, TRANSPARENCY_PEN,palette_transparent_pen );
 
 	wc90b_draw_sprites( bitmap, 0 );
 }

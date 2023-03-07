@@ -1,5 +1,10 @@
 /****************************************************************************
 
+Return of the Jedi
+
+driver by Dan Boris
+
+
 Master processor
 0000-07ff   R/W     Z-page Working RAM
 0800-08ff   R/W     NVRAM
@@ -78,114 +83,135 @@ Sound processor
 #include "vidhrdw/generic.h"
 
 /* sndhrdw jedi.c */
-void jedi_speech_w( int offset, int data);
-int jedi_speech_ready_r( int offset );
+WRITE_HANDLER( jedi_speech_w );
+READ_HANDLER( jedi_speech_ready_r );
 
 /* vidhrdw jedi.c */
-void jedi_paletteram_w(int offset,int data);
-void jedi_backgroundram_w(int offset,int data);
+WRITE_HANDLER( jedi_paletteram_w );
+WRITE_HANDLER( jedi_backgroundram_w );
 int  jedi_vh_start(void);
 void jedi_vh_stop(void);
-void jedi_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
-void jedi_vh_screenrefresh(struct osd_bitmap *bitmap);
-void jedi_vscroll_w(int offset,int data);
-void jedi_hscroll_w(int offset,int data);
+void jedi_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
+WRITE_HANDLER( jedi_vscroll_w );
+WRITE_HANDLER( jedi_hscroll_w );
+WRITE_HANDLER( jedi_video_off_w );
+WRITE_HANDLER( jedi_PIXIRAM_w );
 
 extern unsigned char *jedi_PIXIRAM;
 extern unsigned char *jedi_backgroundram;
-extern int jedi_backgroundram_size;
-extern unsigned char *jedi_paletteram;
-unsigned char *jedi_nvRAM;
+extern size_t jedi_backgroundram_size;
 
-void jedi_soundlatch_w(int offset,int data);
-void jedi_soundacklatch_w(int offset, int data);
-int jedi_soundacklatch_r(int offset);
-int jedi_soundlatch_r(int offset);
-int jedi_soundstat_r(int offset);
-int jedi_mainstat_r(int offset);
-int jedi_control_r (int offset);
-void jedi_control_w (int offset, int data);
-void jedi_alpha_banksel (int offset, int data);
-void jedi_sound_reset( int offset, int data);
-void jedi_rom_banksel( int offset, int data);
+WRITE_HANDLER( jedi_soundlatch_w );
+WRITE_HANDLER( jedi_soundacklatch_w );
+READ_HANDLER( jedi_soundacklatch_r );
+READ_HANDLER( jedi_soundlatch_r );
+READ_HANDLER( jedi_soundstat_r );
+READ_HANDLER( jedi_mainstat_r );
+READ_HANDLER( jedi_control_r );
+WRITE_HANDLER( jedi_control_w );
+WRITE_HANDLER( jedi_alpha_banksel_w );
+WRITE_HANDLER( jedi_sound_reset_w );
+WRITE_HANDLER( jedi_rom_banksel_w );
+
+
+
+static unsigned char *nvram;
+static size_t nvram_size;
+
+static void nvram_handler(void *file, int read_or_write)
+{
+	if (read_or_write)
+		osd_fwrite(file,nvram,nvram_size);
+	else
+	{
+		if (file)
+			osd_fread(file,nvram,nvram_size);
+		else
+			memset(nvram,0,nvram_size);
+	}
+}
 
 
 
 static struct MemoryReadAddress readmem[] =
 {
 	{ 0x0000, 0x07ff, MRA_RAM },
-    { 0x0800, 0x08ff, MRA_RAM, &jedi_nvRAM },
-    { 0x0C00, 0x0C00, input_port_0_r },
-    { 0x0C01, 0x0C01, jedi_mainstat_r }, /* IN1 */
-    { 0x1400, 0x1400, jedi_soundacklatch_r },
-    { 0x1800, 0x1800, jedi_control_r },
-    { 0x2000, 0x27FF, MRA_RAM },
-    { 0x2800, 0x2FFF, MRA_RAM },
-    { 0x3000, 0x37BF, MRA_RAM },
-    { 0x37C0, 0x3BFF, MRA_RAM },
-    { 0x4000, 0x7FFF, MRA_BANK1 },
-    { 0x8000, 0xFFFF, MRA_ROM },
+	{ 0x0800, 0x08ff, MRA_RAM },
+	{ 0x0c00, 0x0c00, input_port_0_r },
+	{ 0x0c01, 0x0c01, jedi_mainstat_r }, /* IN1 */
+	{ 0x1400, 0x1400, jedi_soundacklatch_r },
+	{ 0x1800, 0x1800, jedi_control_r },
+	{ 0x2000, 0x27ff, MRA_RAM },
+	{ 0x2800, 0x2fff, MRA_RAM },
+	{ 0x3000, 0x37bf, MRA_RAM },
+	{ 0x37c0, 0x3bff, MRA_RAM },
+	{ 0x4000, 0x7fff, MRA_BANK1 },
+	{ 0x8000, 0xffff, MRA_ROM },
 	{ -1 }	/* end of table */
 };
 
 static struct MemoryWriteAddress writemem[] =
 {
-    { 0x0000, 0x07ff, MWA_RAM },
-    { 0x0800, 0x08ff, MWA_RAM, &jedi_nvRAM },
-    { 0x1C80, 0x1C82, jedi_control_w},
-    { 0x1D80, 0x1D80, watchdog_reset_w },
-    { 0x1E84, 0x1E84, jedi_alpha_banksel },
-    { 0x1E86, 0x1E86, jedi_sound_reset },
-    { 0x1F00, 0x1F00, jedi_soundlatch_w },
-    { 0x1F80, 0x1F80, jedi_rom_banksel },
-    { 0x2000, 0x27FF, jedi_backgroundram_w, &jedi_backgroundram, &jedi_backgroundram_size },
-    { 0x2800, 0x2FFF, jedi_paletteram_w, &jedi_paletteram },
-    { 0x3000, 0x37BF, videoram_w, &videoram, &videoram_size },
-    { 0x37C0, 0x3Bff, MWA_RAM, &spriteram, &spriteram_size },
-    { 0x3C00, 0x3C01, jedi_vscroll_w },
-    { 0x3D00, 0x3D01, jedi_hscroll_w },
-    { 0x3E00, 0x3FFF, MWA_RAM, &jedi_PIXIRAM },
+	{ 0x0000, 0x07ff, MWA_RAM },
+	{ 0x0800, 0x08ff, MWA_RAM, &nvram, &nvram_size },
+	{ 0x1c80, 0x1c82, jedi_control_w},
+	{ 0x1d80, 0x1d80, watchdog_reset_w },
+	{ 0x1e00, 0x1e00, MWA_NOP },	/* IRQ ack */
+	{ 0x1e80, 0x1e80, coin_counter_w },
+	{ 0x1e84, 0x1e84, jedi_alpha_banksel_w },
+	{ 0x1e86, 0x1e86, jedi_sound_reset_w },
+	{ 0x1e87, 0x1e87, jedi_video_off_w },
+	{ 0x1f00, 0x1f00, jedi_soundlatch_w },
+	{ 0x1f80, 0x1f80, jedi_rom_banksel_w },
+	{ 0x2000, 0x27ff, jedi_backgroundram_w, &jedi_backgroundram, &jedi_backgroundram_size },
+	{ 0x2800, 0x2fff, jedi_paletteram_w, &paletteram },
+	{ 0x3000, 0x37bf, videoram_w, &videoram, &videoram_size },
+	{ 0x37c0, 0x3bff, MWA_RAM, &spriteram, &spriteram_size },
+	{ 0x3c00, 0x3c01, jedi_vscroll_w },
+	{ 0x3d00, 0x3d01, jedi_hscroll_w },
+	{ 0x3e00, 0x3fff, jedi_PIXIRAM_w, &jedi_PIXIRAM },
+	{ 0x4000, 0xffff, MWA_ROM },
 	{ -1 }	/* end of table */
 };
 
 static struct MemoryReadAddress readmem2[] =
 {
-    { 0x0000, 0x07FF, MRA_RAM },
-    { 0x0800, 0x080F, pokey1_r },
-    { 0x0810, 0x081F, pokey2_r },
-    { 0x0820, 0x082F, pokey3_r },
-    { 0x0830, 0x083F, pokey4_r },
-    { 0x1800, 0x1800, jedi_soundlatch_r },
-    { 0x1C00, 0x1C00, jedi_speech_ready_r },
-    { 0x1C01, 0x1C01, jedi_soundstat_r },
-    { 0x8000, 0xFFFF, MRA_ROM },
+	{ 0x0000, 0x07ff, MRA_RAM },
+	{ 0x0800, 0x080f, pokey1_r },
+	{ 0x0810, 0x081f, pokey2_r },
+	{ 0x0820, 0x082f, pokey3_r },
+	{ 0x0830, 0x083f, pokey4_r },
+	{ 0x1800, 0x1800, jedi_soundlatch_r },
+	{ 0x1c00, 0x1c00, jedi_speech_ready_r },
+	{ 0x1c01, 0x1c01, jedi_soundstat_r },
+	{ 0x8000, 0xffff, MRA_ROM },
 	{ -1 }	/* end of table */
 };
 
 static struct MemoryWriteAddress writemem2[] =
 {
-	{ 0x0000, 0x07FF, MWA_RAM },
-	{ 0x0800, 0x080F, pokey1_w },
-	{ 0x0810, 0x081F, pokey2_w },
-	{ 0x0820, 0x082F, pokey3_w },
-	{ 0x0830, 0x083F, pokey4_w },
-	{ 0x1100, 0x13FF, jedi_speech_w },
+	{ 0x0000, 0x07ff, MWA_RAM },
+	{ 0x0800, 0x080f, pokey1_w },
+	{ 0x0810, 0x081f, pokey2_w },
+	{ 0x0820, 0x082f, pokey3_w },
+	{ 0x0830, 0x083f, pokey4_w },
+	{ 0x1000, 0x1000, MWA_NOP },	/* IRQ ack */
+	{ 0x1100, 0x13ff, jedi_speech_w },
 	{ 0x1400, 0x1400, jedi_soundacklatch_w },
+	{ 0x8000, 0xffff, MWA_ROM },
 	{ -1 }	/* end of table */
 };
 
 
 
-INPUT_PORTS_START( input_ports )
+INPUT_PORTS_START( jedi )
     PORT_START  /* IN0 */
     PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_BUTTON3 )
     PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 )
     PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 )
-    PORT_BIT (0x08, IP_ACTIVE_HIGH, IPT_UNUSED )
-    PORT_BITX(    0x10, 0x10, IPT_DIPSWITCH_NAME | IPF_TOGGLE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
-	PORT_DIPSETTING(    0x10, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-    PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_COIN3 )
+    PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_UNUSED )
+	PORT_SERVICE( 0x10, IP_ACTIVE_LOW )
+    PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_SERVICE1 )
     PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_COIN2 )
     PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN1 )
 
@@ -196,10 +222,10 @@ INPUT_PORTS_START( input_ports )
     PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_VBLANK )
 
     PORT_START  /* IN2 */
-    PORT_ANALOG ( 0xff, 0x80, IPT_AD_STICK_Y, 100, 0, 0, 255 )
+    PORT_ANALOG( 0xff, 0x80, IPT_AD_STICK_Y, 100, 10, 0, 255 )
 
     PORT_START  /* IN3 */
-    PORT_ANALOG ( 0xff, 0x80, IPT_AD_STICK_X, 100, 0, 0, 255 )
+    PORT_ANALOG( 0xff, 0x80, IPT_AD_STICK_X, 100, 10, 0, 255 )
 INPUT_PORTS_END
 
 
@@ -209,23 +235,21 @@ static struct GfxLayout charlayout =
 	8,8,    /* 8*8 characters */
     512,    /* 512 characters */
     2,      /* 2 bits per pixel */
-    { 0, 1 }, /* the bitplanes are packed in one nibble */
-    { 0, 2, 4, 6, 8, 10, 12, 14 },
+	{ 0, 1 }, /* the bitplanes are packed in one nibble */
+	{ 0, 2, 4, 6, 8, 10, 12, 14 },
 	{ 0*16, 1*16, 2*16, 3*16, 4*16, 5*16, 6*16, 7*16 },
 	16*8   /* every char takes 16 consecutive bytes */
 };
 
 static struct GfxLayout pflayout =
 {
-	16,16,	/* 16*16 characters (8x8 doubled) */
+	8,8,	/* 8*8 characters */
 	2048,	/* 2048 characters */
 	4,	/* 4 bits per pixel */
 	{ 0, 4, 2048*16*8, 2048*16*8+4 },
-	{ 0,0, 1,1, 2,2, 3,3, 8+0,8+0, 8+1,8+1, 8+2,8+2, 8+3,8+3 },
-	{ 0*16,0*16, 1*16,1*16, 2*16,2*16, 3*16,3*16,
-			4*16,4*16, 5*16,5*16, 6*16,6*16, 7*16,7*16,
-			8*16,8*16, 9*16,9*16, 10*16,10*16, 11*16,11*16,
-			12*16,12*16, 13*16,13*16, 14*16,14*16, 15*16,15*16 },
+	{ 0, 1, 2, 3, 8+0, 8+1, 8+2, 8+3 },
+	{ 0*16, 1*16, 2*16, 3*16, 4*16, 5*16, 6*16, 7*16,
+			8*16, 9*16, 10*16, 11*16, 12*16, 13*16, 14*16, 15*16 },
 	16*8	/* every char takes 16 consecutive bytes */
 };
 
@@ -244,9 +268,9 @@ static struct GfxLayout spritelayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-    { 1, 0x00000, &charlayout,      0, 1 },
-    { 1, 0x02000, &pflayout,        4, 1 },
-    { 1, 0x12000, &spritelayout, 4+16, 1 },
+	{ REGION_GFX1, 0, &charlayout,    0, 1 },
+	{ REGION_GFX2, 0, &pflayout,      0, 1 },
+	{ REGION_GFX3, 0, &spritelayout,  0, 1 },
 	{ -1 }
 };
 
@@ -254,48 +278,44 @@ static struct GfxDecodeInfo gfxdecodeinfo[] =
 
 static struct POKEYinterface pokey_interface =
 {
-    4,  /* 4 chips */
+	4,  /* 4 chips */
 	1500000,	/* 1.5 MHz? */
-    127,
-    POKEY_DEFAULT_GAIN/8,
-	NO_CLIP,
+	{ 30, 30, MIXER(30,MIXER_PAN_LEFT), MIXER(30,MIXER_PAN_RIGHT) },
 	/* The 8 pot handlers */
-    { 0, 0 ,0 ,0},
-    { 0, 0 ,0 ,0},
-    { 0, 0 ,0 ,0},
-    { 0, 0 ,0 ,0},
-    { 0, 0 ,0 ,0},
-    { 0, 0 ,0 ,0},
-    { 0, 0 ,0 ,0},
-    { 0, 0 ,0 ,0},
+	{ 0, 0 ,0 ,0},
+	{ 0, 0 ,0 ,0},
+	{ 0, 0 ,0 ,0},
+	{ 0, 0 ,0 ,0},
+	{ 0, 0 ,0 ,0},
+	{ 0, 0 ,0 ,0},
+	{ 0, 0 ,0 ,0},
+	{ 0, 0 ,0 ,0},
 	/* The allpot handler */
-    { 0,0,0,0 }
+	{ 0,0,0,0 }
 };
 
 static struct TMS5220interface tms5220_interface =
 {
-    672000,     /* clock speed (80*samplerate) */
-    255,        /* volume */
-    0           /* IRQ handler */
+	672000,     /* clock speed (80*samplerate) */
+	100,        /* volume */
+	0           /* IRQ handler */
 };
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_jedi =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
             2500000,    /* 2.5 Mhz */
-			0,
 			readmem,writemem,0,0,
             interrupt,4
 		},
 		{
             CPU_M6502,
             1500000,        /* 1.5 Mhz */
-            2,
 			readmem2,writemem2,0,0,
             interrupt,4
 		}
@@ -305,10 +325,11 @@ static struct MachineDriver machine_driver =
 	0,
 
 	/* video hardware */
-    37*8, 30*8, { 0*8, 37*8-1, 0*8, 30*8-1 },
+	37*8, 30*8, { 0*8, 37*8-1, 0*8, 30*8-1 },
 	gfxdecodeinfo,
-    256,4+16+16,
-    jedi_vh_convert_color_prom,
+	1024+1,0,	/* no colortable, we do the lookups ourselves */
+				/* reserve color 1024 for black (disabled display) */
+	0,
 
     VIDEO_TYPE_RASTER | VIDEO_MODIFIES_PALETTE,
 	0,
@@ -317,8 +338,8 @@ static struct MachineDriver machine_driver =
     jedi_vh_screenrefresh,
 
 	/* sound hardware */
-	0,0,0,0,
-    {
+	SOUND_SUPPORTS_STEREO,0,0,0,
+	{
 		{
 			SOUND_POKEY,
 			&pokey_interface
@@ -327,8 +348,9 @@ static struct MachineDriver machine_driver =
 			SOUND_TMS5220,
 			&tms5220_interface
 		}
-    }
+    },
 
+	nvram_handler
 };
 
 
@@ -339,74 +361,36 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( jedi_rom )
-	ROM_REGION(0x1C000)	/* 64k for code + 48k for banked ROMs */
-	ROM_LOAD( "14f_221.bin", 0x08000, 0x4000, 0x81b8d806 )
-	ROM_LOAD( "13f_222.bin", 0x0c000, 0x4000, 0x4ecc94fc )
-	ROM_LOAD( "13d_123.bin", 0x10000, 0x4000, 0xe7508418 )	/* Page 0 */
-	ROM_LOAD( "13b_124.bin", 0x14000, 0x4000, 0x3b502580 )	/* Page 1 */
-	ROM_LOAD( "13a_122.bin", 0x18000, 0x4000, 0xfcf2c162 )	/* Page 2 */
+ROM_START( jedi )
+	ROM_REGION( 0x1C000, REGION_CPU1 )	/* 64k for code + 48k for banked ROMs */
+	ROM_LOAD( "14f_221.bin",  0x08000, 0x4000, 0x414d05e3 )
+	ROM_LOAD( "13f_222.bin",  0x0c000, 0x4000, 0x7b3f21be )
+	ROM_LOAD( "13d_123.bin",  0x10000, 0x4000, 0x877f554a )	/* Page 0 */
+	ROM_LOAD( "13b_124.bin",  0x14000, 0x4000, 0xe72d41db )	/* Page 1 */
+	ROM_LOAD( "13a_122.bin",  0x18000, 0x4000, 0xcce7ced5 )	/* Page 2 */
 
-	ROM_REGION(0x32000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "11t_215.bin", 0x00000, 0x2000, 0x9a6e2e9e )	/* Alphanumeric */
-	ROM_LOAD( "06r_126.bin", 0x02000, 0x8000, 0xb751b39f )	/* Playfield */
-	ROM_LOAD( "06n_127.bin", 0x0a000, 0x8000, 0x72c11703 )
-	ROM_LOAD( "01h_130.bin", 0x12000, 0x8000, 0xc10a8a70 )	/* Sprites */
-	ROM_LOAD( "01f_131.bin", 0x1a000, 0x8000, 0x60681a2c )
-	ROM_LOAD( "01m_128.bin", 0x22000, 0x8000, 0x1b26b546 )
-	ROM_LOAD( "01k_129.bin", 0x2a000, 0x8000, 0x7d487088 )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* space for the sound ROMs */
+	ROM_LOAD( "01c_133.bin",  0x8000, 0x4000, 0x6c601c69 )
+	ROM_LOAD( "01a_134.bin",  0xC000, 0x4000, 0x5e36c564 )
 
-	ROM_REGION(0x10000)	/* space for the sound ROMs */
-	ROM_LOAD( "01c_133.bin", 0x8000, 0x4000, 0x73521580 )
-	ROM_LOAD( "01a_134.bin", 0xC000, 0x4000, 0x3c5aa3aa )
+	ROM_REGION( 0x02000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "11t_215.bin",  0x00000, 0x2000, 0x3e49491f )	/* Alphanumeric */
+
+	ROM_REGION( 0x10000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "06r_126.bin",  0x00000, 0x8000, 0x9c55ece8 )	/* Playfield */
+	ROM_LOAD( "06n_127.bin",  0x08000, 0x8000, 0x4b09dcc5 )
+
+	ROM_REGION( 0x20000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "01h_130.bin",  0x00000, 0x8000, 0x2646a793 )	/* Sprites */
+	ROM_LOAD( "01f_131.bin",  0x08000, 0x8000, 0x60107350 )
+	ROM_LOAD( "01m_128.bin",  0x10000, 0x8000, 0x24663184 )
+	ROM_LOAD( "01k_129.bin",  0x18000, 0x8000, 0xac86b98c )
+
+	ROM_REGION( 0x0800, REGION_PROMS )	/* background smoothing */
+	ROM_LOAD( "136030.117",   0x0000, 0x0400, 0x9831bd55 )
+	ROM_LOAD( "136030.118",   0x0400, 0x0400, 0x261fbfe7 )
 ROM_END
 
-static int novram_load(void)
-{
-/* get RAM pointer (if game is multiCPU, we can't assume the global */
-/* RAM pointer is pointing to the right place) */
-unsigned char *RAM = Machine->memory_region[0];
-
-	void *f;
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-	{
-        osd_fread(f,&RAM[0x0800],256);
-		osd_fclose(f);
-	}
-	return 1;
-}
-
-static void novram_save(void)
-{
-	void *f;
-	/* get RAM pointer (if game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-        osd_fwrite(f,&RAM[0x0800],256);
-		osd_fclose(f);
-	}
-}
 
 
-struct GameDriver jedi_driver =
-{
-	"Return of the Jedi",
-	"jedi",
-	"Dan Boris",
-	&machine_driver,
-
-	jedi_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	input_ports,
-
-	0, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	novram_load, novram_save /* Highscore load, save */
-};
+GAMEX( 1984, jedi, 0, jedi, jedi, 0, ROT0, "Atari", "Return of the Jedi", GAME_NO_COCKTAIL )

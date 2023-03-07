@@ -11,12 +11,11 @@
 
 
 
-unsigned char *citycon_paletteram,*citycon_charlookup;
+unsigned char *citycon_charlookup;
 unsigned char *citycon_scroll;
 static struct osd_bitmap *tmpbitmap2;
-static int bg_image,dirty_background,dirtypalette;
+static data_t bg_image;
 static unsigned char dirtylookup[32];
-static int flipscreen;
 
 
 
@@ -31,20 +30,20 @@ int citycon_vh_start(void)
 		return 1;
 	memset(dirtybuffer,1,videoram_size);
 
-	dirty_background = 1;
-	dirtypalette = 1;
+	/* forces creating the background */
+	schedule_full_refresh();
 
-	/* CityConnection has a virtual screen 4 times as large as the visible screen */
-	if ((tmpbitmap = osd_new_bitmap(4 * Machine->drv->screen_width,Machine->drv->screen_height,Machine->scrbitmap->depth)) == 0)
+	/* City Connection has a virtual screen 4 times as large as the visible screen */
+	if ((tmpbitmap = bitmap_alloc(4 * Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 	{
 		free(dirtybuffer);
 		return 1;
 	}
 
-	/* And another one for background */
-	if ((tmpbitmap2 = osd_new_bitmap(4 * Machine->drv->screen_width,Machine->drv->screen_height,Machine->scrbitmap->depth)) == 0)
+	/* and another one for background */
+	if ((tmpbitmap2 = bitmap_alloc(4 * Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 	{
-                osd_free_bitmap(tmpbitmap);
+		bitmap_free(tmpbitmap);
 		free(dirtybuffer);
 		return 1;
 	}
@@ -62,25 +61,13 @@ int citycon_vh_start(void)
 void citycon_vh_stop(void)
 {
 	free(dirtybuffer);
-	osd_free_bitmap(tmpbitmap);
-	osd_free_bitmap(tmpbitmap2);
+	bitmap_free(tmpbitmap);
+	bitmap_free(tmpbitmap2);
 }
 
 
 
-void citycon_paletteram_w(int offset,int data)
-{
-	if (citycon_paletteram[offset] != data)
-	{
-		citycon_paletteram[offset] = data;
-
-		dirtypalette = 1;
-	}
-}
-
-
-
-void citycon_charlookup_w(int offset,int data)
+WRITE_HANDLER( citycon_charlookup_w )
 {
 	if (citycon_charlookup[offset] != data)
 	{
@@ -92,28 +79,23 @@ void citycon_charlookup_w(int offset,int data)
 
 
 
-void citycon_background_w(int offset,int data)
+WRITE_HANDLER( citycon_background_w )
 {
 	/* bits 4-7 control the background image */
-	if (bg_image != (data >> 4))
-	{
-		bg_image = data >> 4;
-		dirty_background = 1;
-	}
+	set_vh_global_attribute(&bg_image, data >> 4);
 
 	/* bit 0 flips screen */
-	/* maybe it is also used to multiplex player 1 and player 2 controls */
-	if (flipscreen != (data & 1))
-	{
-		flipscreen = data & 1;
-		memset(dirtybuffer,1,videoram_size);
-		dirty_background = 1;
-	}
+	/* it is also used to multiplex player 1 and player 2 controls */
+	flip_screen_w(offset, data & 0x01);
 
 	/* bits 1-3 are unknown */
-if (errorlog && (data & 0x0e) != 0) fprintf(errorlog,"background register = %02x\n",data);
+	if ((data & 0x0e) != 0) logerror("background register = %02x\n",data);
 }
 
+READ_HANDLER( citycon_in_r )
+{
+	return readinputport(flip_screen ? 1 : 0);
+}
 
 
 /***************************************************************************
@@ -123,59 +105,42 @@ if (errorlog && (data & 0x0e) != 0) fprintf(errorlog,"background register = %02x
   the main emulation engine.
 
 ***************************************************************************/
-void citycon_vh_screenrefresh(struct osd_bitmap *bitmap)
+void citycon_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
-	int j, i;
 
-	/* rebuild the colour lookup table from RAM palette */
-	if (dirtypalette)
+
+	palette_init_used_colors();
+
+	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
-		for (j=0; j<3; j++)
-		{
-			/*
-			0000-01ff:  sprites palettes   (16x16 colours)
-			0200-03ff:  background palette (16x16 colours)
-			0400-04ff:  characters palette (32x4 colours)
-			*/
-			/* CHARS  SPRITES TILES   */
-			int start[3]={0x0400, 0x0000, 0x0200};
-			int count[3]={0x0080, 0x0100, 0x0100};
-			int base=start[j];
-			int max=count[j];
+		int code,color;
 
+		code = memory_region(REGION_GFX4)[0x1000 * bg_image + offs];
+		color = memory_region(REGION_GFX4)[0xc000 + 0x100 * bg_image + code],
+		memset(&palette_used_colors[256 + 16 * color],PALETTE_COLOR_USED,16);
+	}
+	for (offs = 0;offs < 256;offs++)
+	{
+		int color;
 
-			for (i=0; i<max; i++)
-			{
-				int red, green, blue, redgreen;
+		color = citycon_charlookup[offs];
+		palette_used_colors[512 + 4 * color] = PALETTE_COLOR_TRANSPARENT;
+		memset(&palette_used_colors[512 + 4 * color + 1],PALETTE_COLOR_USED,3);
+	}
+	for (offs = spriteram_size-4;offs >= 0;offs -= 4)
+	{
+		int color;
 
-				redgreen=citycon_paletteram[base + 2*i];
-				red=redgreen >>4;
-				green=redgreen & 0x0f ;
-				blue=citycon_paletteram[base + 2*i + 1]>>4;
-
-				red = (red << 4) + red;
-				green = (green << 4) + green;
-				blue = (blue << 4) + blue;
-
-				if (j == 0)
-				{
-					if (i % 4 == 0) red = green = blue = 0;	/* ensure transparency */
-					else if (!red && !green && !blue) red = 0x20;	/* avoid transparency */
-					setgfxcolorentry (Machine->gfx[2*j],i,red,green,blue);
-				}
-				else
-					setgfxcolorentry (Machine->gfx[2*j],i,red,green,blue);
-			}
-		}
+		color = spriteram[offs + 2] & 0x0f;
+		memset(&palette_used_colors[16 * color + 1],PALETTE_COLOR_USED,15);
 	}
 
-
-	/* Create the background */
-	if (dirty_background || dirtypalette)
+	if (palette_recalc() || full_refresh)
 	{
-		dirty_background = 0;
+		memset(dirtybuffer,1,videoram_size);
 
+		/* create the background */
 		for (offs = videoram_size - 1;offs >= 0;offs--)
 		{
 			int sx,sy,code;
@@ -184,33 +149,34 @@ void citycon_vh_screenrefresh(struct osd_bitmap *bitmap)
 			sy = offs / 32;
 			sx = (offs % 32) + (sy & 0x60);
 			sy = sy & 31;
-			if (flipscreen)
+			if (flip_screen)
 			{
 				sx = 127 - sx;
 				sy = 31 - sy;
 			}
 
-			code = Machine->memory_region[2][0x1000 * bg_image + offs];
+			code = memory_region(REGION_GFX4)[0x1000 * bg_image + offs];
 
 			drawgfx(tmpbitmap2,Machine->gfx[3 + bg_image],
 					code,
-					Machine->memory_region[2][0xc000 + 0x100 * bg_image + code],
-					flipscreen,flipscreen,
+					memory_region(REGION_GFX4)[0xc000 + 0x100 * bg_image + code],
+					flip_screen,flip_screen,
 					8*sx,8*sy,
 					0,TRANSPARENCY_NONE,0);
 		}
 	}
 
+
 	/* copy the temporary bitmap to the screen */
 	{
 		int scroll;
 
-		if (flipscreen)
+		if (flip_screen)
 			scroll = 256 + ((citycon_scroll[0]*256+citycon_scroll[1]) >> 1);
 		else
 			scroll = -((citycon_scroll[0]*256+citycon_scroll[1]) >> 1);
 
-		copyscrollbitmap(bitmap,tmpbitmap2,1,&scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap2,1,&scroll,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 
@@ -225,7 +191,7 @@ void citycon_vh_screenrefresh(struct osd_bitmap *bitmap)
 		sx = (offs % 32) + (sy & 0x60);
 		sy = sy & 0x1f;
 
-		if (dirtybuffer[offs] || dirtylookup[sy] || dirtypalette)
+		if (dirtybuffer[offs] || dirtylookup[sy])
 		{
 			int i;
 			struct rectangle clip;
@@ -233,7 +199,7 @@ void citycon_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 			dirtybuffer[offs] = 0;
 
-			if (flipscreen)
+			if (flip_screen)
 			{
 				sx = 127 - sx;
 				sy = 31 - sy;
@@ -252,8 +218,8 @@ void citycon_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 				drawgfx(tmpbitmap,Machine->gfx[0],
 						videoram[offs],
-						citycon_charlookup[flipscreen ? (255 - 8*sy - i) : 8*sy + i],
-						flipscreen,flipscreen,
+						citycon_charlookup[flip_screen ? (255 - 8*sy - i) : 8*sy + i],
+						flip_screen,flip_screen,
 						8*sx,8*sy,
 						&clip,TRANSPARENCY_NONE,0);
 			}
@@ -266,7 +232,7 @@ void citycon_vh_screenrefresh(struct osd_bitmap *bitmap)
 		int i,scroll[32];
 
 
-		if (flipscreen)
+		if (flip_screen)
 		{
 			for (i = 0;i < 6;i++)
 				scroll[31-i] = 256;
@@ -280,7 +246,8 @@ void citycon_vh_screenrefresh(struct osd_bitmap *bitmap)
 			for (i = 6;i < 32;i++)
 				scroll[i] = -(citycon_scroll[0]*256+citycon_scroll[1]);
 		}
-		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,
+				&Machine->visible_area,TRANSPARENCY_PEN,palette_transparent_pen);
 	}
 
 
@@ -292,7 +259,7 @@ void citycon_vh_screenrefresh(struct osd_bitmap *bitmap)
 		sx = spriteram[offs + 3];
 		sy = 239 - spriteram[offs];
 		flipx = ~spriteram[offs + 2] & 0x10;
-		if (flipscreen)
+		if (flip_screen)
 		{
 			sx = 240 - sx;
 			sy = 238 - sy;
@@ -302,13 +269,11 @@ void citycon_vh_screenrefresh(struct osd_bitmap *bitmap)
 		drawgfx(bitmap,Machine->gfx[spriteram[offs + 1] & 0x80 ? 2 : 1],
 				spriteram[offs + 1] & 0x7f,
 				spriteram[offs + 2] & 0x0f,
-				flipx,flipscreen,
+				flipx,flip_screen,
 				sx,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
 
-
-	dirtypalette = 0;
 
 	for (offs = 0;offs < 32;offs++)
 		dirtylookup[offs] = 0;

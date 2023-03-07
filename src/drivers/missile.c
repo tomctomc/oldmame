@@ -22,8 +22,8 @@
 
 	  0640-3FFF  R/W   D  D  D	D  D  D  D	D	2-color bit region of
 												screen ram.
-												Writes to 4 bytes each
-												and mapped to $1900-$FFFF
+												Writes to 4 bytes each to effectively
+												address $1900-$ffff.
 
 	  1900-FFFF  R/W   D  D 					2-color bit region of
 												screen ram
@@ -136,200 +136,204 @@ Off Off 						1 coin 2 plays
 
 
 ******************************************************************************************/
-
-
-
 #include "driver.h"
 
-void missile_init_machine(void);
-int  missile_r(int offset);
-void missile_w(int offset, int data);
+extern unsigned char *missile_video2ram;
 
-int missile_trakball_r(int data);
+void missile_init_machine(void);
+READ_HANDLER( missile_r );
+WRITE_HANDLER( missile_w );
 
 int  missile_vh_start(void);
 void missile_vh_stop(void);
-void missile_vh_update(struct osd_bitmap *bitmap);
+void missile_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
+WRITE_HANDLER( missile_video_3rd_bit_w );
+WRITE_HANDLER( missile_video2_w );
 
 
 static struct MemoryReadAddress readmem[] =
 {
-	{ 0x0000, 0xFFFF, missile_r },
+	{ 0x0000, 0x18ff, MRA_RAM },
+	{ 0x1900, 0xfff9, missile_r }, /* shared region */
+	{ 0xfffa, 0xffff, MRA_ROM },
 	{ -1 }	/* end of table */
 };
 
 
 static struct MemoryWriteAddress writemem[] =
 {
-	{ 0x0000, 0xFFFF, missile_w },
+	{ 0x0000, 0x03ff, MWA_RAM },
+	{ 0x0400, 0x05ff, missile_video_3rd_bit_w },
+	{ 0x0600, 0x063f, MWA_RAM },
+	{ 0x0640, 0x4fff, missile_w }, /* shared region */
+	{ 0x5000, 0xffff, missile_video2_w, &missile_video2ram },
 	{ -1 }	/* end of table */
 };
 
 
 
-INPUT_PORTS_START( input_ports )
+INPUT_PORTS_START( missile )
 	PORT_START	/* IN0 */
-	PORT_BIT ( 0x01, IP_ACTIVE_LOW, IPT_BUTTON3 | IPF_COCKTAIL )
-	PORT_BIT ( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_COCKTAIL )
-	PORT_BIT ( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
-	PORT_BIT ( 0x08, IP_ACTIVE_LOW, IPT_START2 )
-	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_START1 )
-	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_COIN1 )
-	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN2 )
-	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_COIN3 )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_BUTTON3 | IPF_COCKTAIL )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_COCKTAIL )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_START2 )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_START1 )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_COIN1 )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_COIN2 )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN3 )
 
 	PORT_START	/* IN1 */
-	PORT_BIT ( 0x01, IP_ACTIVE_LOW, IPT_BUTTON3 )
-	PORT_BIT ( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 )
-	PORT_BIT ( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 )
-	PORT_BIT ( 0x18, 0x00, IPT_UNUSED ) /* trackball input, handled in machine/missile.c */
-	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_TILT )
-	PORT_BITX( 0x40, IP_ACTIVE_LOW, IPT_SERVICE , "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
-	PORT_BIT ( 0x80, IP_ACTIVE_HIGH, IPT_VBLANK )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_BUTTON3 )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 )
+	PORT_BIT( 0x18, 0x00, IPT_UNUSED ) /* trackball input, handled in machine/missile.c */
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_TILT )
+	PORT_BITX(0x40, IP_ACTIVE_LOW, IPT_SERVICE , DEF_STR( Service_Mode ), KEYCODE_F2, IP_JOY_NONE )
+	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_VBLANK )
 
 	PORT_START	/* IN2 */
-	PORT_DIPNAME (0x03, 0x00, "Coinage", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x01, "2 Coins/1 Credit" )
-	PORT_DIPSETTING (	0x00, "1 Coin/1 Credit" )
-	PORT_DIPSETTING (	0x03, "1 Coin/2 Credits" )
-	PORT_DIPSETTING (	0x02, "Free Play" )
-	PORT_DIPNAME (0x0c, 0x00, "Right Coin", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "*1" )
-	PORT_DIPSETTING (	0x04, "*4" )
-	PORT_DIPSETTING (	0x08, "*5" )
-	PORT_DIPSETTING (	0x0c, "*6" )
-	PORT_DIPNAME (0x10, 0x00, "Center Coin", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "*1" )
-	PORT_DIPSETTING (	0x10, "*2" )
-	PORT_DIPNAME (0x60, 0x00, "Language", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "English" )
-	PORT_DIPSETTING (	0x20, "French" )
-	PORT_DIPSETTING (	0x40, "German" )
-	PORT_DIPSETTING (	0x60, "Spanish" )
-	PORT_DIPNAME (0x80, 0x80, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x80, "Off" )
-	PORT_DIPSETTING (	0x00, "On" )
+	PORT_DIPNAME(0x03, 0x00, DEF_STR( Coinage ) )
+	PORT_DIPSETTING(   0x01, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(   0x03, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(   0x02, DEF_STR( Free_Play ) )
+	PORT_DIPNAME(0x0c, 0x00, "Right Coin" )
+	PORT_DIPSETTING(   0x00, "*1" )
+	PORT_DIPSETTING(   0x04, "*4" )
+	PORT_DIPSETTING(   0x08, "*5" )
+	PORT_DIPSETTING(   0x0c, "*6" )
+	PORT_DIPNAME(0x10, 0x00, "Center Coin" )
+	PORT_DIPSETTING(   0x00, "*1" )
+	PORT_DIPSETTING(   0x10, "*2" )
+	PORT_DIPNAME(0x60, 0x00, "Language" )
+	PORT_DIPSETTING(   0x00, "English" )
+	PORT_DIPSETTING(   0x20, "French" )
+	PORT_DIPSETTING(   0x40, "German" )
+	PORT_DIPSETTING(   0x60, "Spanish" )
+	PORT_DIPNAME(0x80, 0x80, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(   0x80, DEF_STR( Off ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( On ) )
 
 	PORT_START	/* IN3 */
-	PORT_DIPNAME (0x03, 0x00, "Cities", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x02, "4" )
-	PORT_DIPSETTING (	0x01, "5" )
-	PORT_DIPSETTING (	0x03, "6" )
-	PORT_DIPSETTING (	0x00, "7" )
-	PORT_DIPNAME (0x04, 0x04, "Bonus Credit for 4 Coins", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x04, "No" )
-	PORT_DIPSETTING (	0x00, "Yes" )
-	PORT_DIPNAME (0x08, 0x08, "Trackball Size", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "Large" )
-	PORT_DIPSETTING (	0x08, "Mini" )
-	PORT_DIPNAME (0x70, 0x00, "Bonus City", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x10, "8000" )
-	PORT_DIPSETTING (	0x70, "10000" )
-	PORT_DIPSETTING (	0x60, "12000" )
-	PORT_DIPSETTING (	0x50, "14000" )
-	PORT_DIPSETTING (	0x40, "15000" )
-	PORT_DIPSETTING (	0x30, "18000" )
-	PORT_DIPSETTING (	0x20, "20000" )
-	PORT_DIPSETTING (	0x00, "None" )
-	PORT_DIPNAME (0x80, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "Upright" )
-	PORT_DIPSETTING (	0x80, "Cocktail" )
+	PORT_DIPNAME(0x03, 0x00, "Cities" )
+	PORT_DIPSETTING(   0x02, "4" )
+	PORT_DIPSETTING(   0x01, "5" )
+	PORT_DIPSETTING(   0x03, "6" )
+	PORT_DIPSETTING(   0x00, "7" )
+	PORT_DIPNAME(0x04, 0x04, "Bonus Credit for 4 Coins" )
+	PORT_DIPSETTING(   0x04, DEF_STR( No ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( Yes ) )
+	PORT_DIPNAME(0x08, 0x00, "Trackball Size" )
+	PORT_DIPSETTING(   0x00, "Large" )
+	PORT_DIPSETTING(   0x08, "Mini" )
+	PORT_DIPNAME(0x70, 0x70, "Bonus City" )
+	PORT_DIPSETTING(   0x10, "8000" )
+	PORT_DIPSETTING(   0x70, "10000" )
+	PORT_DIPSETTING(   0x60, "12000" )
+	PORT_DIPSETTING(   0x50, "14000" )
+	PORT_DIPSETTING(   0x40, "15000" )
+	PORT_DIPSETTING(   0x30, "18000" )
+	PORT_DIPSETTING(   0x20, "20000" )
+	PORT_DIPSETTING(   0x00, "None" )
+	PORT_DIPNAME(0x80, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(   0x80, DEF_STR( Cocktail ) )
 
 	PORT_START	/* FAKE */
-	PORT_ANALOG ( 0x0f, 0x0, IPT_TRACKBALL_Y | IPF_CENTER | IPF_REVERSE, 50, 7, 0, 0)
+	PORT_ANALOG( 0x0f, 0x00, IPT_TRACKBALL_X, 20, 10, 0, 0)
 
 	PORT_START	/* FAKE */
-	PORT_ANALOG ( 0x0f, 0x0, IPT_TRACKBALL_X | IPF_CENTER, 50, 7, 0, 0)
+	PORT_ANALOG( 0x0f, 0x00, IPT_TRACKBALL_Y | IPF_REVERSE, 20, 10, 0, 0)
+
+	PORT_START	/* FAKE */
+	PORT_ANALOG( 0x0f, 0x00, IPT_TRACKBALL_X | IPF_REVERSE | IPF_COCKTAIL, 20, 10, 0, 0)
+
+	PORT_START	/* FAKE */
+	PORT_ANALOG( 0x0f, 0x00, IPT_TRACKBALL_Y | IPF_REVERSE | IPF_COCKTAIL, 20, 10, 0, 0)
 INPUT_PORTS_END
 
-INPUT_PORTS_START( suprmatk_input_ports )
+INPUT_PORTS_START( suprmatk )
 	PORT_START	/* IN0 */
-	PORT_BIT ( 0x01, IP_ACTIVE_LOW, IPT_BUTTON3 | IPF_COCKTAIL )
-	PORT_BIT ( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_COCKTAIL )
-	PORT_BIT ( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
-	PORT_BIT ( 0x08, IP_ACTIVE_LOW, IPT_START2 )
-	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_START1 )
-	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_COIN1 )
-	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN2 )
-	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_COIN3 )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_BUTTON3 | IPF_COCKTAIL )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_COCKTAIL )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_START2 )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_START1 )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_COIN1 )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_COIN2 )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN3 )
 
 	PORT_START	/* IN1 */
-	PORT_BIT ( 0x01, IP_ACTIVE_LOW, IPT_BUTTON3 )
-	PORT_BIT ( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 )
-	PORT_BIT ( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 )
-	PORT_BIT ( 0x18, 0x00, IPT_UNUSED ) /* trackball input, handled in machine/missile.c */
-	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_TILT )
-	PORT_BITX( 0x40, IP_ACTIVE_LOW, IPT_SERVICE , "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
-	PORT_BIT ( 0x80, IP_ACTIVE_HIGH, IPT_VBLANK )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_BUTTON3 )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 )
+	PORT_BIT( 0x18, 0x00, IPT_UNUSED ) /* trackball input, handled in machine/missile.c */
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_TILT )
+	PORT_BITX(0x40, IP_ACTIVE_LOW, IPT_SERVICE , DEF_STR( Service_Mode ), KEYCODE_F2, IP_JOY_NONE )
+	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_VBLANK )
 
 	PORT_START	/* IN2 */
-	PORT_DIPNAME (0x03, 0x00, "Coinage", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x01, "2 Coins/1 Credit" )
-	PORT_DIPSETTING (	0x00, "1 Coin/1 Credit" )
-	PORT_DIPSETTING (	0x03, "1 Coin/2 Credits" )
-	PORT_DIPSETTING (	0x02, "Free Play" )
-	PORT_DIPNAME (0x0c, 0x00, "Right Coin", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "*1" )
-	PORT_DIPSETTING (	0x04, "*4" )
-	PORT_DIPSETTING (	0x08, "*5" )
-	PORT_DIPSETTING (	0x0c, "*6" )
-	PORT_DIPNAME (0x10, 0x00, "Center Coin", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "*1" )
-	PORT_DIPSETTING (	0x10, "*2" )
-	PORT_DIPNAME (0xE0, 0x40, "Game", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "Missile Command" )
-	PORT_DIPSETTING (	0x40, "Easy Super Missile Attack" )
-	PORT_DIPSETTING (	0x80, "Reg. Super Missile Attack" )
-	PORT_DIPSETTING (	0xC0, "Hard Super Missile Attack" )
+	PORT_DIPNAME(0x03, 0x00, DEF_STR( Coinage ) )
+	PORT_DIPSETTING(   0x01, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(   0x03, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(   0x02, DEF_STR( Free_Play ) )
+	PORT_DIPNAME(0x0c, 0x00, "Right Coin" )
+	PORT_DIPSETTING(   0x00, "*1" )
+	PORT_DIPSETTING(   0x04, "*4" )
+	PORT_DIPSETTING(   0x08, "*5" )
+	PORT_DIPSETTING(   0x0c, "*6" )
+	PORT_DIPNAME(0x10, 0x00, "Center Coin" )
+	PORT_DIPSETTING(   0x00, "*1" )
+	PORT_DIPSETTING(   0x10, "*2" )
+	PORT_DIPNAME(0x20, 0x20, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(   0x20, DEF_STR( Off ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( On ) )
+	PORT_DIPNAME(0xc0, 0x40, "Game" )
+	PORT_DIPSETTING(   0x00, "Missile Command" )
+	PORT_DIPSETTING(   0x40, "Easy Super Missile Attack" )
+	PORT_DIPSETTING(   0x80, "Reg. Super Missile Attack" )
+	PORT_DIPSETTING(   0xc0, "Hard Super Missile Attack" )
 
 	PORT_START	/* IN3 */
-	PORT_DIPNAME (0x03, 0x00, "Cities", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x02, "4" )
-	PORT_DIPSETTING (	0x01, "5" )
-	PORT_DIPSETTING (	0x03, "6" )
-	PORT_DIPSETTING (	0x00, "7" )
-	PORT_DIPNAME (0x04, 0x04, "Bonus Credit for 4 Coins", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x04, "No" )
-	PORT_DIPSETTING (	0x00, "Yes" )
-	PORT_DIPNAME (0x08, 0x08, "Trackball Size", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "Large" )
-	PORT_DIPSETTING (	0x08, "Mini" )
-	PORT_DIPNAME (0x70, 0x00, "Bonus City", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x10, "8000" )
-	PORT_DIPSETTING (	0x70, "10000" )
-	PORT_DIPSETTING (	0x60, "12000" )
-	PORT_DIPSETTING (	0x50, "14000" )
-	PORT_DIPSETTING (	0x40, "15000" )
-	PORT_DIPSETTING (	0x30, "18000" )
-	PORT_DIPSETTING (	0x20, "20000" )
-	PORT_DIPSETTING (	0x00, "None" )
-	PORT_DIPNAME (0x80, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING (	0x00, "Upright" )
-	PORT_DIPSETTING (	0x80, "Cocktail" )
+	PORT_DIPNAME(0x03, 0x00, "Cities" )
+	PORT_DIPSETTING(   0x02, "4" )
+	PORT_DIPSETTING(   0x01, "5" )
+	PORT_DIPSETTING(   0x03, "6" )
+	PORT_DIPSETTING(   0x00, "7" )
+	PORT_DIPNAME(0x04, 0x04, "Bonus Credit for 4 Coins" )
+	PORT_DIPSETTING(   0x04, DEF_STR( No ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( Yes ) )
+	PORT_DIPNAME(0x08, 0x00, "Trackball Size" )
+	PORT_DIPSETTING(   0x00, "Large" )
+	PORT_DIPSETTING(   0x08, "Mini" )
+	PORT_DIPNAME(0x70, 0x70, "Bonus City" )
+	PORT_DIPSETTING(   0x10, "8000" )
+	PORT_DIPSETTING(   0x70, "10000" )
+	PORT_DIPSETTING(   0x60, "12000" )
+	PORT_DIPSETTING(   0x50, "14000" )
+	PORT_DIPSETTING(   0x40, "15000" )
+	PORT_DIPSETTING(   0x30, "18000" )
+	PORT_DIPSETTING(   0x20, "20000" )
+	PORT_DIPSETTING(   0x00, "None" )
+	PORT_DIPNAME(0x80, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(   0x80, DEF_STR( Cocktail ) )
 
 	PORT_START	/* FAKE */
-	PORT_ANALOG ( 0x0f, 0x0, IPT_TRACKBALL_Y | IPF_CENTER | IPF_REVERSE, 50, 7, 0, 0)
+	PORT_ANALOG( 0x0f, 0x00, IPT_TRACKBALL_X, 20, 10, 0, 0)
 
 	PORT_START	/* FAKE */
-	PORT_ANALOG ( 0x0f, 0x0, IPT_TRACKBALL_X | IPF_CENTER, 50, 7, 0, 0)
+	PORT_ANALOG( 0x0f, 0x00, IPT_TRACKBALL_Y | IPF_REVERSE, 20, 10, 0, 0)
+
+	PORT_START	/* FAKE */
+	PORT_ANALOG( 0x0f, 0x00, IPT_TRACKBALL_X | IPF_REVERSE | IPF_COCKTAIL, 20, 10, 0, 0)
+
+	PORT_START	/* FAKE */
+	PORT_ANALOG( 0x0f, 0x00, IPT_TRACKBALL_Y | IPF_REVERSE | IPF_COCKTAIL, 20, 10, 0, 0)
 INPUT_PORTS_END
-
-
-
-
-static unsigned char palette[] =
-{
-	0, 0, 0,					/* extra black for Macs */
-	0xFF,0xFF,0xFF,   /* white	 */
-	0xFF,0xFF,0x00,   /* yellow  */
-	0xFF,0x00,0xFF,   /* magenta  */
-	0xFF,0x00,0x00,   /* red	*/
-	0x00,0xFF,0xFF,   /* cyan	 */
-	0x00,0xFF,0x00,   /* green	 */
-	0x00,0x00,0xFF,   /* blue  */
-	0x00,0x00,0x00	  /* black */
-};
 
 
 
@@ -337,9 +341,7 @@ static struct POKEYinterface pokey_interface =
 {
 	1,	/* 1 chip */
 	1250000,	/* 1.25 MHz??? */
-	255,
-	POKEY_DEFAULT_GAIN/2,
-	NO_CLIP,
+	{ 100 },
 	/* The 8 pot handlers */
 	{ 0 },
 	{ 0 },
@@ -355,14 +357,13 @@ static struct POKEYinterface pokey_interface =
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_missile =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
 			1000000,	/* 1 Mhz ???? */
-			0,
 			readmem,writemem,0,0,
 			interrupt, 4  /* EEA was 1 */
 		}
@@ -372,18 +373,16 @@ static struct MachineDriver machine_driver =
 	missile_init_machine,
 
 	/* video hardware */
-										/* RG - 4/11/98 - for flips and rotates... */
-										/* 256, 231, { 0, 255, 0, 230 }, */
-	256, 256, { 0, 255, 0, 255 },
+	256, 231, { 0, 255, 0, 230 },
 	0,
-	sizeof(palette)/3, 0,
+	8, 0,
 	0,
 
-	VIDEO_TYPE_RASTER,
+	VIDEO_TYPE_RASTER | VIDEO_MODIFIES_PALETTE | VIDEO_SUPPORTS_DIRTY,
 	0,
 	missile_vh_start,
 	missile_vh_stop,
-	missile_vh_update,
+	missile_vh_screenrefresh,
 
 	/* sound hardware */
 	0,0,0,0,
@@ -404,97 +403,41 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( missile_rom )
-	ROM_REGION(0x10000) /* 64k for code */
-	ROM_LOAD( "035820.02", 0x5000, 0x0800, 0x899d091b )
-	ROM_LOAD( "035821.02", 0x5800, 0x0800, 0x25543e0a )
-	ROM_LOAD( "035822.02", 0x6000, 0x0800, 0x8067194f )
-	ROM_LOAD( "035823.02", 0x6800, 0x0800, 0xfc0f6b13 )
-	ROM_LOAD( "035824.02", 0x7000, 0x0800, 0xa3e9d74d )
-	ROM_LOAD( "035825.02", 0x7800, 0x0800, 0x6050ea56 )
+ROM_START( missile )
+	ROM_REGION( 0x10000, REGION_CPU1 ) /* 64k for code */
+	ROM_LOAD( "035820.02",    0x5000, 0x0800, 0x7a62ce6a )
+	ROM_LOAD( "035821.02",    0x5800, 0x0800, 0xdf3bd57f )
+	ROM_LOAD( "035822.02",    0x6000, 0x0800, 0xa1cd384a )
+	ROM_LOAD( "035823.02",    0x6800, 0x0800, 0x82e552bb )
+	ROM_LOAD( "035824.02",    0x7000, 0x0800, 0x606e42e0 )
+	ROM_LOAD( "035825.02",    0x7800, 0x0800, 0xf752eaeb )
 	ROM_RELOAD( 		   0xF800, 0x0800 ) 	/* for interrupt vectors  */
 ROM_END
 
-ROM_START( suprmatk_rom )
-	ROM_REGION(0x10000) /* 64k for code */
-	ROM_LOAD( "035820.02", 0x5000, 0x0800, 0xbb306b5e )
-	ROM_LOAD( "035821.02", 0x5800, 0x0800, 0x8fb48b0a )
-	ROM_LOAD( "035822.02", 0x6000, 0x0800, 0x0ac4e004 )
-	ROM_LOAD( "035823.02", 0x6800, 0x0800, 0x0bcb03b7 )
-	ROM_LOAD( "035824.02", 0x7000, 0x0800, 0xbdc91101 )
-	ROM_LOAD( "035825.02", 0x7800, 0x0800, 0x43836d2d )
+ROM_START( missile2 )
+	ROM_REGION( 0x10000, REGION_CPU1 ) /* 64k for code */
+	ROM_LOAD( "35820-01.h1",  0x5000, 0x0800, 0x41cbb8f2 )
+	ROM_LOAD( "35821-01.jk1", 0x5800, 0x0800, 0x728702c8 )
+	ROM_LOAD( "35822-01.kl1", 0x6000, 0x0800, 0x28f0999f )
+	ROM_LOAD( "35823-01.mn1", 0x6800, 0x0800, 0xbcc93c94 )
+	ROM_LOAD( "35824-01.np1", 0x7000, 0x0800, 0x0ca089c8 )
+	ROM_LOAD( "35825-01.r1",  0x7800, 0x0800, 0x428cf0d5 )
+	ROM_RELOAD( 		      0xF800, 0x0800 ) 	/* for interrupt vectors  */
+ROM_END
+
+ROM_START( suprmatk )
+	ROM_REGION( 0x10000, REGION_CPU1 ) /* 64k for code */
+	ROM_LOAD( "035820.sma",   0x5000, 0x0800, 0x75f01b87 )
+	ROM_LOAD( "035821.sma",   0x5800, 0x0800, 0x3320d67e )
+	ROM_LOAD( "035822.sma",   0x6000, 0x0800, 0xe6be5055 )
+	ROM_LOAD( "035823.sma",   0x6800, 0x0800, 0xa6069185 )
+	ROM_LOAD( "035824.sma",   0x7000, 0x0800, 0x90a06be8 )
+	ROM_LOAD( "035825.sma",   0x7800, 0x0800, 0x1298213d )
 	ROM_RELOAD( 		   0xF800, 0x0800 ) 	/* for interrupt vectors  */
 ROM_END
 
 
 
-static int hiload(void)
-{
-	void *f;
-	/* check if the hi score table has already been initialized */
-	if (memcmp(&RAM[0x002C],"\x47\x4A\x4C", 3) == 0 &&
-		memcmp(&RAM[0x0044],"\x50\x69\x00", 3) == 0){
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0){
-			osd_fread(f,&RAM[0x002C],6*8);
-			osd_fclose(f);
-		}
-		return 1;
-	}else
-		return 0;	/* we can't load the hi scores yet */
-}
-
-
-
-static void hisave(void)
-{
-	void *f;
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0){
-		osd_fwrite(f,&RAM[0x002C],6*8);
-		osd_fclose(f);
-	}
-}
-
-
-
-struct GameDriver missile_driver =
-{
-	"Missile Command",
-	"missile",
-	"Ray Giarratana\nMarco Cassili\nEric Anschuetz",  /* EEA */
-	&machine_driver,
-
-	missile_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	input_ports,
-
-	0, palette, 0,
-	ORIENTATION_DEFAULT,
-
-	hiload, hisave
-};
-
-struct GameDriver suprmatk_driver =
-{
-	"Super Missile Attack",
-	"suprmatk",
-	"Ray Giarratana\nMarco Cassili\nEric Anschuetz",  /* EEA */
-	&machine_driver,
-
-	suprmatk_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	suprmatk_input_ports,
-
-	0, palette, 0,
-	ORIENTATION_DEFAULT,
-
-	hiload, hisave
-};
-
+GAME( 1980, missile,  0,       missile, missile,  0, ROT0, "Atari", "Missile Command (set 1)" )
+GAME( 1980, missile2, missile, missile, missile,  0, ROT0, "Atari", "Missile Command (set 2)" )
+GAME( 1981, suprmatk, missile, missile, suprmatk, 0, ROT0, "Atari + Gencomp", "Super Missile Attack" )

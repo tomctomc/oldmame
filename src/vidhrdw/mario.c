@@ -13,7 +13,7 @@
 
 static int gfx_bank,palette_bank;
 
-
+unsigned char *mario_scrolly;
 
 /***************************************************************************
 
@@ -35,7 +35,7 @@ static int gfx_bank,palette_bank;
   bit 0 -- 470 ohm resistor -- inverter  -- BLUE
 
 ***************************************************************************/
-void mario_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void mario_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -89,7 +89,7 @@ void mario_vh_convert_color_prom(unsigned char *palette, unsigned char *colortab
 
 
 
-void mario_gfxbank_w(int offset,int data)
+WRITE_HANDLER( mario_gfxbank_w )
 {
 	if (gfx_bank != (data & 1))
 	{
@@ -100,7 +100,7 @@ void mario_gfxbank_w(int offset,int data)
 
 
 
-void mario_palettebank_w(int offset,int data)
+WRITE_HANDLER( mario_palettebank_w )
 {
 	if (palette_bank != (data & 1))
 	{
@@ -118,7 +118,7 @@ void mario_palettebank_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void mario_vh_screenrefresh(struct osd_bitmap *bitmap)
+void mario_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -134,22 +134,27 @@ void mario_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 			dirtybuffer[offs] = 0;
 
-			sx = 31 - offs % 32;
-			sy = 31 - offs / 32;
+			sx = offs % 32;
+			sy = offs / 32;
 
 			drawgfx(tmpbitmap,Machine->gfx[0],
 					videoram[offs] + 256 * gfx_bank,
 					(videoram[offs] >> 5) + 8 * palette_bank,
 					0,0,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					0,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
-	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	/* copy the temporary bitmap to the screen */
+	{
+		int scrolly;
 
+		/* I'm not positive the scroll direction is right */
+		scrolly = -*mario_scrolly - 17;
+		copyscrollbitmap(bitmap,tmpbitmap,0,0,1,&scrolly,&Machine->visible_area,TRANSPARENCY_NONE,0);
+	}
 
 	/* Draw the sprites. */
 	for (offs = 0;offs < spriteram_size;offs += 4)
@@ -158,10 +163,10 @@ void mario_vh_screenrefresh(struct osd_bitmap *bitmap)
 		{
 			drawgfx(bitmap,Machine->gfx[1],
 					spriteram[offs + 2],
-					(spriteram[offs + 1] & 0x0f) + 0x10 * palette_bank,
+					(spriteram[offs + 1] & 0x0f) + 16 * palette_bank,
 					spriteram[offs + 1] & 0x80,spriteram[offs + 1] & 0x40,
-					248 - spriteram[offs + 3],spriteram[offs] - 8,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+					spriteram[offs + 3] - 8,240 - spriteram[offs] + 8,
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
 		}
 	}
 }

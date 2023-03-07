@@ -29,16 +29,8 @@ int llander_interrupt (void)
 		return ignore_interrupt();
 }
 
-/*
- * We catch the following busy loop in Asteroids:
- * 6812 lda $2002
- * 6815 bmi $6812
- *
- * and the following busy loop in Asteroid Deluxe
- * 6014 bit $2002
- * 6017 bmi $6014
- */
-int asteroid_IN0_r (int offset) {
+READ_HANDLER( asteroid_IN0_r )
+{
 
 	int res;
 	int bitmask;
@@ -49,13 +41,8 @@ int asteroid_IN0_r (int offset) {
 
 	if (cpu_gettotalcycles() & 0x100)
 		res |= 0x02;
-	if (!avgdvg_done()) {
-		if (cpu_getpc()==0x6815)
-			cpu_spinuntil_int();
-		if (cpu_getpc()==0x6017)
-			cpu_spinuntil_int();
+	if (!avgdvg_done())
 		res |= 0x04;
-	}
 
 	if (res & bitmask)
 		res = 0x80;
@@ -65,12 +52,26 @@ int asteroid_IN0_r (int offset) {
 	return res;
 }
 
+READ_HANDLER( asteroib_IN0_r )
+{
+	int res;
+
+	res=readinputport(0);
+
+//	if (cpu_gettotalcycles() & 0x100)
+//		res |= 0x02;
+	if (!avgdvg_done())
+		res |= 0x80;
+
+	return res;
+}
+
 /*
  * These 7 memory locations are used to read the player's controls.
  * Typically, only the high bit is used. This is handled by one input port.
  */
 
-int asteroid_IN1_r (int offset)
+READ_HANDLER( asteroid_IN1_r )
 {
 	int res;
 	int bitmask;
@@ -85,7 +86,7 @@ int asteroid_IN1_r (int offset)
 	return (res);
 }
 
-int asteroid_DSW1_r (int offset)
+READ_HANDLER( asteroid_DSW1_r )
 {
 	int res;
 	int res1;
@@ -97,10 +98,12 @@ int asteroid_DSW1_r (int offset)
 }
 
 
-void asteroid_bank_switch_w (int offset,int data)
+WRITE_HANDLER( asteroid_bank_switch_w )
 {
 	static int asteroid_bank = 0;
 	int asteroid_newbank;
+	unsigned char *RAM = memory_region(REGION_CPU1);
+
 
 	asteroid_newbank = (data >> 2) & 1;
 	if (asteroid_bank != asteroid_newbank) {
@@ -119,10 +122,12 @@ void asteroid_bank_switch_w (int offset,int data)
 	osd_led_w (1, ~data);
 }
 
-void astdelux_bank_switch_w (int offset,int data)
+WRITE_HANDLER( astdelux_bank_switch_w )
 {
 	static int astdelux_bank = 0;
 	int astdelux_newbank;
+	unsigned char *RAM = memory_region(REGION_CPU1);
+
 
 	astdelux_newbank = (data >> 7) & 1;
 	if (astdelux_bank != astdelux_newbank) {
@@ -139,7 +144,7 @@ void astdelux_bank_switch_w (int offset,int data)
 	}
 }
 
-void astdelux_led_w (int offset,int data)
+WRITE_HANDLER( astdelux_led_w )
 {
 	osd_led_w (offset, ~data);
 }
@@ -151,17 +156,10 @@ void asteroid_init_machine(void)
 
 /*
  * This is Lunar Lander's Inputport 0.
- * We also catch the following busyloop:
- * 6531 lda $2000
- * 6534 lsr
- * 6535 bcc 6531
  */
-int llander_IN0_r (int offset)
+READ_HANDLER( llander_IN0_r )
 {
 	int res;
-
-	if (cpu_getpc()==0x6534)
-		cpu_spinuntil_int();
 
 	res = readinputport(0);
 
@@ -171,20 +169,4 @@ int llander_IN0_r (int offset)
 		res |= 0x40;
 
 	return res;
-}
-
-void llander_led_w (int offset,int data)
-{
-	osd_led_w (0, ~(data >> 1));
-	osd_led_w (1, ~data);
-}
-
-int llander_zeropage_r(int offset)
-{
-	return RAM[0x0100+offset];
-}
-
-void llander_zeropage_w(int offset,int data)
-{
-	RAM[0x0100+offset]=data;
 }

@@ -1,5 +1,9 @@
 /***************************************************************************
 
+4/25/99 - Tac-Scan sound call for coins now works. (Jim Hernandez)
+2/5/98 - Added input ports support for Tac Scan. Bonus Ships now work.
+         Zektor now uses it's own input port section. (Jim Hernandez)
+
 Sega Vector memory map (preliminary)
 
 Most of the info here comes from the wiretap archive at:
@@ -119,61 +123,65 @@ Is 1) still valid?
 
 extern unsigned char *sega_mem;
 extern void sega_security(int chip);
-extern void sega_wr(int offset, int data);
+WRITE_HANDLER( sega_w );
 
-int sega_read_ports (int offset);
-int sega_IN4_r (int offset);
-int elim4_IN4_r (int offset);
+READ_HANDLER( sega_ports_r );
+READ_HANDLER( sega_IN4_r );
+READ_HANDLER( elim4_IN4_r );
 
 int sega_interrupt(void);
-int sega_mult_r (int offset);
-void sega_mult1_w (int offset, int data);
-void sega_mult2_w (int offset, int data);
-void sega_switch_w (int offset, int data);
+READ_HANDLER( sega_mult_r );
+WRITE_HANDLER( sega_mult1_w );
+WRITE_HANDLER( sega_mult2_w );
+WRITE_HANDLER( sega_switch_w );
 
 /* Sound hardware prototypes */
-int sega_sh_start (void);
-int sega_sh_r (int offset);
-void sega_sh_speech_w (int offset, int data);
+int sega_sh_start (const struct MachineSound *msound);
+READ_HANDLER( sega_sh_r );
+WRITE_HANDLER( sega_sh_speech_w );
 void sega_sh_update(void);
 
-void elim1_sh_w (int offset, int data);
-void elim2_sh_w (int offset, int data);
-void spacfury1_sh_w (int offset, int data);
-void spacfury2_sh_w (int offset, int data);
+WRITE_HANDLER( elim1_sh_w );
+WRITE_HANDLER( elim2_sh_w );
+WRITE_HANDLER( spacfury1_sh_w );
+WRITE_HANDLER( spacfury2_sh_w );
+WRITE_HANDLER( zektor1_sh_w );
+WRITE_HANDLER( zektor2_sh_w );
 
-int tacscan_sh_start (void);
-void tacscan_sh_w (int offset, int data);
+int tacscan_sh_start (const struct MachineSound *msound);
+WRITE_HANDLER( tacscan_sh_w );
 void tacscan_sh_update(void);
 
-void startrek_sh_w (int offset, int data);
+WRITE_HANDLER( startrek_sh_w );
 
 /* Video hardware prototypes */
-void sega_init_colors (unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
+void sega_init_colors (unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
 int sega_vh_start (void);
 void sega_vh_stop (void);
-void sega_vh_screenrefresh(struct osd_bitmap *bitmap);
+void sega_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
 static struct MemoryReadAddress readmem[] =
 {
 	{ 0x0000, 0xbfff, MRA_ROM },
 	{ 0xc800, 0xcfff, MRA_RAM },
-	{ 0xe000, 0xefff, MRA_RAM, &vectorram, &vectorram_size },
+	{ 0xe000, 0xefff, MRA_RAM },
 	{ 0xd000, 0xdfff, MRA_RAM },			/* sound ram */
 	{ -1 }	/* end of table */
 };
 
 static struct MemoryWriteAddress writemem[] =
 {
-	{ 0x0000, 0xFFFF, sega_wr, &sega_mem },
+	{ 0x0000, 0xffff, sega_w, &sega_mem },
+	{ 0xe000, 0xefff, MWA_RAM, &vectorram, &vectorram_size },	/* handled by the above, */
+												/* here only to initialize the pointer */
 	{ -1 }
 };
 
 static struct IOReadPort spacfury_readport[] =
 {
- 	{ 0x3f, 0x3f, sega_sh_r },
- 	{ 0xbe, 0xbe, sega_mult_r },
-	{ 0xf8, 0xfb, sega_read_ports },
+	{ 0x3f, 0x3f, sega_sh_r },
+	{ 0xbe, 0xbe, sega_mult_r },
+	{ 0xf8, 0xfb, sega_ports_r },
 	{ -1 }	/* end of table */
 };
 
@@ -182,17 +190,17 @@ static struct IOWritePort spacfury_writeport[] =
 	{ 0x38, 0x38, sega_sh_speech_w },
 	{ 0x3e, 0x3e, spacfury1_sh_w },
 	{ 0x3f, 0x3f, spacfury2_sh_w },
-  	{ 0xbd, 0xbd, sega_mult1_w },
- 	{ 0xbe, 0xbe, sega_mult2_w },
-/* 	{ 0xf9, 0xf9, coin_counter_w },*//* 0x80 = enable, 0x00 = disable */
+	{ 0xbd, 0xbd, sega_mult1_w },
+	{ 0xbe, 0xbe, sega_mult2_w },
+	{ 0xf9, 0xf9, coin_counter_w }, /* 0x80 = enable, 0x00 = disable */
 	{ -1 }	/* end of table */
 };
 
 static struct IOReadPort zektor_readport[] =
 {
- 	{ 0x3f, 0x3f, sega_sh_r },
- 	{ 0xbe, 0xbe, sega_mult_r },
-	{ 0xf8, 0xfb, sega_read_ports },
+	{ 0x3f, 0x3f, sega_sh_r },
+	{ 0xbe, 0xbe, sega_mult_r },
+	{ 0xf8, 0xfb, sega_ports_r },
 	{ 0xfc, 0xfc, sega_IN4_r },
 	{ -1 }	/* end of table */
 };
@@ -200,37 +208,39 @@ static struct IOReadPort zektor_readport[] =
 static struct IOWritePort zektor_writeport[] =
 {
 	{ 0x38, 0x38, sega_sh_speech_w },
-  	{ 0xbd, 0xbd, sega_mult1_w },
- 	{ 0xbe, 0xbe, sega_mult2_w },
- 	{ 0xf8, 0xf8, sega_switch_w },
-/* 	{ 0xf9, 0xf9, coin_counter_w },*//* 0x80 = enable, 0x00 = disable */
+        { 0x3e, 0x3e, zektor1_sh_w },
+        { 0x3f, 0x3f, zektor2_sh_w },
+	{ 0xbd, 0xbd, sega_mult1_w },
+	{ 0xbe, 0xbe, sega_mult2_w },
+	{ 0xf8, 0xf8, sega_switch_w },
+	{ 0xf9, 0xf9, coin_counter_w }, /* 0x80 = enable, 0x00 = disable */
 	{ -1 }	/* end of table */
 };
 
 static struct IOWritePort tacscan_writeport[] =
 {
 	{ 0x3f, 0x3f, tacscan_sh_w },
-  	{ 0xbd, 0xbd, sega_mult1_w },
- 	{ 0xbe, 0xbe, sega_mult2_w },
- 	{ 0xf8, 0xf8, sega_switch_w },
-/* 	{ 0xf9, 0xf9, coin_counter_w },*//* 0x80 = enable, 0x00 = disable */
+	{ 0xbd, 0xbd, sega_mult1_w },
+	{ 0xbe, 0xbe, sega_mult2_w },
+	{ 0xf8, 0xf8, sega_switch_w },
+	{ 0xf9, 0xf9, coin_counter_w }, /* 0x80 = enable, 0x00 = disable */
 	{ -1 }	/* end of table */
 };
 
 static struct IOReadPort elim2_readport[] =
 {
- 	{ 0x3f, 0x3f, sega_sh_r },
- 	{ 0xbe, 0xbe, sega_mult_r },
-	{ 0xf8, 0xfb, sega_read_ports },
+	{ 0x3f, 0x3f, sega_sh_r },
+	{ 0xbe, 0xbe, sega_mult_r },
+	{ 0xf8, 0xfb, sega_ports_r },
 	{ 0xfc, 0xfc, input_port_4_r },
 	{ -1 }	/* end of table */
 };
 
 static struct IOReadPort elim4_readport[] =
 {
- 	{ 0x3f, 0x3f, sega_sh_r },
- 	{ 0xbe, 0xbe, sega_mult_r },
-	{ 0xf8, 0xfb, sega_read_ports },
+	{ 0x3f, 0x3f, sega_sh_r },
+	{ 0xbe, 0xbe, sega_mult_r },
+	{ 0xf8, 0xfb, sega_ports_r },
 	{ 0xfc, 0xfc, elim4_IN4_r },
 	{ -1 }	/* end of table */
 };
@@ -239,10 +249,10 @@ static struct IOWritePort elim_writeport[] =
 {
 	{ 0x3e, 0x3e, elim1_sh_w },
 	{ 0x3f, 0x3f, elim2_sh_w },
-  	{ 0xbd, 0xbd, sega_mult1_w },
- 	{ 0xbe, 0xbe, sega_mult2_w },
- 	{ 0xf8, 0xf8, sega_switch_w },
-/* 	{ 0xf9, 0xf9, coin_counter_w },*//* 0x80 = enable, 0x00 = disable */
+	{ 0xbd, 0xbd, sega_mult1_w },
+	{ 0xbe, 0xbe, sega_mult2_w },
+	{ 0xf8, 0xf8, sega_switch_w },
+	{ 0xf9, 0xf9, coin_counter_w }, /* 0x80 = enable, 0x00 = disable */
 	{ -1 }	/* end of table */
 };
 
@@ -250,20 +260,62 @@ static struct IOWritePort startrek_writeport[] =
 {
 	{ 0x38, 0x38, sega_sh_speech_w },
 	{ 0x3f, 0x3f, startrek_sh_w },
-  	{ 0xbd, 0xbd, sega_mult1_w },
- 	{ 0xbe, 0xbe, sega_mult2_w },
- 	{ 0xf8, 0xf8, sega_switch_w },
-/* 	{ 0xf9, 0xf9, coin_counter_w },*//* 0x80 = enable, 0x00 = disable */
+	{ 0xbd, 0xbd, sega_mult1_w },
+	{ 0xbe, 0xbe, sega_mult2_w },
+	{ 0xf8, 0xf8, sega_switch_w },
+	{ 0xf9, 0xf9, coin_counter_w }, /* 0x80 = enable, 0x00 = disable */
 	{ -1 }	/* end of table */
 };
 
+/*************************************************************************
+Input Ports
+*************************************************************************/
 
-INPUT_PORTS_START( spacfury_input_ports )
+/* This fake input port is used for DIP Switch 2
+   for all games except Eliminato 4 players */
+#define COINAGE PORT_START \
+        PORT_DIPNAME( 0x0f, 0x0c, DEF_STR ( Coin_B ) ) \
+        PORT_DIPSETTING(    0x00, DEF_STR ( 4C_1C ) ) \
+        PORT_DIPSETTING(    0x08, DEF_STR ( 3C_1C ) ) \
+        PORT_DIPSETTING(    0x09, "2 Coins/1 Credit 5/3 6/4" ) \
+        PORT_DIPSETTING(    0x05, "2 Coins/1 Credit 4/3" ) \
+        PORT_DIPSETTING(    0x04, DEF_STR ( 2C_1C ) ) \
+        PORT_DIPSETTING(    0x0c, DEF_STR ( 1C_1C ) ) \
+        PORT_DIPSETTING(    0x0d, "1 Coin/1 Credit 5/6" ) \
+        PORT_DIPSETTING(    0x03, "1 Coin/1 Credit 4/5" ) \
+        PORT_DIPSETTING(    0x0b, "1 Coin/1 Credit 2/3" ) \
+        PORT_DIPSETTING(    0x02, DEF_STR ( 1C_2C ) ) \
+        PORT_DIPSETTING(    0x0f, "1 Coin/2 Credits 4/9" ) \
+        PORT_DIPSETTING(    0x07, "1 Coin/2 Credits 5/11" ) \
+        PORT_DIPSETTING(    0x0a, DEF_STR ( 1C_3C ) ) \
+        PORT_DIPSETTING(    0x06, DEF_STR ( 1C_4C ) ) \
+        PORT_DIPSETTING(    0x0e, DEF_STR ( 1C_5C ) ) \
+        PORT_DIPSETTING(    0x01, DEF_STR ( 1C_6C ) ) \
+        PORT_DIPNAME( 0xf0, 0xc0, DEF_STR ( Coin_A ) ) \
+        PORT_DIPSETTING(    0x00, DEF_STR ( 4C_1C ) ) \
+        PORT_DIPSETTING(    0x80, DEF_STR ( 3C_1C ) ) \
+        PORT_DIPSETTING(    0x90, "2 Coins/1 Credit 5/3 6/4" ) \
+        PORT_DIPSETTING(    0x50, "2 Coins/1 Credit 4/3" ) \
+        PORT_DIPSETTING(    0x40, DEF_STR ( 2C_1C ) ) \
+        PORT_DIPSETTING(    0xc0, DEF_STR ( 1C_1C ) ) \
+        PORT_DIPSETTING(    0xd0, "1 Coin/1 Credit 5/6" ) \
+        PORT_DIPSETTING(    0x30, "1 Coin/1 Credit 4/5" ) \
+        PORT_DIPSETTING(    0xb0, "1 Coin/1 Credit 2/3" ) \
+        PORT_DIPSETTING(    0x20, DEF_STR ( 1C_2C ) ) \
+        PORT_DIPSETTING(    0xf0, "1 Coin/2 Credits 4/9" ) \
+        PORT_DIPSETTING(    0x70, "1 Coin/2 Credits 5/11" ) \
+        PORT_DIPSETTING(    0xa0, DEF_STR ( 1C_3C ) ) \
+        PORT_DIPSETTING(    0x60, DEF_STR ( 1C_4C ) ) \
+        PORT_DIPSETTING(    0xe0, DEF_STR ( 1C_5C ) ) \
+        PORT_DIPSETTING(    0x10, DEF_STR ( 1C_6C ) )
+
+
+INPUT_PORTS_START( spacfury )
 	PORT_START	/* IN0 - port 0xf8 */
 	/* The next bit is referred to as the Service switch in the self test - it just adds a credit */
-	PORT_BITX( 0x20, IP_ACTIVE_LOW, IPT_COIN3 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x40, IP_ACTIVE_LOW, IPT_COIN2 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x80, IP_ACTIVE_LOW, IPT_COIN1 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
+	PORT_BIT_IMPULSE( 0x20, IP_ACTIVE_LOW, IPT_COIN3, 3 )
+	PORT_BIT_IMPULSE( 0x40, IP_ACTIVE_LOW, IPT_COIN2, 3 )
+	PORT_BIT_IMPULSE( 0x80, IP_ACTIVE_LOW, IPT_COIN1, 3 )
 
 	PORT_START	/* IN1 - port 0xf9 */
 	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_START2 )
@@ -286,78 +338,43 @@ INPUT_PORTS_START( spacfury_input_ports )
 	PORT_START	/* IN5 - FAKE */
 	/* This fake input port is used to get the status of the F2 key, */
 	/* and activate the test mode, which is triggered by a NMI */
-	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
+	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, DEF_STR( Service_Mode ), KEYCODE_F2, IP_JOY_NONE )
 
 	PORT_START	/* FAKE */
         /* This fake input port is used for DIP Switch 1 */
-        PORT_DIPNAME( 0x03, 0x01, "Bonus Ship", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x03, "40K Points" )
-        PORT_DIPSETTING(    0x01, "30K Points" )
-        PORT_DIPSETTING(    0x02, "20K Points" )
-        PORT_DIPSETTING(    0x00, "10K Points" )
-        PORT_DIPNAME( 0x0c, 0x00, "Difficulty", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x0c, "Very Hard" )
-        PORT_DIPSETTING(    0x04, "Hard" )
-        PORT_DIPSETTING(    0x08, "Moderate" )
+        PORT_DIPNAME( 0x03, 0x01, DEF_STR ( Bonus_Life ) )
+        PORT_DIPSETTING(    0x00, "10000" )
+        PORT_DIPSETTING(    0x02, "20000" )
+        PORT_DIPSETTING(    0x01, "30000" )
+        PORT_DIPSETTING(    0x03, "40000" )
+        PORT_DIPNAME( 0x0c, 0x00, DEF_STR ( Difficulty ) )
         PORT_DIPSETTING(    0x00, "Easy" )
-        PORT_DIPNAME( 0x30, 0x30, "Number of Ships", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x30, "5 Ships" )
-        PORT_DIPSETTING(    0x10, "4 Ships" )
-        PORT_DIPSETTING(    0x20, "3 Ships" )
-        PORT_DIPSETTING(    0x00, "2 Ships" )
-        PORT_DIPNAME( 0x40, 0x00, "Attract Sound", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x40, "Off" )
-        PORT_DIPSETTING(    0x00, "On" )
-        PORT_DIPNAME( 0x80, 0x80, "Orientation", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x80, "Upright" )
-        PORT_DIPSETTING(    0x00, "Cocktail" )
+        PORT_DIPSETTING(    0x08, "Normal" )
+        PORT_DIPSETTING(    0x04, "Hard" )
+        PORT_DIPSETTING(    0x0c, "Very Hard" )
+        PORT_DIPNAME( 0x30, 0x30, DEF_STR ( Lives ) )
+        PORT_DIPSETTING(    0x00, "2" )
+        PORT_DIPSETTING(    0x20, "3" )
+        PORT_DIPSETTING(    0x10, "4" )
+        PORT_DIPSETTING(    0x30, "5" )
+        PORT_DIPNAME( 0x40, 0x00, DEF_STR ( Demo_Sounds) )
+        PORT_DIPSETTING(    0x40, DEF_STR ( Off ) )
+        PORT_DIPSETTING(    0x00, DEF_STR ( On ) )
+        PORT_DIPNAME( 0x80, 0x80, DEF_STR ( Cabinet ) )
+        PORT_DIPSETTING(    0x80, DEF_STR ( Upright ) )
+        PORT_DIPSETTING(    0x00, DEF_STR ( Cocktail ) )
 
-	PORT_START	/* FAKE */
-        /* This fake input port is used for DIP Switch 2 */
-        PORT_DIPNAME( 0x0F, 0x0C, "Coins/Credits (R)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x08, "3 / 1" )
-        PORT_DIPSETTING(    0x04, "2 / 1" )
-        PORT_DIPSETTING(    0x0C, "1 / 1" )
-        PORT_DIPSETTING(    0x02, "1 / 2" )
-        PORT_DIPSETTING(    0x0A, "1 / 3" )
-        PORT_DIPSETTING(    0x06, "1 / 4" )
-        PORT_DIPSETTING(    0x0E, "1 / 5" )
-        PORT_DIPSETTING(    0x01, "1 / 6" )
-        PORT_DIPSETTING(    0x09, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x05, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0x0D, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x03, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0x0B, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x07, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0x0F, "1/2/3/4 / 2/4/6/9" )
+        COINAGE
 
-        PORT_DIPNAME( 0xF0, 0xC0, "Coins/Credits (L)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x80, "3 / 1" )
-        PORT_DIPSETTING(    0x40, "2 / 1" )
-        PORT_DIPSETTING(    0xC0, "1 / 1" )
-        PORT_DIPSETTING(    0x20, "1 / 2" )
-        PORT_DIPSETTING(    0xA0, "1 / 3" )
-        PORT_DIPSETTING(    0x60, "1 / 4" )
-        PORT_DIPSETTING(    0xE0, "1 / 5" )
-        PORT_DIPSETTING(    0x10, "1 / 6" )
-        PORT_DIPSETTING(    0x90, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x50, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0xD0, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x30, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0xB0, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x70, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0xF0, "1/2/3/4 / 2/4/6/9" )
 
 INPUT_PORTS_END
 
-INPUT_PORTS_START( zektor_input_ports )
+INPUT_PORTS_START( zektor )
 	PORT_START	/* IN0 - port 0xf8 */
 	/* The next bit is referred to as the Service switch in the self test - it just adds a credit */
-	PORT_BITX( 0x20, IP_ACTIVE_LOW, IPT_COIN3 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x40, IP_ACTIVE_LOW, IPT_COIN2 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x80, IP_ACTIVE_LOW, IPT_COIN1 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
+	PORT_BIT_IMPULSE( 0x20, IP_ACTIVE_LOW, IPT_COIN3, 3 )
+	PORT_BIT_IMPULSE( 0x40, IP_ACTIVE_LOW, IPT_COIN2, 3 )
+	PORT_BIT_IMPULSE( 0x80, IP_ACTIVE_LOW, IPT_COIN1, 3 )
 
 	PORT_START	/* IN1 - port 0xf9 */
 	PORT_BIT ( 0xf0, IP_ACTIVE_LOW, IPT_UNUSED )
@@ -378,75 +395,45 @@ INPUT_PORTS_START( zektor_input_ports )
 	PORT_START	/* IN5 - FAKE */
 	/* This fake input port is used to get the status of the F2 key, */
 	/* and activate the test mode, which is triggered by a NMI */
-	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
+	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, DEF_STR( Service_Mode ), KEYCODE_F2, IP_JOY_NONE )
 
 	PORT_START	/* FAKE */
-        /* This fake input port is used for DIP Switch 1 */
-        PORT_DIPNAME( 0x0c, 0x00, "Difficulty", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x0c, "Very Hard" )
-        PORT_DIPSETTING(    0x04, "Hard" )
-        PORT_DIPSETTING(    0x08, "Moderate" )
-        PORT_DIPSETTING(    0x00, "Easy" )
-        PORT_DIPNAME( 0x30, 0x30, "Number of Ships", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x30, "5 Ships" )
-        PORT_DIPSETTING(    0x10, "4 Ships" )
-        PORT_DIPSETTING(    0x20, "3 Ships" )
-        PORT_DIPSETTING(    0x00, "2 Ships" )
-        PORT_DIPNAME( 0x40, 0x00, "Attract Sound", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x40, "Off" )
-        PORT_DIPSETTING(    0x00, "On" )
-        PORT_DIPNAME( 0x80, 0x80, "Orientation", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x80, "Upright" )
-        PORT_DIPSETTING(    0x00, "Cocktail" )
+	/* This fake input port is used for DIP Switch 1 */
+	PORT_DIPNAME( 0x03, 0x01, DEF_STR ( Bonus_Life ) )
+	PORT_DIPSETTING(    0x03, "10000" )
+	PORT_DIPSETTING(    0x01, "20000" )
+	PORT_DIPSETTING(    0x02, "30000" )
+	PORT_DIPSETTING(    0x00, "None" )
+	PORT_DIPNAME( 0x0c, 0x00, DEF_STR ( Difficulty ) )
+	PORT_DIPSETTING(    0x00, "Easy" )
+	PORT_DIPSETTING(    0x08, "Normal" )
+	PORT_DIPSETTING(    0x04, "Hard" )
+	PORT_DIPSETTING(    0x0c, "Very Hard" )
+	PORT_DIPNAME( 0x30, 0x30, DEF_STR ( Lives ) )
+	PORT_DIPSETTING(    0x00, "2" )
+	PORT_DIPSETTING(    0x20, "3" )
+	PORT_DIPSETTING(    0x10, "4" )
+	PORT_DIPSETTING(    0x30, "5" )
+	PORT_DIPNAME( 0x40, 0x00, DEF_STR ( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x40, DEF_STR ( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR ( On ) )
+	PORT_DIPNAME( 0x80, 0x80, DEF_STR ( Cabinet ) )
+	PORT_DIPSETTING(    0x80, DEF_STR ( Upright ) )
+	PORT_DIPSETTING(    0x00, DEF_STR ( Cocktail ) )
 
-	PORT_START	/* FAKE */
-        /* This fake input port is used for DIP Switch 2 */
-        PORT_DIPNAME( 0x0F, 0x0C, "Coins/Credits (R)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x08, "3 / 1" )
-        PORT_DIPSETTING(    0x04, "2 / 1" )
-        PORT_DIPSETTING(    0x0C, "1 / 1" )
-        PORT_DIPSETTING(    0x02, "1 / 2" )
-        PORT_DIPSETTING(    0x0A, "1 / 3" )
-        PORT_DIPSETTING(    0x06, "1 / 4" )
-        PORT_DIPSETTING(    0x0E, "1 / 5" )
-        PORT_DIPSETTING(    0x01, "1 / 6" )
-        PORT_DIPSETTING(    0x09, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x05, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0x0D, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x03, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0x0B, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x07, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0x0F, "1/2/3/4 / 2/4/6/9" )
+	COINAGE
 
-        PORT_DIPNAME( 0xF0, 0xC0, "Coins/Credits (L)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x80, "3 / 1" )
-        PORT_DIPSETTING(    0x40, "2 / 1" )
-        PORT_DIPSETTING(    0xC0, "1 / 1" )
-        PORT_DIPSETTING(    0x20, "1 / 2" )
-        PORT_DIPSETTING(    0xA0, "1 / 3" )
-        PORT_DIPSETTING(    0x60, "1 / 4" )
-        PORT_DIPSETTING(    0xE0, "1 / 5" )
-        PORT_DIPSETTING(    0x10, "1 / 6" )
-        PORT_DIPSETTING(    0x90, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x50, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0xD0, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x30, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0xB0, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x70, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0xF0, "1/2/3/4 / 2/4/6/9" )
-
-        PORT_START      /* IN8 - FAKE port for the dial */
-	PORT_ANALOG ( 0xff, 0x00, IPT_DIAL|IPF_CENTER, 100, 0, 0, 0 )
+	PORT_START      /* IN8 - FAKE port for the dial */
+	PORT_ANALOG( 0xff, 0x00, IPT_DIAL | IPF_CENTER, 100, 10, 0, 0 )
 INPUT_PORTS_END
 
-INPUT_PORTS_START( startrek_input_ports )
+
+INPUT_PORTS_START( startrek )
 	PORT_START	/* IN0 - port 0xf8 */
 	/* The next bit is referred to as the Service switch in the self test - it just adds a credit */
-	PORT_BITX( 0x20, IP_ACTIVE_LOW, IPT_COIN3 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x40, IP_ACTIVE_LOW, IPT_COIN2 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x80, IP_ACTIVE_LOW, IPT_COIN1 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
+	PORT_BIT_IMPULSE( 0x20, IP_ACTIVE_LOW, IPT_COIN3, 3 )
+	PORT_BIT_IMPULSE( 0x40, IP_ACTIVE_LOW, IPT_COIN2, 3 )
+	PORT_BIT_IMPULSE( 0x80, IP_ACTIVE_LOW, IPT_COIN1, 3 )
 
 	PORT_START	/* IN1 - port 0xf9 */
 	PORT_BIT ( 0xf0, IP_ACTIVE_LOW, IPT_UNUSED )
@@ -469,80 +456,104 @@ INPUT_PORTS_START( startrek_input_ports )
 	PORT_START	/* IN5 - FAKE */
 	/* This fake input port is used to get the status of the F2 key, */
 	/* and activate the test mode, which is triggered by a NMI */
-	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
+	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, DEF_STR( Service_Mode ), KEYCODE_F2, IP_JOY_NONE )
 
 	PORT_START	/* FAKE */
-        /* This fake input port is used for DIP Switch 1 */
-        PORT_DIPNAME( 0x03, 0x01, "Bonus Ship", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x03, "40K Points" )
-        PORT_DIPSETTING(    0x01, "30K Points" )
-        PORT_DIPSETTING(    0x02, "20K Points" )
-        PORT_DIPSETTING(    0x00, "10K Points" )
-        PORT_DIPNAME( 0x0c, 0x00, "Difficulty", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x0c, "Tournament" )
-        PORT_DIPSETTING(    0x04, "Hard" )
-        PORT_DIPSETTING(    0x08, "Medium" )
-        PORT_DIPSETTING(    0x00, "Easy" )
-        PORT_DIPNAME( 0x30, 0x30, "Photon Torpedoes", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x30, "4" )
-        PORT_DIPSETTING(    0x10, "3" )
-        PORT_DIPSETTING(    0x20, "2" )
-        PORT_DIPSETTING(    0x00, "1" )
-        PORT_DIPNAME( 0x40, 0x00, "Attract Sound", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x40, "Off" )
-        PORT_DIPSETTING(    0x00, "On" )
-        PORT_DIPNAME( 0x80, 0x80, "Orientation", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x80, "Upright" )
-        PORT_DIPSETTING(    0x00, "Cocktail" )
+	/* This fake input port is used for DIP Switch 1 */
+	PORT_DIPNAME( 0x03, 0x01, DEF_STR ( Bonus_Life ) )
+	PORT_DIPSETTING(    0x00, "10000" )
+	PORT_DIPSETTING(    0x02, "20000" )
+	PORT_DIPSETTING(    0x01, "30000" )
+	PORT_DIPSETTING(    0x03, "40000" )
+	PORT_DIPNAME( 0x0c, 0x00, DEF_STR ( Difficulty ) )
+	PORT_DIPSETTING(    0x00, "Easy" )
+	PORT_DIPSETTING(    0x08, "Medium" )
+	PORT_DIPSETTING(    0x04, "Hard" )
+	PORT_DIPSETTING(    0x0c, "Tournament" )
+	PORT_DIPNAME( 0x30, 0x30, "Photon Torpedoes" )
+	PORT_DIPSETTING(    0x00, "1" )
+	PORT_DIPSETTING(    0x20, "2" )
+	PORT_DIPSETTING(    0x10, "3" )
+	PORT_DIPSETTING(    0x30, "4" )
+	PORT_DIPNAME( 0x40, 0x00, "Demo Sounds?" )
+	PORT_DIPSETTING(    0x40, DEF_STR ( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR ( On ) )
+	PORT_DIPNAME( 0x80, 0x80, DEF_STR ( Cabinet ) )
+	PORT_DIPSETTING(    0x80, DEF_STR ( Upright ) )
+	PORT_DIPSETTING(    0x00, DEF_STR ( Cocktail ) )
 
-	PORT_START	/* FAKE */
-        /* This fake input port is used for DIP Switch 2 */
-        PORT_DIPNAME( 0x0F, 0x0C, "Coins/Credits (R)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x08, "3 / 1" )
-        PORT_DIPSETTING(    0x04, "2 / 1" )
-        PORT_DIPSETTING(    0x0C, "1 / 1" )
-        PORT_DIPSETTING(    0x02, "1 / 2" )
-        PORT_DIPSETTING(    0x0A, "1 / 3" )
-        PORT_DIPSETTING(    0x06, "1 / 4" )
-        PORT_DIPSETTING(    0x0E, "1 / 5" )
-        PORT_DIPSETTING(    0x01, "1 / 6" )
-        PORT_DIPSETTING(    0x09, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x05, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0x0D, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x03, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0x0B, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x07, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0x0F, "1/2/3/4 / 2/4/6/9" )
+	COINAGE
 
-        PORT_DIPNAME( 0xF0, 0xC0, "Coins/Credits (L)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x80, "3 / 1" )
-        PORT_DIPSETTING(    0x40, "2 / 1" )
-        PORT_DIPSETTING(    0xC0, "1 / 1" )
-        PORT_DIPSETTING(    0x20, "1 / 2" )
-        PORT_DIPSETTING(    0xA0, "1 / 3" )
-        PORT_DIPSETTING(    0x60, "1 / 4" )
-        PORT_DIPSETTING(    0xE0, "1 / 5" )
-        PORT_DIPSETTING(    0x10, "1 / 6" )
-        PORT_DIPSETTING(    0x90, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x50, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0xD0, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x30, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0xB0, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x70, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0xF0, "1/2/3/4 / 2/4/6/9" )
-
-        PORT_START      /* IN8 - dummy port for the dial */
-	PORT_ANALOG ( 0xff, 0x00, IPT_DIAL|IPF_CENTER, 100, 0, 0, 0 )
+	PORT_START      /* IN8 - dummy port for the dial */
+	PORT_ANALOG( 0xff, 0x00, IPT_DIAL | IPF_CENTER, 100, 10, 0, 0 )
 INPUT_PORTS_END
 
-INPUT_PORTS_START( elim2_input_ports )
+
+INPUT_PORTS_START( tacscan )
 	PORT_START	/* IN0 - port 0xf8 */
 	/* The next bit is referred to as the Service switch in the self test - it just adds a credit */
-	PORT_BITX( 0x20, IP_ACTIVE_LOW, IPT_COIN3 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x40, IP_ACTIVE_LOW, IPT_COIN2 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x80, IP_ACTIVE_LOW, IPT_COIN1 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
+	PORT_BIT_IMPULSE( 0x20, IP_ACTIVE_LOW, IPT_COIN3, 3 )
+	PORT_BIT_IMPULSE( 0x40, IP_ACTIVE_LOW, IPT_COIN2, 3 )
+	PORT_BIT_IMPULSE( 0x80, IP_ACTIVE_LOW, IPT_COIN1, 3 )
+
+	PORT_START	/* IN1 - port 0xf9 */
+	PORT_BIT ( 0xf0, IP_ACTIVE_LOW, IPT_UNUSED )
+
+	PORT_START	/* IN2 - port 0xfa */
+	PORT_BIT ( 0xf0, IP_ACTIVE_LOW, IPT_UNUSED )
+
+	PORT_START	/* IN3 - port 0xfb */
+	PORT_BIT ( 0xf0, IP_ACTIVE_LOW, IPT_UNUSED )
+
+	PORT_START	/* IN4 - port 0xfc - read in machine/sega.c */
+	PORT_BIT ( 0x01, IP_ACTIVE_HIGH, IPT_START1 )
+	PORT_BIT ( 0x02, IP_ACTIVE_HIGH, IPT_START2 )
+	PORT_BIT ( 0x04, IP_ACTIVE_HIGH, IPT_BUTTON1 )
+	PORT_BIT ( 0x08, IP_ACTIVE_HIGH, IPT_BUTTON2 )
+	PORT_BIT ( 0xf0, IP_ACTIVE_HIGH, IPT_UNUSED )
+
+	PORT_START	/* IN5 - FAKE */
+	/* This fake input port is used to get the status of the F2 key, */
+	/* and activate the test mode, which is triggered by a NMI */
+	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, DEF_STR( Service_Mode ), KEYCODE_F2, IP_JOY_NONE )
+
+	PORT_START	/* FAKE */
+	/* This fake input port is used for DIP Switch 1 */
+	PORT_DIPNAME( 0x03, 0x01, DEF_STR ( Bonus_Life ) )
+	PORT_DIPSETTING(    0x03, "10000" )
+	PORT_DIPSETTING(    0x01, "20000" )
+	PORT_DIPSETTING(    0x02, "30000" )
+	PORT_DIPSETTING(    0x00, "None" )
+	PORT_DIPNAME( 0x0c, 0x00, DEF_STR ( Difficulty ) )
+	PORT_DIPSETTING(    0x00, "Easy" )
+	PORT_DIPSETTING(    0x08, "Normal" )
+	PORT_DIPSETTING(    0x04, "Hard" )
+	PORT_DIPSETTING(    0x0c, "Very Hard" )
+	PORT_DIPNAME( 0x30, 0x30, "Number of Ships" )
+	PORT_DIPSETTING(    0x00, "2" )
+	PORT_DIPSETTING(    0x20, "4" )
+	PORT_DIPSETTING(    0x10, "6" )
+	PORT_DIPSETTING(    0x30, "8" )
+	PORT_DIPNAME( 0x40, 0x00, "Demo Sounds?" )
+	PORT_DIPSETTING(    0x40, DEF_STR ( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR ( On ) )
+	PORT_DIPNAME( 0x80, 0x80, DEF_STR ( Cabinet ) )
+	PORT_DIPSETTING(    0x80, DEF_STR ( Upright ) )
+	PORT_DIPSETTING(    0x00, DEF_STR ( Cocktail ) )
+
+	COINAGE
+
+	PORT_START      /* IN8 - FAKE port for the dial */
+	PORT_ANALOG( 0xff, 0x00, IPT_DIAL | IPF_CENTER, 100, 10, 0, 0 )
+INPUT_PORTS_END
+
+
+INPUT_PORTS_START( elim2 )
+	PORT_START	/* IN0 - port 0xf8 */
+	/* The next bit is referred to as the Service switch in the self test - it just adds a credit */
+	PORT_BIT_IMPULSE( 0x20, IP_ACTIVE_LOW, IPT_COIN3, 3 )
+	PORT_BIT_IMPULSE( 0x40, IP_ACTIVE_LOW, IPT_COIN2, 3 )
+	PORT_BIT_IMPULSE( 0x80, IP_ACTIVE_LOW, IPT_COIN1, 3 )
 
 	PORT_START	/* IN1 - port 0xf9 */
 	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_START2 )
@@ -569,76 +580,41 @@ INPUT_PORTS_START( elim2_input_ports )
 	PORT_START	/* IN5 - FAKE */
 	/* This fake input port is used to get the status of the F2 key, */
 	/* and activate the test mode, which is triggered by a NMI */
-	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
+	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, DEF_STR( Service_Mode ), KEYCODE_F2, IP_JOY_NONE )
 
 	PORT_START	/* FAKE */
         /* This fake input port is used for DIP Switch 1 */
-        PORT_DIPNAME( 0x03, 0x02, "Bonus Ship", IP_KEY_NONE )
+        PORT_DIPNAME( 0x03, 0x02, DEF_STR ( Bonus_Life ) )
+        PORT_DIPSETTING(    0x01, "10000" )
+        PORT_DIPSETTING(    0x02, "20000" )
+        PORT_DIPSETTING(    0x00, "30000" )
         PORT_DIPSETTING(    0x03, "None" )
-        PORT_DIPSETTING(    0x00, "30K Points" )
-        PORT_DIPSETTING(    0x02, "20K Points" )
-        PORT_DIPSETTING(    0x01, "10K Points" )
-        PORT_DIPNAME( 0x0c, 0x00, "Difficulty", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x0c, "Very Hard" )
-        PORT_DIPSETTING(    0x04, "Hard" )
-        PORT_DIPSETTING(    0x08, "Moderate" )
+        PORT_DIPNAME( 0x0c, 0x00, DEF_STR ( Difficulty ) )
         PORT_DIPSETTING(    0x00, "Easy" )
-        PORT_DIPNAME( 0x30, 0x30, "Number of Ships", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x30, "5 Ships" )
-        PORT_DIPSETTING(    0x10, "4 Ships" )
-        PORT_DIPSETTING(    0x20, "3 Ships" )
-        PORT_DIPSETTING(    0x00, "2 Ships" )
-        PORT_DIPNAME( 0x80, 0x80, "Orientation", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x80, "Upright" )
-        PORT_DIPSETTING(    0x00, "Cocktail" )
+        PORT_DIPSETTING(    0x08, "Normal" )
+        PORT_DIPSETTING(    0x04, "Hard" )
+        PORT_DIPSETTING(    0x0c, "Very Hard" )
+        PORT_DIPNAME( 0x30, 0x20, DEF_STR ( Lives ) )
+        PORT_DIPSETTING(    0x20, "3" )
+        PORT_DIPSETTING(    0x10, "4" )
+        PORT_DIPSETTING(    0x00, "5" )
+        /* 0x30 gives 5 Lives */
+        PORT_DIPNAME( 0x80, 0x80, DEF_STR ( Cabinet ) )
+        PORT_DIPSETTING(    0x80, DEF_STR ( Upright ) )
+        PORT_DIPSETTING(    0x00, DEF_STR ( Cocktail ) )
 
-	PORT_START	/* FAKE */
-        /* This fake input port is used for DIP Switch 2 */
-        PORT_DIPNAME( 0x0F, 0x0C, "Coins/Credits (R)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x08, "3 / 1" )
-        PORT_DIPSETTING(    0x04, "2 / 1" )
-        PORT_DIPSETTING(    0x0C, "1 / 1" )
-        PORT_DIPSETTING(    0x02, "1 / 2" )
-        PORT_DIPSETTING(    0x0A, "1 / 3" )
-        PORT_DIPSETTING(    0x06, "1 / 4" )
-        PORT_DIPSETTING(    0x0E, "1 / 5" )
-        PORT_DIPSETTING(    0x01, "1 / 6" )
-        PORT_DIPSETTING(    0x09, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x05, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0x0D, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x03, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0x0B, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x07, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0x0F, "1/2/3/4 / 2/4/6/9" )
-
-        PORT_DIPNAME( 0xF0, 0xC0, "Coins/Credits (L)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x80, "3 / 1" )
-        PORT_DIPSETTING(    0x40, "2 / 1" )
-        PORT_DIPSETTING(    0xC0, "1 / 1" )
-        PORT_DIPSETTING(    0x20, "1 / 2" )
-        PORT_DIPSETTING(    0xA0, "1 / 3" )
-        PORT_DIPSETTING(    0x60, "1 / 4" )
-        PORT_DIPSETTING(    0xE0, "1 / 5" )
-        PORT_DIPSETTING(    0x10, "1 / 6" )
-        PORT_DIPSETTING(    0x90, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x50, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0xD0, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x30, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0xB0, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x70, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0xF0, "1/2/3/4 / 2/4/6/9" )
+        COINAGE
 
 INPUT_PORTS_END
 
-INPUT_PORTS_START( elim4_input_ports )
+
+INPUT_PORTS_START( elim4 )
 	PORT_START	/* IN0 - port 0xf8 */
 	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 )
 	/* The next bit is referred to as the Service switch in the self test - it just adds a credit */
-	PORT_BITX( 0x20, IP_ACTIVE_LOW, IPT_COIN1 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x40, IP_ACTIVE_LOW, IPT_COIN2 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x80, IP_ACTIVE_LOW, IPT_COIN3 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
+	PORT_BIT_IMPULSE( 0x20, IP_ACTIVE_LOW, IPT_COIN1, 3 )
+	PORT_BIT_IMPULSE( 0x40, IP_ACTIVE_LOW, IPT_COIN2, 3 )
+	PORT_BIT_IMPULSE( 0x80, IP_ACTIVE_LOW, IPT_COIN3, 3 )
 
 	PORT_START	/* IN1 - port 0xf9 */
 	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_BUTTON2 )
@@ -669,92 +645,39 @@ INPUT_PORTS_START( elim4_input_ports )
 	PORT_START	/* IN5 - FAKE */
 	/* This fake input port is used to get the status of the F2 key, */
 	/* and activate the test mode, which is triggered by a NMI */
-	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
+	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_SERVICE, DEF_STR( Service_Mode ), KEYCODE_F2, IP_JOY_NONE )
 
 	PORT_START	/* FAKE */
         /* This fake input port is used for DIP Switch 1 */
-        PORT_DIPNAME( 0x03, 0x02, "Bonus Ship", IP_KEY_NONE )
+        PORT_DIPNAME( 0x03, 0x02, DEF_STR ( Bonus_Life ) )
+        PORT_DIPSETTING(    0x01, "10000" )
+        PORT_DIPSETTING(    0x02, "20000" )
+        PORT_DIPSETTING(    0x00, "30000" )
         PORT_DIPSETTING(    0x03, "None" )
-        PORT_DIPSETTING(    0x00, "30K Points" )
-        PORT_DIPSETTING(    0x02, "20K Points" )
-        PORT_DIPSETTING(    0x01, "10K Points" )
-        PORT_DIPNAME( 0x0c, 0x00, "Difficulty", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x0c, "Very Hard" )
-        PORT_DIPSETTING(    0x04, "Hard" )
-        PORT_DIPSETTING(    0x08, "Moderate" )
+        PORT_DIPNAME( 0x0c, 0x00, DEF_STR ( Difficulty ) )
         PORT_DIPSETTING(    0x00, "Easy" )
-        PORT_DIPNAME( 0x30, 0x30, "Number of Ships", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x30, "5 Ships" )
-        PORT_DIPSETTING(    0x10, "4 Ships" )
-        PORT_DIPSETTING(    0x20, "3 Ships" )
-        PORT_DIPSETTING(    0x00, "2 Ships" )
-        PORT_DIPNAME( 0x80, 0x80, "Orientation", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x80, "Upright" )
-        PORT_DIPSETTING(    0x00, "Cocktail" )
+        PORT_DIPSETTING(    0x08, "Normal" )
+        PORT_DIPSETTING(    0x04, "Hard" )
+        PORT_DIPSETTING(    0x0c, "Very Hard" )
+        PORT_DIPNAME( 0x30, 0x30, DEF_STR ( Lives ) )
+        PORT_DIPSETTING(    0x20, "3" )
+        PORT_DIPSETTING(    0x10, "4" )
+        PORT_DIPSETTING(    0x00, "5" )
+        /* 0x30 gives 5 Lives */
+        PORT_DIPNAME( 0x80, 0x80, DEF_STR ( Cabinet ) )
+        PORT_DIPSETTING(    0x80, DEF_STR ( Upright ) )
+        PORT_DIPSETTING(    0x00, DEF_STR ( Cocktail ) )
 
-	PORT_START	/* FAKE */
-        /* This fake input port is used for DIP Switch 2 */
-        PORT_DIPNAME( 0x0F, 0x0C, "Coins/Credits (R)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x08, "3 / 1" )
-        PORT_DIPSETTING(    0x04, "2 / 1" )
-        PORT_DIPSETTING(    0x0C, "1 / 1" )
-        PORT_DIPSETTING(    0x02, "1 / 2" )
-        PORT_DIPSETTING(    0x0A, "1 / 3" )
-        PORT_DIPSETTING(    0x06, "1 / 4" )
-        PORT_DIPSETTING(    0x0E, "1 / 5" )
-        PORT_DIPSETTING(    0x01, "1 / 6" )
-        PORT_DIPSETTING(    0x09, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x05, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0x0D, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x03, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0x0B, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x07, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0x0F, "1/2/3/4 / 2/4/6/9" )
-
-        PORT_DIPNAME( 0xF0, 0xC0, "Coins/Credits (L)", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x00, "4 / 1" )
-        PORT_DIPSETTING(    0x80, "3 / 1" )
-        PORT_DIPSETTING(    0x40, "2 / 1" )
-        PORT_DIPSETTING(    0xC0, "1 / 1" )
-        PORT_DIPSETTING(    0x20, "1 / 2" )
-        PORT_DIPSETTING(    0xA0, "1 / 3" )
-        PORT_DIPSETTING(    0x60, "1 / 4" )
-        PORT_DIPSETTING(    0xE0, "1 / 5" )
-        PORT_DIPSETTING(    0x10, "1 / 6" )
-        PORT_DIPSETTING(    0x90, "2/4/5 / 1/2/3" )
-        PORT_DIPSETTING(    0x50, "2/4 / 1/3" )
-        PORT_DIPSETTING(    0xD0, "1/2/3/4/5 / 1/2/3/4/6" )
-        PORT_DIPSETTING(    0x30, "1/2/3/4 / 1/2/3/5" )
-        PORT_DIPSETTING(    0xB0, "1/2 / 1/3" )
-        PORT_DIPSETTING(    0x70, "1/2/3/4/5 / 2/4/6/8/11" )
-        PORT_DIPSETTING(    0xF0, "1/2/3/4 / 2/4/6/9" )
+        PORT_START /* That is the coinage port in all the other games */
+        PORT_BIT ( 0xff, IP_ACTIVE_LOW, IPT_UNKNOWN )
 
         PORT_START      /* IN8 - FAKE - port 0xfc - read in machine/sega.c */
-	PORT_BITX( 0x01, IP_ACTIVE_HIGH, IPT_COIN1 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x02, IP_ACTIVE_HIGH, IPT_COIN2 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x04, IP_ACTIVE_HIGH, IPT_COIN3 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
-	PORT_BITX( 0x08, IP_ACTIVE_HIGH, IPT_COIN4 | IPF_IMPULSE, IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 3 )
+	PORT_BIT_IMPULSE( 0x01, IP_ACTIVE_HIGH, IPT_COIN1, 3 )
+	PORT_BIT_IMPULSE( 0x02, IP_ACTIVE_HIGH, IPT_COIN2, 3 )
+	PORT_BIT_IMPULSE( 0x04, IP_ACTIVE_HIGH, IPT_COIN3, 3 )
+	PORT_BIT_IMPULSE( 0x08, IP_ACTIVE_HIGH, IPT_COIN4, 3 )
 	PORT_BIT ( 0xf0, IP_ACTIVE_HIGH, IPT_UNUSED )
 INPUT_PORTS_END
-
-
-static struct GfxLayout fakelayout =
-{
-	1,1,
-	0,
-	1,
-	{ 0 },
-	{ 0 },
-	{ 0 },
-	0
-};
-
-static struct GfxDecodeInfo gfxdecodeinfo[] =
-{
-	{ 0, 0,      &fakelayout,     0, 256 },
-	{ -1 } /* end of array */
-};
 
 
 /***************************************************************************
@@ -763,403 +686,41 @@ static struct GfxDecodeInfo gfxdecodeinfo[] =
 
 ***************************************************************************/
 
-void spacfury_decode(void)
+void init_spacfury(void)
 {
     /* This game uses the 315-0064 security chip */
     sega_security(64);
 }
 
-void zektor_decode(void)
+void init_zektor(void)
 {
     /* This game uses the 315-0082 security chip */
     sega_security(82);
 }
 
-void elim2_decode(void)
+void init_elim2(void)
 {
     /* This game uses the 315-0070 security chip */
     sega_security(70);
 }
 
-void elim4_decode(void)
+void init_elim4(void)
 {
     /* This game uses the 315-0076 security chip */
     sega_security(76);
 }
 
-void startrek_decode(void)
+void init_startrek(void)
 {
     /* This game uses the 315-0064 security chip */
     sega_security(64);
 }
 
-void tacscan_decode(void)
+void init_tacscan(void)
 {
     /* This game uses the 315-0076 security chip */
     sega_security(76);
 }
-
-/***************************************************************************
-
-  Game ROMs
-
-***************************************************************************/
-
-ROM_START( spacfury_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-        ROM_LOAD( "969A.U25", 0x0000, 0x0800, 0xcc7c8410 )
-        ROM_LOAD( "960A.U1", 0x0800, 0x0800, 0x8a0f3d2f )
-        ROM_LOAD( "961A.U2", 0x1000, 0x0800, 0x87019ccb )
-        ROM_LOAD( "962A.U3", 0x1800, 0x0800, 0x6e505c6a )
-        ROM_LOAD( "963A.U4", 0x2000, 0x0800, 0x23de181e )
-        ROM_LOAD( "964A.U5", 0x2800, 0x0800, 0x059d031f )
-        ROM_LOAD( "965A.U6", 0x3000, 0x0800, 0xf5ff830d )
-        ROM_LOAD( "966A.U7", 0x3800, 0x0800, 0x0f83c95f )
-        ROM_LOAD( "967A.U8", 0x4000, 0x0800, 0xb48ed0b6 )
-        ROM_LOAD( "968A.U9", 0x4800, 0x0800, 0xd8987bc8 )
-ROM_END
-
-ROM_START( spacfurc_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-        ROM_LOAD( "969C.U25", 0x0000, 0x0800, 0x63ef8173 )
-        ROM_LOAD( "960C.U1", 0x0800, 0x0800, 0x5f84cd72 )
-        ROM_LOAD( "961C.U2", 0x1000, 0x0800, 0x307344e9 )
-        ROM_LOAD( "962C.U3", 0x1800, 0x0800, 0xa54c56c0 )
-        ROM_LOAD( "963C.U4", 0x2000, 0x0800, 0x6eaf448f )
-        ROM_LOAD( "964C.U5", 0x2800, 0x0800, 0xaddd6913 )
-        ROM_LOAD( "965C.U6", 0x3000, 0x0800, 0xfd79703b )
-        ROM_LOAD( "966C.U7", 0x3800, 0x0800, 0x3feb6bf5 )
-        ROM_LOAD( "967C.U8", 0x4000, 0x0800, 0x46ac086a )
-        ROM_LOAD( "968C.U9", 0x4800, 0x0800, 0x413125b3 )
-ROM_END
-
-ROM_START( zektor_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "1611.cpu", 0x0000, 0x0800, 0x983937af )
-	ROM_LOAD( "1586.rom", 0x0800, 0x0800, 0xfb3c2528 )
-	ROM_LOAD( "1587.rom", 0x1000, 0x0800, 0x7b9683a8 )
-	ROM_LOAD( "1588.rom", 0x1800, 0x0800, 0xda1f5c49 )
-	ROM_LOAD( "1589.rom", 0x2000, 0x0800, 0x8111734f )
-	ROM_LOAD( "1590.rom", 0x2800, 0x0800, 0xf8e0690e )
-	ROM_LOAD( "1591.rom", 0x3000, 0x0800, 0x75fc709a )
-	ROM_LOAD( "1592.rom", 0x3800, 0x0800, 0x649c649c )
-	ROM_LOAD( "1593.rom", 0x4000, 0x0800, 0xe89e17f4 )
-	ROM_LOAD( "1594.rom", 0x4800, 0x0800, 0x7039e1c3 )
-	ROM_LOAD( "1595.rom", 0x5000, 0x0800, 0x22aa812c )
-	ROM_LOAD( "1596.rom", 0x5800, 0x0800, 0x4c2b25fd )
-	ROM_LOAD( "1597.rom", 0x6000, 0x0800, 0xe6dd26d3 )
-	ROM_LOAD( "1598.rom", 0x6800, 0x0800, 0xeb7e8ae4 )
-	ROM_LOAD( "1599.rom", 0x7000, 0x0800, 0x7ff8950e )
-	ROM_LOAD( "1600.rom", 0x7800, 0x0800, 0xb0dad8fe )
-	ROM_LOAD( "1601.rom", 0x8000, 0x0800, 0xfff0224c )
-	ROM_LOAD( "1602.rom", 0x8800, 0x0800, 0xb76d9577 )
-	ROM_LOAD( "1603.rom", 0x9000, 0x0800, 0xa1975c5b )
-	ROM_LOAD( "1604.rom", 0x9800, 0x0800, 0x8fe3a997 )
-	ROM_LOAD( "1605.rom", 0xa000, 0x0800, 0xde90c85c )
-	ROM_LOAD( "1606.rom", 0xa800, 0x0800, 0x68a20d5a )
-ROM_END
-
-ROM_START( tacscan_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "1711a", 0x0000, 0x0800, 0xc6225a26 )
-	ROM_LOAD( "1670c", 0x0800, 0x0800, 0x6421f9df )
-	ROM_LOAD( "1671a", 0x1000, 0x0800, 0xdb17a05f )
-	ROM_LOAD( "1672a", 0x1800, 0x0800, 0x4f46f708 )
-	ROM_LOAD( "1673a", 0x2000, 0x0800, 0x27eab072 )
-	ROM_LOAD( "1674a", 0x2800, 0x0800, 0x7a8b8a85 )
-	ROM_LOAD( "1675a", 0x3000, 0x0800, 0xba99816d )
-	ROM_LOAD( "1676a", 0x3800, 0x0800, 0xcc193697 )
-	ROM_LOAD( "1677a", 0x4000, 0x0800, 0x50c26ea8 )
-	ROM_LOAD( "1678b", 0x4800, 0x0800, 0x0eb69a4a )
-	ROM_LOAD( "1679a", 0x5000, 0x0800, 0xf50d05b1 )
-	ROM_LOAD( "1680a", 0x5800, 0x0800, 0x3c641fb0 )
-	ROM_LOAD( "1681a", 0x6000, 0x0800, 0x3e079d8b )
-	ROM_LOAD( "1682a", 0x6800, 0x0800, 0x9e75d4d1 )
-	ROM_LOAD( "1683a", 0x7000, 0x0800, 0xdbd24e9c )
-	ROM_LOAD( "1684a", 0x7800, 0x0800, 0x8f92fd3c )
-	ROM_LOAD( "1685a", 0x8000, 0x0800, 0x79993241 )
-	ROM_LOAD( "1686a", 0x8800, 0x0800, 0x0f2c10d2 )
-	ROM_LOAD( "1687a", 0x9000, 0x0800, 0x2b705294 )
-	ROM_LOAD( "1688a", 0x9800, 0x0800, 0xf51ace36 )
-	ROM_LOAD( "1709a", 0xa000, 0x0800, 0x709e505c )
-	ROM_LOAD( "1710a", 0xa800, 0x0800, 0x63a010cc )
-ROM_END
-
-ROM_START( elim2_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "cpu_u25.969", 0x0000, 0x0800, 0x63ef8173 )
-	ROM_LOAD( "1333", 0x0800, 0x0800, 0xa22e4534 )
-	ROM_LOAD( "1334", 0x1000, 0x0800, 0xcea8b008 )
-	ROM_LOAD( "1335", 0x1800, 0x0800, 0x05f7f015 )
-	ROM_LOAD( "1336", 0x2000, 0x0800, 0xfce1ed93 )
-	ROM_LOAD( "1337", 0x2800, 0x0800, 0x6290ba12 )
-	ROM_LOAD( "1338", 0x3000, 0x0800, 0xbe9bea97 )
-	ROM_LOAD( "1339", 0x3800, 0x0800, 0x866c7a66 )
-	ROM_LOAD( "1340", 0x4000, 0x0800, 0x4e28488c )
-	ROM_LOAD( "1341", 0x4800, 0x0800, 0x1780cb00 )
-	ROM_LOAD( "1342", 0x5000, 0x0800, 0xde8197d7 )
-	ROM_LOAD( "1343", 0x5800, 0x0800, 0xe8fdcd29 )
-	ROM_LOAD( "1344", 0x6000, 0x0800, 0x2da38ebb )
-	ROM_LOAD( "1345", 0x6800, 0x0800, 0x97b074d6 )
-ROM_END
-
-ROM_START( elim4_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "1390_cpu.u25", 0x0000, 0x0800, 0xd0ed7045 )
-	ROM_LOAD( "1347", 0x0800, 0x0800, 0xbdb2733a )
-	ROM_LOAD( "1348", 0x1000, 0x0800, 0xa4f682c6 )
-	ROM_LOAD( "1349", 0x1800, 0x0800, 0xa8e8b15e )
-	ROM_LOAD( "1350", 0x2000, 0x0800, 0xfd7cc90c )
-	ROM_LOAD( "1351", 0x2800, 0x0800, 0xcc430063 )
-	ROM_LOAD( "1352", 0x3000, 0x0800, 0x7372f406 )
-	ROM_LOAD( "1353", 0x3800, 0x0800, 0xd86e5002 )
-	ROM_LOAD( "1354", 0x4000, 0x0800, 0x52f948f5 )
-	ROM_LOAD( "1355", 0x4800, 0x0800, 0x0a39ca5f )
-	ROM_LOAD( "1356", 0x5000, 0x0800, 0xae016361 )
-	ROM_LOAD( "1357", 0x5800, 0x0800, 0x0776e4ae )
-	ROM_LOAD( "1358", 0x6000, 0x0800, 0x207bf5b9 )
-	ROM_LOAD( "1359", 0x6800, 0x0800, 0x5c198b03 )
-	ROM_LOAD( "1360", 0x7000, 0x0800, 0x362603e2 )
-ROM_END
-
-ROM_START( startrek_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "cpu1873", 0x0000, 0x0800, 0xa70b114f )
-	ROM_LOAD( "1848", 0x0800, 0x0800, 0x13f1616b )
-	ROM_LOAD( "1849", 0x1000, 0x0800, 0x4a6266dc )
-	ROM_LOAD( "1850", 0x1800, 0x0800, 0xb57a12d2 )
-	ROM_LOAD( "1851", 0x2000, 0x0800, 0xd03a429e )
-	ROM_LOAD( "1852", 0x2800, 0x0800, 0xd37e34bc )
-	ROM_LOAD( "1853", 0x3000, 0x0800, 0x1312c496 )
-	ROM_LOAD( "1854", 0x3800, 0x0800, 0x49c91fb9 )
-	ROM_LOAD( "1855", 0x4000, 0x0800, 0x4ee42fca )
-	ROM_LOAD( "1856", 0x4800, 0x0800, 0x1fb10e59 )
-	ROM_LOAD( "1857", 0x5000, 0x0800, 0x1ec61d2e )
-	ROM_LOAD( "1858", 0x5800, 0x0800, 0x57331e55 )
-	ROM_LOAD( "1859", 0x6000, 0x0800, 0x3bb7c0d7 )
-	ROM_LOAD( "1860", 0x6800, 0x0800, 0x592e9b78 )
-	ROM_LOAD( "1861", 0x7000, 0x0800, 0x8ec0e258 )
-	ROM_LOAD( "1862", 0x7800, 0x0800, 0xd08f2543 )
-	ROM_LOAD( "1863", 0x8000, 0x0800, 0x21b5dc1f )
-	ROM_LOAD( "1864", 0x8800, 0x0800, 0x2adbfa49 )
-	ROM_LOAD( "1865", 0x9000, 0x0800, 0x952a28ce )
-	ROM_LOAD( "1866", 0x9800, 0x0800, 0xf46e7f98 )
-	ROM_LOAD( "1867", 0xa000, 0x0800, 0x78bf2f2b )
-	ROM_LOAD( "1868", 0xa800, 0x0800, 0x81f02c94 )
-	ROM_LOAD( "1869", 0xb000, 0x0800, 0xafaa3d74 )
-	ROM_LOAD( "1870", 0xb800, 0x0800, 0x5328d652 )
-ROM_END
-
-/***************************************************************************
-
-  Hi Score Routines
-
-***************************************************************************/
-
-static int spacfury_hiload(void)
-{
-	/* check if the hi score table has already been initialized */
-	if ((memcmp(&RAM[0xC924],"\x90\x02",2) == 0) &&
-			(memcmp(&RAM[0xC95C],"\x10\x00",2) == 0))
-	{
-		void *f;
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0xC924],2*30);  /* 2 bytes * 30 scores */
-			osd_fread(f,&RAM[0xCFD2],3*10);   /* 3 letters * 10 scores */
-
-			osd_fclose(f);
-		}
-		return 1;
-	}
-	else return 0;  /* we can't load the hi scores yet */
-}
-
-
-static void spacfury_hisave(void)
-{
-	void *f;
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0xC924],2*30); /* 2 bytes * 30 scores */
-		osd_fwrite(f,&RAM[0xCFD2],3*10);  /* 3 letters * 10 scores */
-		osd_fclose(f);
-	}
-}
-
-
-static int zektor_hiload(void)
-{
-	/* check if the hi score table has already been initialized */
-	if ((memcmp(&RAM[0xC924],"\x90\x02",2) == 0) &&
-			(memcmp(&RAM[0xC95C],"\x10\x00",2) == 0))
-	{
-		void *f;
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0xC924],2*30);  /* 2 bytes * 30 scores? */
-			osd_fread(f,&RAM[0xCFD2],3*5);   /* 3 letters * 5 scores */
-
-			osd_fclose(f);
-		}
-		return 1;
-	}
-	else return 0;  /* we can't load the hi scores yet */
-}
-
-
-static void zektor_hisave(void)
-{
-	void *f;
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0xC924],2*30); /* 2 bytes * 30 scores? */
-		osd_fwrite(f,&RAM[0xCFD2],3*5);  /* 3 letters * 5 scores */
-		osd_fclose(f);
-	}
-}
-
-static int tacscan_hiload(void)
-{
-	/* check if the hi score table has already been initialized */
-	if ((memcmp(&RAM[0xCB44],"MCL",3) == 0) &&
-		(memcmp(&RAM[0xCB95],"\x02\x03\x00",3) == 0))
-	{
-		void *f;
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0xCB44],3*5);  /* initials */
-			osd_fread(f,&RAM[0xCB95],3*5);  /* scores */
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;  /* we can't load the hi scores yet */
-}
-
-
-static void tacscan_hisave(void)
-{
-	void *f;
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0xCB44],3*5);  /* initials */
-		osd_fwrite(f,&RAM[0xCB95],3*5);  /* scores */
-		osd_fclose(f);
-	}
-}
-
-
-static int elim2_hiload(void)
-{
-	/* check if the hi score table has already been initialized */
-	if ((memcmp(&RAM[0xC99F],"\x0C\x0B\x07",3) == 0) &&
-			(memcmp(&RAM[0xC9BA],"\x0A\x08\x03",3) == 0))
-	{
-		void *f;
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0xC924],2*30);  /* 2 bytes * 30 scores */
-			osd_fread(f,&RAM[0xC99F],3*10);  /* 3 letters * 10 scores */
-
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;  /* we can't load the hi scores yet */
-}
-
-
-static void elim2_hisave(void)
-{
-	void *f;
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0xC924],2*30); /* 2 bytes * 30 scores */
-		osd_fwrite(f,&RAM[0xC99F],3*10); /* 3 letters * 10 scores */
-		osd_fclose(f);
-	}
-}
-
-static int elim4_hiload(void)
-{
-	/* check if the hi score table has already been initialized */
-	if ((memcmp(&RAM[0xCC4D],"\x0C\x0B\x07",3) == 0) &&
-			(memcmp(&RAM[0xCC68],"\x0A\x08\x03",3) == 0))
-	{
-		void *f;
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0xC928],2*30);  /* 2 bytes * 30 scores */
-			osd_fread(f,&RAM[0xCC4D],3*10);  /* 3 letters * 10 scores */
-
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;  /* we can't load the hi scores yet */
-}
-
-
-static void elim4_hisave(void)
-{
-	void *f;
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0xC928],2*30); /* 2 bytes * 30 scores */
-		osd_fwrite(f,&RAM[0xCC4D],3*10); /* 3 letters * 10 scores */
-		osd_fclose(f);
-	}
-}
-
-static int startrek_hiload(void)
-{
-	/* check if the hi score table has already been initialized */
-	if ((memcmp(&RAM[0xC98B],"SLP",3) == 0) &&
-			(memcmp(&RAM[0xC910],"\x25\x06\x09",3) == 0))
-	{
-		void *f;
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0xC98B],0x1B);
-			osd_fread(f,&RAM[0xC910],0x24);
-			// osd_fread(f,&RAM[0xC98B],0xF0); /* longer ? */
-
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;  /* we can't load the hi scores yet */
-}
-
-
-static void startrek_hisave(void)
-{
-	void *f;
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0xC98B],0x1B);
-		osd_fwrite(f,&RAM[0xC910],0x24);
-		osd_fclose(f);
-	}
-}
-
 
 
 
@@ -1173,54 +734,62 @@ static const char *spacfury_sample_names[] =
 {
 	"*spacfury",
 	/* Speech samples */
-	"sf01.sam",
-	"sf02.sam",
-	"sf03.sam",
-	"sf04.sam",
-	"sf05.sam",
-	"sf06.sam",
-	"sf07.sam",
-	"sf08.sam",
-	"sf09.sam",
-	"sf0a.sam",
-	"sf0b.sam",
-	"sf0c.sam",
-	"sf0d.sam",
-	"sf0e.sam",
-	"sf0f.sam",
-	"sf10.sam",
-	"sf11.sam",
-	"sf12.sam",
-	"sf13.sam",
-	"sf14.sam",
-	"sf15.sam",
+	"sf01.wav",
+	"sf02.wav",
+	"sf03.wav",
+	"sf04.wav",
+	"sf05.wav",
+	"sf06.wav",
+	"sf07.wav",
+	"sf08.wav",
+	"sf09.wav",
+	"sf0a.wav",
+	"sf0b.wav",
+	"sf0c.wav",
+	"sf0d.wav",
+	"sf0e.wav",
+	"sf0f.wav",
+	"sf10.wav",
+	"sf11.wav",
+	"sf12.wav",
+	"sf13.wav",
+	"sf14.wav",
+	"sf15.wav",
 	/* Sound samples */
-	"sfury1.sam",
-	"sfury2.sam",
-	"sfury3.sam",
-	"sfury4.sam",
-	"sfury5.sam",
-	"sfury6.sam",
-	"sfury7.sam",
-	"sfury8.sam",
-	"sfury9.sam",
-	"sfury10.sam",
+	"sfury1.wav",
+	"sfury2.wav",
+	"sfury3.wav",
+	"sfury4.wav",
+	"sfury5.wav",
+	"sfury6.wav",
+	"sfury7.wav",
+	"sfury8.wav",
+	"sfury9.wav",
+	"sfury10.wav",
     0	/* end of array */
 };
 
 static struct Samplesinterface spacfury_samples_interface =
 {
-	9	/* 9 channels */
+	9,	/* 9 channels */
+	25,	/* volume */
+	spacfury_sample_names
 };
 
-static struct MachineDriver spacfury_machine_driver =
+static struct CustomSound_interface sega_custom_interface =
+{
+	sega_sh_start,
+	0,
+	sega_sh_update
+};
+
+static struct MachineDriver machine_driver_spacfury =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80,
 			3867120,	/* 3.86712 Mhz */
-			0,
 			readmem, writemem, spacfury_readport, spacfury_writeport,
 			0, 0, /* no vblank interrupt */
 			sega_interrupt, 40 /* 40 Hz */
@@ -1232,7 +801,7 @@ static struct MachineDriver spacfury_machine_driver =
 
 	/* video hardware */
 	400, 300, { 512, 1536, 552, 1464 },
-	gfxdecodeinfo,
+	0,
 	256,256,
 	sega_init_colors,
 
@@ -1243,65 +812,21 @@ static struct MachineDriver spacfury_machine_driver =
 	sega_vh_screenrefresh,
 
 	/* sound hardware */
-	0,
-	sega_sh_start,
-	0,
-	sega_sh_update,
+	0,0,0,0,
 	{
 		{
 			SOUND_SAMPLES,
 			&spacfury_samples_interface
+		},
+		{
+			SOUND_CUSTOM,	/* actually plays the samples */
+			&sega_custom_interface
 		}
 	}
 };
 
 
 
-struct GameDriver spacfury_driver =
-{
-	"Space Fury (revision A)",
-	"spacfury",
-	"Al Kossow (G80 Emu)\nBrad Oliver (MAME driver)\n"
-	"Mike Balfour (high score saving)\n"
-	VECTOR_TEAM,
-
-	&spacfury_machine_driver,
-
-	spacfury_rom,
-	spacfury_decode, 0,
-	spacfury_sample_names,
-	0,
-
-	spacfury_input_ports,
-
-	0, 0, 0,
-	ORIENTATION_DEFAULT,
-
-    spacfury_hiload, spacfury_hisave
-};
-
-struct GameDriver spacfurc_driver =
-{
-	"Space Fury (revision C)",
-	"spacfurc",
-	"Al Kossow (G80 Emu)\nBrad Oliver (MAME driver)\n"
-	"Mike Balfour (high score saving)\n"
-	VECTOR_TEAM,
-
-	&spacfury_machine_driver,
-
-	spacfurc_rom,
-	spacfury_decode, 0,
-	spacfury_sample_names,
-	0,
-
-	spacfury_input_ports,
-
-	0, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	spacfury_hiload, spacfury_hisave
-};
 
 /***************************************************************************
 
@@ -1312,41 +837,60 @@ struct GameDriver spacfurc_driver =
 static const char *zektor_sample_names[] =
 {
 	"*zektor",
-	"zk01.sam",
-	"zk02.sam",
-	"zk03.sam",
-	"zk04.sam",
-	"zk05.sam",
-	"zk06.sam",
-	"zk07.sam",
-	"zk08.sam",
-	"zk09.sam",
-	"zk0a.sam",
-	"zk0b.sam",
-	"zk0c.sam",
-	"zk0d.sam",
-	"zk0e.sam",
-	"zk0f.sam",
-	"zk10.sam",
-	"zk11.sam",
-	"zk12.sam",
-	"zk13.sam",
+	"zk01.wav",  /* 1 */
+	"zk02.wav",
+	"zk03.wav",
+	"zk04.wav",
+	"zk05.wav",
+	"zk06.wav",
+	"zk07.wav",
+	"zk08.wav",
+	"zk09.wav",
+	"zk0a.wav",
+	"zk0b.wav",
+	"zk0c.wav",
+	"zk0d.wav",
+	"zk0e.wav",
+	"zk0f.wav",
+	"zk10.wav",
+	"zk11.wav",
+	"zk12.wav",
+	"zk13.wav",
+	"elim1.wav",  /* 19 fireball */
+	"elim2.wav",  /* 20 bounce */
+	"elim3.wav",  /* 21 Skitter */
+	"elim4.wav",  /* 22 Eliminator */
+	"elim5.wav",  /* 23 Electron */
+	"elim6.wav",  /* 24 fire */
+	"elim7.wav",  /* 25 thrust */
+	"elim8.wav",  /* 26 Electron */
+	"elim9.wav",  /* 27 small explosion */
+	"elim10.wav", /* 28 med explosion */
+	"elim11.wav", /* 29 big explosion */
+				  /* Missing Zizzer */
+				  /* Missing City fly by */
+				  /* Missing Rotation Rings */
+
+
     0	/* end of array */
 };
 
 static struct Samplesinterface zektor_samples_interface =
 {
-	1 /* only speech for now */
+	12, /* only speech for now */
+	25,	/* volume */
+	zektor_sample_names
 };
 
-static struct MachineDriver zektor_machine_driver =
+
+
+static struct MachineDriver machine_driver_zektor =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80,
 			3867120,	/* 3.86712 Mhz */
-			0,
 			readmem,writemem,zektor_readport,zektor_writeport,
 
 			0, 0, /* no vblank interrupt */
@@ -1359,7 +903,7 @@ static struct MachineDriver zektor_machine_driver =
 
 	/* video hardware */
 	400, 300, { 512, 1536, 624, 1432 },
-	gfxdecodeinfo,
+	0,
 	256,256,
 	sega_init_colors,
 
@@ -1370,42 +914,20 @@ static struct MachineDriver zektor_machine_driver =
 	sega_vh_screenrefresh,
 
 	/* sound hardware */
-	0,
-	sega_sh_start,
-	0,
-	sega_sh_update,
+	0,0,0,0,
 	{
 		{
 			SOUND_SAMPLES,
 			&zektor_samples_interface
+		},
+		{
+			SOUND_CUSTOM,	/* actually plays the samples */
+			&sega_custom_interface
 		}
 	}
 };
 
 
-
-struct GameDriver zektor_driver =
-{
-	"Zektor",
-	"zektor",
-	"Al Kossow (G80 Emu)\nBrad Oliver (MAME driver)\n"
-	"Mike Balfour (high score saving)\n"
-	VECTOR_TEAM,
-
-	&zektor_machine_driver,
-
-	zektor_rom,
-	zektor_decode, 0,
-	zektor_sample_names,
-	0,
-
-	zektor_input_ports,
-
-	0, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	zektor_hiload, zektor_hisave
-};
 
 /***************************************************************************
 
@@ -1417,34 +939,55 @@ static const char *tacscan_sample_names[] =
 {
 	"*tacscan",
 	/* Player ship thrust sounds */
-	"01.sam",
-	"02.sam",
-	"03.sam",
-	"plaser.sam",
-	"pexpl.sam",
-	"pship.sam",
-	"tunnelh.sam",
-	"sthrust.sam",
-	"slaser.sam",
-	"sexpl.sam",
-	"eshot.sam",
-	"eexpl.sam",
+	"01.wav",
+	"02.wav",
+	"03.wav",
+        "plaser.wav",
+	"pexpl.wav",
+	"pship.wav",
+	"tunnelh.wav",
+	"sthrust.wav",
+	"slaser.wav",
+	"sexpl.wav",
+	"eshot.wav",
+	"eexpl.wav",
+        "tunnelw.wav",
+        "flight1.wav",
+        "flight2.wav",
+        "flight3.wav",
+        "flight4.wav",
+        "flight5.wav",
+        "formatn.wav",
+        "warp.wav",
+        "credit.wav",
+        "1up.wav",
+
     0	/* end of array */
 };
 
 static struct Samplesinterface tacscan_samples_interface =
 {
-	6	/* 6 channels */
+	12,	/* 12 channels */
+	25,	/* volume */
+	tacscan_sample_names
 };
 
-static struct MachineDriver tacscan_machine_driver =
+static struct CustomSound_interface tacscan_custom_interface =
+{
+	tacscan_sh_start,
+	0,
+	tacscan_sh_update
+};
+
+
+
+static struct MachineDriver machine_driver_tacscan =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80,
 			3867120,	/* 3.86712 Mhz */
-			0,
 			readmem,writemem,zektor_readport,tacscan_writeport,
 
 			0, 0, /* no vblank interrupt */
@@ -1457,7 +1000,7 @@ static struct MachineDriver tacscan_machine_driver =
 
 	/* video hardware */
 	400, 300, { 496, 1552, 592, 1456 },
-	gfxdecodeinfo,
+	0,
 	256,256,
 	sega_init_colors,
 
@@ -1468,39 +1011,17 @@ static struct MachineDriver tacscan_machine_driver =
 	sega_vh_screenrefresh,
 
 	/* sound hardware */
-	0,
-	tacscan_sh_start,
-	0,
-	tacscan_sh_update,
+	0,0,0,0,
 	{
 		{
 			SOUND_SAMPLES,
 			&tacscan_samples_interface
+		},
+		{
+			SOUND_CUSTOM,	/* actually plays the samples */
+			&tacscan_custom_interface
 		}
 	}
-};
-
-struct GameDriver tacscan_driver =
-{
-	"Tac-Scan",
-	"tacscan",
-	"Al Kossow (G80 Emu)\nBrad Oliver (MAME driver)\n"
-	"Valerio Verrando (high score saving)\n"
-	VECTOR_TEAM,
-
-	&tacscan_machine_driver,
-
-	tacscan_rom,
-	tacscan_decode, 0,
-	tacscan_sample_names,
-	0,
-
-	zektor_input_ports,
-
-	0, 0, 0,
-	ORIENTATION_ROTATE_270,
-
-	tacscan_hiload, tacscan_hisave
 };
 
 /***************************************************************************
@@ -1513,34 +1034,36 @@ struct GameDriver tacscan_driver =
 static const char *elim_sample_names[] =
 {
 	"*elim2",
-	"elim1.sam",
-	"elim2.sam",
-	"elim3.sam",
-	"elim4.sam",
-	"elim5.sam",
-	"elim6.sam",
-	"elim7.sam",
-	"elim8.sam",
-	"elim9.sam",
-	"elim10.sam",
-	"elim11.sam",
-	"elim12.sam",
+	"elim1.wav",
+	"elim2.wav",
+	"elim3.wav",
+	"elim4.wav",
+	"elim5.wav",
+	"elim6.wav",
+	"elim7.wav",
+	"elim8.wav",
+	"elim9.wav",
+	"elim10.wav",
+	"elim11.wav",
+	"elim12.wav",
     0	/* end of array */
 };
 
 static struct Samplesinterface elim2_samples_interface =
 {
-	8	/* 8 channels */
+	8,	/* 8 channels */
+	25,	/* volume */
+	elim_sample_names
 };
 
-static struct MachineDriver elim2_machine_driver =
+
+static struct MachineDriver machine_driver_elim2 =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80,
 			3867120,	/* 3.86712 Mhz */
-			0,
 			readmem,writemem,elim2_readport,elim_writeport,
 
 			0, 0, /* no vblank interrupt */
@@ -1553,7 +1076,7 @@ static struct MachineDriver elim2_machine_driver =
 
 	/* video hardware */
 	400, 300, { 512, 1536, 600, 1440 },
-	gfxdecodeinfo,
+	0,
 	256,256,
 	sega_init_colors,
 
@@ -1564,49 +1087,28 @@ static struct MachineDriver elim2_machine_driver =
 	sega_vh_screenrefresh,
 
 	/* sound hardware */
-	0,
-	sega_sh_start,
-	0,
-	sega_sh_update,
+	0,0,0,0,
 	{
 		{
 			SOUND_SAMPLES,
 			&elim2_samples_interface
+		},
+		{
+			SOUND_CUSTOM,	/* actually plays the samples */
+			&sega_custom_interface
 		}
 	}
 };
 
-struct GameDriver elim2_driver =
-{
-	"Eliminator (2 Player)",
-	"elim2",
-	"Al Kossow (G80 Emu)\nBrad Oliver (MAME driver)\n"
-	"Mike Balfour (high score saving)\n"
-	VECTOR_TEAM,
 
-	&elim2_machine_driver,
 
-	elim2_rom,
-	elim2_decode, 0,
-	elim_sample_names,
-	0,
-
-	elim2_input_ports,
-
-	0, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	elim2_hiload, elim2_hisave
-};
-
-static struct MachineDriver elim4_machine_driver =
+static struct MachineDriver machine_driver_elim4 =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80,
 			3867120,	/* 3.86712 Mhz */
-			0,
 			readmem,writemem,elim4_readport,elim_writeport,
 
 			0, 0, /* no vblank interrupt */
@@ -1619,7 +1121,7 @@ static struct MachineDriver elim4_machine_driver =
 
 	/* video hardware */
 	400, 300, { 512, 1536, 600, 1440 },
-	gfxdecodeinfo,
+	0,
 	256,256,
 	sega_init_colors,
 
@@ -1630,39 +1132,17 @@ static struct MachineDriver elim4_machine_driver =
 	sega_vh_screenrefresh,
 
 	/* sound hardware */
-	0,
-	sega_sh_start,
-	0,
-	sega_sh_update,
+	0,0,0,0,
 	{
 		{
 			SOUND_SAMPLES,
 			&elim2_samples_interface
+		},
+		{
+			SOUND_CUSTOM,	/* actually plays the samples */
+			&sega_custom_interface
 		}
 	}
-};
-
-struct GameDriver elim4_driver =
-{
-	"Eliminator (4 Player)",
-	"elim4",
-        "Al Kossow (G80 Emu)\nBrad Oliver (MAME driver)\n"
-	"Mike Balfour (high score saving)\n"
-	VECTOR_TEAM,
-
-	&elim4_machine_driver,
-
-	elim4_rom,
-	elim4_decode, 0,
-	elim_sample_names,
-	0,
-
-	elim4_input_ports,
-
-	0, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	elim4_hiload, elim4_hisave
 };
 
 /***************************************************************************
@@ -1675,74 +1155,75 @@ static const char *startrek_sample_names[] =
 {
 	"*startrek",
 	/* Speech samples */
-	"st01.sam",
-	"st02.sam",
-	"st03.sam",
-	"st04.sam",
-	"st05.sam",
-	"st06.sam",
-	"st07.sam",
-	"st08.sam",
-	"st09.sam",
-	"st0a.sam",
-	"st0b.sam",
-	"st0c.sam",
-	"st0d.sam",
-	"st0e.sam",
-	"st0f.sam",
-	"st10.sam",
-	"st11.sam",
-	"st12.sam",
-	"st13.sam",
-	"st14.sam",
-	"st15.sam",
-	"st16.sam",
-	"st17.sam",
+	"st01.wav",
+	"st02.wav",
+	"st03.wav",
+	"st04.wav",
+	"st05.wav",
+	"st06.wav",
+	"st07.wav",
+	"st08.wav",
+	"st09.wav",
+	"st0a.wav",
+	"st0b.wav",
+	"st0c.wav",
+	"st0d.wav",
+	"st0e.wav",
+	"st0f.wav",
+	"st10.wav",
+	"st11.wav",
+	"st12.wav",
+	"st13.wav",
+	"st14.wav",
+	"st15.wav",
+	"st16.wav",
+	"st17.wav",
 	/* Sound samples */
-	"trek1.sam",
-	"trek2.sam",
-	"trek3.sam",
-	"trek4.sam",
-	"trek5.sam",
-	"trek6.sam",
-	"trek7.sam",
-	"trek8.sam",
-	"trek9.sam",
-	"trek10.sam",
-	"trek11.sam",
-	"trek12.sam",
-	"trek13.sam",
-	"trek14.sam",
-	"trek15.sam",
-	"trek16.sam",
-	"trek17.sam",
-	"trek18.sam",
-	"trek19.sam",
-	"trek20.sam",
-	"trek21.sam",
-	"trek22.sam",
-	"trek23.sam",
-	"trek24.sam",
-	"trek25.sam",
-	"trek26.sam",
-	"trek27.sam",
-	"trek28.sam",
+	"trek1.wav",
+	"trek2.wav",
+	"trek3.wav",
+	"trek4.wav",
+	"trek5.wav",
+	"trek6.wav",
+	"trek7.wav",
+	"trek8.wav",
+	"trek9.wav",
+	"trek10.wav",
+	"trek11.wav",
+	"trek12.wav",
+	"trek13.wav",
+	"trek14.wav",
+	"trek15.wav",
+	"trek16.wav",
+	"trek17.wav",
+	"trek18.wav",
+	"trek19.wav",
+	"trek20.wav",
+	"trek21.wav",
+	"trek22.wav",
+	"trek23.wav",
+	"trek24.wav",
+	"trek25.wav",
+	"trek26.wav",
+	"trek27.wav",
+	"trek28.wav",
     0	/* end of array */
 };
 
 static struct Samplesinterface startrek_samples_interface =
 {
-	6	/* 6 channels */
+	10,	/* 10 channels */
+	25,	/* volume */
+	startrek_sample_names
 };
 
-static struct MachineDriver startrek_machine_driver =
+static struct MachineDriver machine_driver_startrek =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80,
 			3867120,	/* 3.86712 Mhz */
-			0,
 			readmem,writemem,zektor_readport,startrek_writeport,
 
 			0, 0, /* no vblank interrupt */
@@ -1755,7 +1236,7 @@ static struct MachineDriver startrek_machine_driver =
 
 	/* video hardware */
 	400, 300, { 512, 1536, 616, 1464 },
-	gfxdecodeinfo,
+	0,
 	256,256,
 	sega_init_colors,
 
@@ -1766,40 +1247,202 @@ static struct MachineDriver startrek_machine_driver =
 	sega_vh_screenrefresh,
 
 	/* sound hardware */
-	0,
-	sega_sh_start,
-	0,
-	sega_sh_update,
+	0,0,0,0,
 	{
 		{
 			SOUND_SAMPLES,
 			&startrek_samples_interface
+		},
+		{
+			SOUND_CUSTOM,	/* actually plays the samples */
+			&sega_custom_interface
 		}
 	}
 };
 
-struct GameDriver startrek_driver =
-{
-	"Star Trek",
-	"startrek",
-	"Al Kossow (G80 Emu)\nBrad Oliver (MAME driver)\n"
-	"Valerio Verrando (high score saving)\n"
-	VECTOR_TEAM,
-
-	&startrek_machine_driver,
-
-	startrek_rom,
-	startrek_decode, 0,
-	startrek_sample_names,
-	0,
-
-	startrek_input_ports,
-
-	0, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	startrek_hiload, startrek_hisave
-};
 
 
 
+
+ROM_START( spacfury ) /* Revision C */
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+        ROM_LOAD( "969c.u25",     0x0000, 0x0800, 0x411207f2 )
+        ROM_LOAD( "960c.u1",      0x0800, 0x0800, 0xd071ab7e )
+        ROM_LOAD( "961c.u2",      0x1000, 0x0800, 0xaebc7b97 )
+        ROM_LOAD( "962c.u3",      0x1800, 0x0800, 0xdbbba35e )
+        ROM_LOAD( "963c.u4",      0x2000, 0x0800, 0xd9e9eadc )
+        ROM_LOAD( "964c.u5",      0x2800, 0x0800, 0x7ed947b6 )
+        ROM_LOAD( "965c.u6",      0x3000, 0x0800, 0xd2443a22 )
+        ROM_LOAD( "966c.u7",      0x3800, 0x0800, 0x1985ccfc )
+        ROM_LOAD( "967c.u8",      0x4000, 0x0800, 0x330f0751 )
+        ROM_LOAD( "968c.u9",      0x4800, 0x0800, 0x8366eadb )
+ROM_END
+
+ROM_START( spacfura ) /* Revision A */
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+        ROM_LOAD( "969a.u25",     0x0000, 0x0800, 0x896a615c )
+        ROM_LOAD( "960a.u1",      0x0800, 0x0800, 0xe1ea7964 )
+        ROM_LOAD( "961a.u2",      0x1000, 0x0800, 0xcdb04233 )
+        ROM_LOAD( "962a.u3",      0x1800, 0x0800, 0x5f03e632 )
+        ROM_LOAD( "963a.u4",      0x2000, 0x0800, 0x45a77b44 )
+        ROM_LOAD( "964a.u5",      0x2800, 0x0800, 0xba008f8b )
+        ROM_LOAD( "965a.u6",      0x3000, 0x0800, 0x78677d31 )
+        ROM_LOAD( "966a.u7",      0x3800, 0x0800, 0xa8a51105 )
+        ROM_LOAD( "967a.u8",      0x4000, 0x0800, 0xd60f667d )
+        ROM_LOAD( "968a.u9",      0x4800, 0x0800, 0xaea85b6a )
+ROM_END
+
+ROM_START( zektor )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "1611.cpu",     0x0000, 0x0800, 0x6245aa23 )
+	ROM_LOAD( "1586.rom",     0x0800, 0x0800, 0xefeb4fb5 )
+	ROM_LOAD( "1587.rom",     0x1000, 0x0800, 0xdaa6c25c )
+	ROM_LOAD( "1588.rom",     0x1800, 0x0800, 0x62b67dde )
+	ROM_LOAD( "1589.rom",     0x2000, 0x0800, 0xc2db0ba4 )
+	ROM_LOAD( "1590.rom",     0x2800, 0x0800, 0x4d948414 )
+	ROM_LOAD( "1591.rom",     0x3000, 0x0800, 0xb0556a6c )
+	ROM_LOAD( "1592.rom",     0x3800, 0x0800, 0x750ecadf )
+	ROM_LOAD( "1593.rom",     0x4000, 0x0800, 0x34f8850f )
+	ROM_LOAD( "1594.rom",     0x4800, 0x0800, 0x52b22ab2 )
+	ROM_LOAD( "1595.rom",     0x5000, 0x0800, 0xa704d142 )
+	ROM_LOAD( "1596.rom",     0x5800, 0x0800, 0x6975e33d )
+	ROM_LOAD( "1597.rom",     0x6000, 0x0800, 0xd48ab5c2 )
+	ROM_LOAD( "1598.rom",     0x6800, 0x0800, 0xab54a94c )
+	ROM_LOAD( "1599.rom",     0x7000, 0x0800, 0xc9d4f3a5 )
+	ROM_LOAD( "1600.rom",     0x7800, 0x0800, 0x893b7dbc )
+	ROM_LOAD( "1601.rom",     0x8000, 0x0800, 0x867bdf4f )
+	ROM_LOAD( "1602.rom",     0x8800, 0x0800, 0xbd447623 )
+	ROM_LOAD( "1603.rom",     0x9000, 0x0800, 0x9f8f10e8 )
+	ROM_LOAD( "1604.rom",     0x9800, 0x0800, 0xad2f0f6c )
+	ROM_LOAD( "1605.rom",     0xa000, 0x0800, 0xe27d7144 )
+	ROM_LOAD( "1606.rom",     0xa800, 0x0800, 0x7965f636 )
+ROM_END
+
+ROM_START( tacscan )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "1711a",        0x0000, 0x0800, 0x0da13158 )
+	ROM_LOAD( "1670c",        0x0800, 0x0800, 0x98de6fd5 )
+	ROM_LOAD( "1671a",        0x1000, 0x0800, 0xdc400074 )
+	ROM_LOAD( "1672a",        0x1800, 0x0800, 0x2caf6f7e )
+	ROM_LOAD( "1673a",        0x2000, 0x0800, 0x1495ce3d )
+	ROM_LOAD( "1674a",        0x2800, 0x0800, 0xab7fc5d9 )
+	ROM_LOAD( "1675a",        0x3000, 0x0800, 0xcf5e5016 )
+	ROM_LOAD( "1676a",        0x3800, 0x0800, 0xb61a3ab3 )
+	ROM_LOAD( "1677a",        0x4000, 0x0800, 0xbc0273b1 )
+	ROM_LOAD( "1678b",        0x4800, 0x0800, 0x7894da98 )
+	ROM_LOAD( "1679a",        0x5000, 0x0800, 0xdb865654 )
+	ROM_LOAD( "1680a",        0x5800, 0x0800, 0x2c2454de )
+	ROM_LOAD( "1681a",        0x6000, 0x0800, 0x77028885 )
+	ROM_LOAD( "1682a",        0x6800, 0x0800, 0xbabe5cf1 )
+	ROM_LOAD( "1683a",        0x7000, 0x0800, 0x1b98b618 )
+	ROM_LOAD( "1684a",        0x7800, 0x0800, 0xcb3ded3b )
+	ROM_LOAD( "1685a",        0x8000, 0x0800, 0x43016a79 )
+	ROM_LOAD( "1686a",        0x8800, 0x0800, 0xa4397772 )
+	ROM_LOAD( "1687a",        0x9000, 0x0800, 0x002f3bc4 )
+	ROM_LOAD( "1688a",        0x9800, 0x0800, 0x0326d87a )
+	ROM_LOAD( "1709a",        0xa000, 0x0800, 0xf35ed1ec )
+	ROM_LOAD( "1710a",        0xa800, 0x0800, 0x6203be22 )
+ROM_END
+
+ROM_START( elim2 )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "cpu_u25.969",  0x0000, 0x0800, 0x411207f2 )
+	ROM_LOAD( "1333",         0x0800, 0x0800, 0xfd2a2916 )
+	ROM_LOAD( "1334",         0x1000, 0x0800, 0x79eb5548 )
+	ROM_LOAD( "1335",         0x1800, 0x0800, 0x3944972e )
+	ROM_LOAD( "1336",         0x2000, 0x0800, 0x852f7b4d )
+	ROM_LOAD( "1337",         0x2800, 0x0800, 0xcf932b08 )
+	ROM_LOAD( "1338",         0x3000, 0x0800, 0x99a3f3c9 )
+	ROM_LOAD( "1339",         0x3800, 0x0800, 0xd35f0fa3 )
+	ROM_LOAD( "1340",         0x4000, 0x0800, 0x8fd4da21 )
+	ROM_LOAD( "1341",         0x4800, 0x0800, 0x629c9a28 )
+	ROM_LOAD( "1342",         0x5000, 0x0800, 0x643df651 )
+	ROM_LOAD( "1343",         0x5800, 0x0800, 0xd29d70d2 )
+	ROM_LOAD( "1344",         0x6000, 0x0800, 0xc5e153a3 )
+	ROM_LOAD( "1345",         0x6800, 0x0800, 0x40597a92 )
+ROM_END
+
+ROM_START( elim2a )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "cpu_u25.969",  0x0000, 0x0800, 0x411207f2 )
+	ROM_LOAD( "1158",         0x0800, 0x0800, 0xa40ac3a5 )
+	ROM_LOAD( "1159",         0x1000, 0x0800, 0xff100604 )
+	ROM_LOAD( "1160a",        0x1800, 0x0800, 0xebfe33bd )
+	ROM_LOAD( "1161a",        0x2000, 0x0800, 0x03d41db3 )
+	ROM_LOAD( "1162a",        0x2800, 0x0800, 0xf2c7ece3 )
+	ROM_LOAD( "1163a",        0x3000, 0x0800, 0x1fc58b00 )
+	ROM_LOAD( "1164a",        0x3800, 0x0800, 0xf37480d1 )
+	ROM_LOAD( "1165a",        0x4000, 0x0800, 0x328819f8 )
+	ROM_LOAD( "1166a",        0x4800, 0x0800, 0x1b8e8380 )
+	ROM_LOAD( "1167a",        0x5000, 0x0800, 0x16aa3156 )
+	ROM_LOAD( "1168a",        0x5800, 0x0800, 0x3c7c893a )
+	ROM_LOAD( "1169a",        0x6000, 0x0800, 0x5cee23b1 )
+	ROM_LOAD( "1170a",        0x6800, 0x0800, 0x8cdacd35 )
+ROM_END
+
+ROM_START( elim4 )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "1390_cpu.u25", 0x0000, 0x0800, 0x97010c3e )
+	ROM_LOAD( "1347",         0x0800, 0x0800, 0x657d7320 )
+	ROM_LOAD( "1348",         0x1000, 0x0800, 0xb15fe578 )
+	ROM_LOAD( "1349",         0x1800, 0x0800, 0x0702b586 )
+	ROM_LOAD( "1350",         0x2000, 0x0800, 0x4168dd3b )
+	ROM_LOAD( "1351",         0x2800, 0x0800, 0xc950f24c )
+	ROM_LOAD( "1352",         0x3000, 0x0800, 0xdc8c91cc )
+	ROM_LOAD( "1353",         0x3800, 0x0800, 0x11eda631 )
+	ROM_LOAD( "1354",         0x4000, 0x0800, 0xb9dd6e7a )
+	ROM_LOAD( "1355",         0x4800, 0x0800, 0xc92c7237 )
+	ROM_LOAD( "1356",         0x5000, 0x0800, 0x889b98e3 )
+	ROM_LOAD( "1357",         0x5800, 0x0800, 0xd79248a5 )
+	ROM_LOAD( "1358",         0x6000, 0x0800, 0xc5dabc77 )
+	ROM_LOAD( "1359",         0x6800, 0x0800, 0x24c8e5d8 )
+	ROM_LOAD( "1360",         0x7000, 0x0800, 0x96d48238 )
+ROM_END
+
+ROM_START( startrek )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "cpu1873",      0x0000, 0x0800, 0xbe46f5d9 )
+	ROM_LOAD( "1848",         0x0800, 0x0800, 0x65e3baf3 )
+	ROM_LOAD( "1849",         0x1000, 0x0800, 0x8169fd3d )
+	ROM_LOAD( "1850",         0x1800, 0x0800, 0x78fd68dc )
+	ROM_LOAD( "1851",         0x2000, 0x0800, 0x3f55ab86 )
+	ROM_LOAD( "1852",         0x2800, 0x0800, 0x2542ecfb )
+	ROM_LOAD( "1853",         0x3000, 0x0800, 0x75c2526a )
+	ROM_LOAD( "1854",         0x3800, 0x0800, 0x096d75d0 )
+	ROM_LOAD( "1855",         0x4000, 0x0800, 0xbc7b9a12 )
+	ROM_LOAD( "1856",         0x4800, 0x0800, 0xed9fe2fb )
+	ROM_LOAD( "1857",         0x5000, 0x0800, 0x28699d45 )
+	ROM_LOAD( "1858",         0x5800, 0x0800, 0x3a7593cb )
+	ROM_LOAD( "1859",         0x6000, 0x0800, 0x5b11886b )
+	ROM_LOAD( "1860",         0x6800, 0x0800, 0x62eb96e6 )
+	ROM_LOAD( "1861",         0x7000, 0x0800, 0x99852d1d )
+	ROM_LOAD( "1862",         0x7800, 0x0800, 0x76ce27b2 )
+	ROM_LOAD( "1863",         0x8000, 0x0800, 0xdd92d187 )
+	ROM_LOAD( "1864",         0x8800, 0x0800, 0xe37d3a1e )
+	ROM_LOAD( "1865",         0x9000, 0x0800, 0xb2ec8125 )
+	ROM_LOAD( "1866",         0x9800, 0x0800, 0x6f188354 )
+	ROM_LOAD( "1867",         0xa000, 0x0800, 0xb0a3eae8 )
+	ROM_LOAD( "1868",         0xa800, 0x0800, 0x8b4e2e07 )
+	ROM_LOAD( "1869",         0xb000, 0x0800, 0xe5663070 )
+	ROM_LOAD( "1870",         0xb800, 0x0800, 0x4340616d )
+
+// I'm not sure where these roms are supposed to go, but they are speech
+// related (from what I've read), so I just took a wild guess here,
+// until their location is determined and speech is emulated, plus, it
+// helps make sure everyone has them for the future... MRH
+	ROM_LOAD ("1670",         0xc000, 0x0800, 0xb779884b )
+	ROM_LOAD ("1871",         0xc800, 0x1000, 0x03713920 )
+	ROM_LOAD ("1872",         0xd800, 0x1000, 0xebb5c3a9 )
+ROM_END
+
+
+
+
+GAME( 1981, spacfury, 0,        spacfury, spacfury, spacfury, ROT0,   "Sega", "Space Fury (revision C)" )
+GAME( 1981, spacfura, spacfury, spacfury, spacfury, spacfury, ROT0,   "Sega", "Space Fury (revision A)" )
+GAME( 1982, zektor,   0,        zektor,   zektor,   zektor,   ROT0,   "Sega", "Zektor" )
+GAME( 1982, tacscan,  0,        tacscan,  tacscan,  tacscan,  ROT270, "Sega", "Tac/Scan" )
+GAME( 1981, elim2,    0,        elim2,    elim2,    elim2,    ROT0,   "Gremlin", "Eliminator (2 Players, set 1)" )
+GAME( 1981, elim2a,   elim2,    elim2,    elim2,    elim2,    ROT0,   "Gremlin", "Eliminator (2 Players, set 2)" )
+GAME( 1981, elim4,    elim2,    elim4,    elim4,    elim4,    ROT0,   "Gremlin", "Eliminator (4 Players)" )
+GAME( 1982, startrek, 0,        startrek, startrek, startrek, ROT0,   "Sega", "Star Trek" )

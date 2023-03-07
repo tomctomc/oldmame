@@ -15,16 +15,19 @@
 
 #define BIGSPRITE_WIDTH 128
 #define BIGSPRITE_HEIGHT 256
+#define ARMWREST_BIGSPRITE_WIDTH 256
+#define ARMWREST_BIGSPRITE_HEIGHT 128
 
 unsigned char *punchout_videoram2;
-int punchout_videoram2_size;
+size_t punchout_videoram2_size;
 unsigned char *punchout_bigsprite1ram;
-int punchout_bigsprite1ram_size;
+size_t punchout_bigsprite1ram_size;
 unsigned char *punchout_bigsprite2ram;
-int punchout_bigsprite2ram_size;
+size_t punchout_bigsprite2ram_size;
 unsigned char *punchout_scroll;
 unsigned char *punchout_bigsprite1;
 unsigned char *punchout_bigsprite2;
+unsigned char *punchout_palettebank;
 static unsigned char *dirtybuffer2,*bs1dirtybuffer,*bs2dirtybuffer;
 static struct osd_bitmap *bs1tmpbitmap,*bs2tmpbitmap;
 
@@ -54,112 +57,168 @@ static struct rectangle backgroundvisiblearea =
 
   Punch Out has a six 512x4 palette PROMs (one per gun; three for the top
   monitor chars, three for everything else).
-  I don't know the exact values of the resistors between the RAM and the
-  RGB output. I assumed these values (the same as Commando)
+  The PROMs are connected to the RGB output this way:
 
-  bit 3 -- 220 ohm resistor -- inverter  -- RED/GREEN/BLUE
+  bit 3 -- 240 ohm resistor -- inverter  -- RED/GREEN/BLUE
         -- 470 ohm resistor -- inverter  -- RED/GREEN/BLUE
         -- 1  kohm resistor -- inverter  -- RED/GREEN/BLUE
-  bit 0 -- 2.2kohm resistor -- inverter  -- RED/GREEN/BLUE
+  bit 0 -- 2  kohm resistor -- inverter  -- RED/GREEN/BLUE
 
 ***************************************************************************/
-void punchout_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+static void convert_palette(unsigned char *palette,const unsigned char *color_prom)
 {
-	int i,j,used;
-	unsigned char allocated[3*256];
+	int i;
+
+
+	for (i = 0;i < 1024;i++)
+	{
+		int bit0,bit1,bit2,bit3;
+
+
+		bit0 = (color_prom[0] >> 0) & 0x01;
+		bit1 = (color_prom[0] >> 1) & 0x01;
+		bit2 = (color_prom[0] >> 2) & 0x01;
+		bit3 = (color_prom[0] >> 3) & 0x01;
+		*(palette++) = 255 - (0x10 * bit0 + 0x21 * bit1 + 0x46 * bit2 + 0x88 * bit3);
+		bit0 = (color_prom[1024] >> 0) & 0x01;
+		bit1 = (color_prom[1024] >> 1) & 0x01;
+		bit2 = (color_prom[1024] >> 2) & 0x01;
+		bit3 = (color_prom[1024] >> 3) & 0x01;
+		*(palette++) = 255 - (0x10 * bit0 + 0x21 * bit1 + 0x46 * bit2 + 0x88 * bit3);
+		bit0 = (color_prom[2*1024] >> 0) & 0x01;
+		bit1 = (color_prom[2*1024] >> 1) & 0x01;
+		bit2 = (color_prom[2*1024] >> 2) & 0x01;
+		bit3 = (color_prom[2*1024] >> 3) & 0x01;
+		*(palette++) = 255 - (0x10 * bit0 + 0x21 * bit1 + 0x46 * bit2 + 0x88 * bit3);
+
+		color_prom++;
+	}
+
+	/* reserve the last color for the transparent pen (none of the game colors has */
+	/* these RGB components) */
+	*(palette++) = 240;
+	*(palette++) = 240;
+	*(palette++) = 240;
+}
+
+
+/* these depend on jumpers on the board and change from game to game */
+static int gfx0inv,gfx1inv,gfx2inv,gfx3inv;
+
+void punchout_vh_convert_color_prom(unsigned char *palette,unsigned short *colortable,const unsigned char *color_prom)
+{
+	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
 	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + (offs)])
 
 
-	/* The game has 1024 colors, but we are limited to a maximum of 256. */
-	/* Luckily, many of the colors are duplicated, so the total number of */
-	/* different colors is less than 256. We select the unique colors and */
-	/* put them in our palette. */
+	convert_palette(palette,color_prom);
 
-	memset(palette,0,3 * Machine->drv->total_colors);
 
-	/* transparent black */
-	allocated[0] = 0xff;
-	allocated[1] = 0xff;
-	allocated[2] = 0xff;
-	palette[0] = 0;
-	palette[1] = 0;
-	palette[2] = 0;
-	/* non transparent black */
-	allocated[3] = 0xff;
-	allocated[4] = 0xff;
-	allocated[5] = 0xff;
-	palette[3] = 0;
-	palette[4] = 0;
-	palette[5] = 0;
-	used = 2;
+	/* top monitor chars */
+	for (i = 0;i < TOTAL_COLORS(0);i++)
+		COLOR(0,i ^ gfx0inv) = i;
 
-	for (i = 0;i < 1024;i++)
+	/* bottom monitor chars */
+	for (i = 0;i < TOTAL_COLORS(1);i++)
+		COLOR(1,i ^ gfx1inv) = i + 512;
+
+	/* big sprite #1 */
+	for (i = 0;i < TOTAL_COLORS(2);i++)
 	{
-		for (j = 0;j < used;j++)
-		{
-			if (allocated[j] == color_prom[i] &&
-					allocated[j+256] == color_prom[i+1024] &&
-					allocated[j+2*256] == color_prom[i+2*1024])
-				break;
-		}
-		if (j == used)
-		{
-			int bit0,bit1,bit2,bit3;
+		if (i % 8 == 0) COLOR(2,i ^ gfx2inv) = 1024;	/* transparent */
+		else COLOR(2,i ^ gfx2inv) = i + 512;
+	}
 
-
-			used++;
-
-			allocated[j] = color_prom[i];
-			allocated[j+256] = color_prom[i+1024];
-			allocated[j+2*256] = color_prom[i+2*1024];
-
-			bit0 = (color_prom[i] >> 0) & 0x01;
-			bit1 = (color_prom[i] >> 1) & 0x01;
-			bit2 = (color_prom[i] >> 2) & 0x01;
-			bit3 = (color_prom[i] >> 3) & 0x01;
-			palette[3*j] = 255 - (0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3);
-			bit0 = (color_prom[i+1024] >> 0) & 0x01;
-			bit1 = (color_prom[i+1024] >> 1) & 0x01;
-			bit2 = (color_prom[i+1024] >> 2) & 0x01;
-			bit3 = (color_prom[i+1024] >> 3) & 0x01;
-			palette[3*j + 1] = 255 - (0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3);
-			bit0 = (color_prom[i+2*1024] >> 0) & 0x01;
-			bit1 = (color_prom[i+2*1024] >> 1) & 0x01;
-			bit2 = (color_prom[i+2*1024] >> 2) & 0x01;
-			bit3 = (color_prom[i+2*1024] >> 3) & 0x01;
-			palette[3*j + 2] = 255 - (0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3);
-		}
-
-		if (i < 512)
-		{
-			/* top monitor chars - palette order is inverted */
-			COLOR(0,i ^ 0x03) = j;
-		}
-		else
-		{
-			int ii,jj;
-
-
-			ii = i - 512;
-
-			/* bottom monitor chars */
-			COLOR(1,ii) = j;
-
-			/* big sprite #1 - palette order is inverted */
-			jj = j;
-			if (ii % 8 == 0) jj = 0;	/* preserve transparency */
-			else if (jj == 0) jj = 1;	/* avoid undesired transparency */
-			COLOR(2,ii ^ 0x07) = jj;
-
-			/* big sprite #2 */
-			jj = j;
-			if (ii % 4 == 0) jj = 0;	/* preserve transparency */
-			else if (jj == 0) jj = 1;	/* avoid undesired transparency */
-			COLOR(3,ii) = jj;
-		}
+	/* big sprite #2 */
+	for (i = 0;i < TOTAL_COLORS(3);i++)
+	{
+		if (i % 4 == 0) COLOR(3,i ^ gfx3inv) = 1024;	/* transparent */
+		else COLOR(3,i ^ gfx3inv) = i + 512;
 	}
 }
+
+void armwrest_vh_convert_color_prom(unsigned char *palette,unsigned short *colortable,const unsigned char *color_prom)
+{
+	int i;
+	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
+	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + (offs)])
+
+
+	convert_palette(palette,color_prom);
+
+
+	/* top monitor / bottom monitor backround chars */
+	for (i = 0;i < TOTAL_COLORS(0);i++)
+		COLOR(0,i) = i;
+
+	/* bottom monitor foreground chars */
+	for (i = 0;i < TOTAL_COLORS(1);i++)
+		COLOR(1,i) = i + 512;
+
+	/* big sprite #1 */
+	for (i = 0;i < TOTAL_COLORS(2);i++)
+	{
+		if (i % 8 == 7) COLOR(2,i) = 1024;	/* transparent */
+		else COLOR(2,i) = i + 512;
+	}
+
+	/* big sprite #2 - pen order is inverted */
+	for (i = 0;i < TOTAL_COLORS(3);i++)
+	{
+		if (i % 4 == 3) COLOR(3,i ^ 3) = 1024;	/* transparent */
+		else COLOR(3,i ^ 3) = i + 512;
+	}
+}
+
+
+
+static void gfx_fix(void)
+{
+	/* one graphics ROM (4v) doesn't */
+	/* exist but must be seen as a 0xff fill for colors to come out properly */
+	memset(memory_region(REGION_GFX3) + 0x2c000,0xff,0x4000);
+}
+
+void init_punchout(void)
+{
+	gfx_fix();
+
+	gfx0inv = 0x03;
+	gfx1inv = 0xfc;
+	gfx2inv = 0xff;
+	gfx3inv = 0xfc;
+}
+
+void init_spnchout(void)
+{
+	gfx_fix();
+
+	gfx0inv = 0x00;
+	gfx1inv = 0xff;
+	gfx2inv = 0xff;
+	gfx3inv = 0xff;
+}
+
+void init_spnchotj(void)
+{
+	gfx_fix();
+
+	gfx0inv = 0xfc;
+	gfx1inv = 0xff;
+	gfx2inv = 0xff;
+	gfx3inv = 0xff;
+}
+
+void init_armwrest(void)
+{
+	gfx_fix();
+
+	/* also, ROM 2k is enabled only when its top half is accessed. The other half must */
+	/* be seen as a 0xff fill for colors to come out properly */
+	memset(memory_region(REGION_GFX2) + 0x08000,0xff,0x2000);
+}
+
 
 
 
@@ -181,7 +240,7 @@ int punchout_vh_start(void)
 	}
 	memset(dirtybuffer2,1,punchout_videoram2_size);
 
-	if ((tmpbitmap = osd_create_bitmap(512,480)) == 0)
+	if ((tmpbitmap = bitmap_alloc(512,480)) == 0)
 	{
 		free(dirtybuffer);
 		free(dirtybuffer2);
@@ -190,16 +249,16 @@ int punchout_vh_start(void)
 
 	if ((bs1dirtybuffer = malloc(punchout_bigsprite1ram_size)) == 0)
 	{
-		osd_free_bitmap(tmpbitmap);
+		bitmap_free(tmpbitmap);
 		free(dirtybuffer);
 		free(dirtybuffer2);
 		return 1;
 	}
 	memset(bs1dirtybuffer,1,punchout_bigsprite1ram_size);
 
-	if ((bs1tmpbitmap = osd_create_bitmap(BIGSPRITE_WIDTH,BIGSPRITE_HEIGHT)) == 0)
+	if ((bs1tmpbitmap = bitmap_alloc(BIGSPRITE_WIDTH,BIGSPRITE_HEIGHT)) == 0)
 	{
-		osd_free_bitmap(tmpbitmap);
+		bitmap_free(tmpbitmap);
 		free(dirtybuffer);
 		free(dirtybuffer2);
 		free(bs1dirtybuffer);
@@ -208,8 +267,8 @@ int punchout_vh_start(void)
 
 	if ((bs2dirtybuffer = malloc(punchout_bigsprite2ram_size)) == 0)
 	{
-		osd_free_bitmap(tmpbitmap);
-		osd_free_bitmap(bs1tmpbitmap);
+		bitmap_free(tmpbitmap);
+		bitmap_free(bs1tmpbitmap);
 		free(dirtybuffer);
 		free(dirtybuffer2);
 		free(bs1dirtybuffer);
@@ -217,10 +276,73 @@ int punchout_vh_start(void)
 	}
 	memset(bs2dirtybuffer,1,punchout_bigsprite2ram_size);
 
-	if ((bs2tmpbitmap = osd_create_bitmap(BIGSPRITE_WIDTH,BIGSPRITE_HEIGHT)) == 0)
+	if ((bs2tmpbitmap = bitmap_alloc(BIGSPRITE_WIDTH,BIGSPRITE_HEIGHT)) == 0)
 	{
-		osd_free_bitmap(tmpbitmap);
-		osd_free_bitmap(bs1tmpbitmap);
+		bitmap_free(tmpbitmap);
+		bitmap_free(bs1tmpbitmap);
+		free(dirtybuffer);
+		free(dirtybuffer2);
+		free(bs1dirtybuffer);
+		free(bs2dirtybuffer);
+		return 1;
+	}
+
+	return 0;
+}
+
+int armwrest_vh_start(void)
+{
+	if ((dirtybuffer = malloc(videoram_size)) == 0)
+		return 1;
+	memset(dirtybuffer,1,videoram_size);
+
+	if ((dirtybuffer2 = malloc(punchout_videoram2_size)) == 0)
+	{
+		free(dirtybuffer);
+		return 1;
+	}
+	memset(dirtybuffer2,1,punchout_videoram2_size);
+
+	if ((tmpbitmap = bitmap_alloc(512,480)) == 0)
+	{
+		free(dirtybuffer);
+		free(dirtybuffer2);
+		return 1;
+	}
+
+	if ((bs1dirtybuffer = malloc(punchout_bigsprite1ram_size)) == 0)
+	{
+		bitmap_free(tmpbitmap);
+		free(dirtybuffer);
+		free(dirtybuffer2);
+		return 1;
+	}
+	memset(bs1dirtybuffer,1,punchout_bigsprite1ram_size);
+
+	if ((bs1tmpbitmap = bitmap_alloc(ARMWREST_BIGSPRITE_WIDTH,ARMWREST_BIGSPRITE_HEIGHT)) == 0)
+	{
+		bitmap_free(tmpbitmap);
+		free(dirtybuffer);
+		free(dirtybuffer2);
+		free(bs1dirtybuffer);
+		return 1;
+	}
+
+	if ((bs2dirtybuffer = malloc(punchout_bigsprite2ram_size)) == 0)
+	{
+		bitmap_free(tmpbitmap);
+		bitmap_free(bs1tmpbitmap);
+		free(dirtybuffer);
+		free(dirtybuffer2);
+		free(bs1dirtybuffer);
+		return 1;
+	}
+	memset(bs2dirtybuffer,1,punchout_bigsprite2ram_size);
+
+	if ((bs2tmpbitmap = bitmap_alloc(BIGSPRITE_WIDTH,BIGSPRITE_HEIGHT)) == 0)
+	{
+		bitmap_free(tmpbitmap);
+		bitmap_free(bs1tmpbitmap);
 		free(dirtybuffer);
 		free(dirtybuffer2);
 		free(bs1dirtybuffer);
@@ -244,14 +366,14 @@ void punchout_vh_stop(void)
 	free(dirtybuffer2);
 	free(bs1dirtybuffer);
 	free(bs2dirtybuffer);
-	osd_free_bitmap(tmpbitmap);
-	osd_free_bitmap(bs1tmpbitmap);
-	osd_free_bitmap(bs2tmpbitmap);
+	bitmap_free(tmpbitmap);
+	bitmap_free(bs1tmpbitmap);
+	bitmap_free(bs2tmpbitmap);
 }
 
 
 
-void punchout_videoram2_w(int offset,int data)
+WRITE_HANDLER( punchout_videoram2_w )
 {
 	if (punchout_videoram2[offset] != data)
 	{
@@ -261,7 +383,7 @@ void punchout_videoram2_w(int offset,int data)
 	}
 }
 
-void punchout_bigsprite1ram_w(int offset,int data)
+WRITE_HANDLER( punchout_bigsprite1ram_w )
 {
 	if (punchout_bigsprite1ram[offset] != data)
 	{
@@ -271,7 +393,7 @@ void punchout_bigsprite1ram_w(int offset,int data)
 	}
 }
 
-void punchout_bigsprite2ram_w(int offset,int data)
+WRITE_HANDLER( punchout_bigsprite2ram_w )
 {
 	if (punchout_bigsprite2ram[offset] != data)
 	{
@@ -283,8 +405,10 @@ void punchout_bigsprite2ram_w(int offset,int data)
 
 
 
-void punchout_palettebank_w(int offset,int data)
+WRITE_HANDLER( punchout_palettebank_w )
 {
+	*punchout_palettebank = data;
+
 	if (top_palette_bank != ((data >> 1) & 0x01))
 	{
 		top_palette_bank = (data >> 1) & 0x01;
@@ -308,7 +432,7 @@ void punchout_palettebank_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void punchout_vh_screenrefresh(struct osd_bitmap *bitmap)
+void punchout_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -352,7 +476,7 @@ void punchout_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 			drawgfx(tmpbitmap,Machine->gfx[1],
 					punchout_videoram2[offs] + 256 * (punchout_videoram2[offs + 1] & 0x03),
-					32 + ((~punchout_videoram2[offs + 1] & 0x7c) >> 2) + 64 * bottom_palette_bank,
+					((punchout_videoram2[offs + 1] & 0x7c) >> 2) + 64 * bottom_palette_bank,
 					punchout_videoram2[offs + 1] & 0x80,0,
 					8*sx,8*sy + 8*TOP_MONITOR_ROWS,
 					&backgroundvisiblearea,TRANSPARENCY_NONE,0);
@@ -375,7 +499,7 @@ void punchout_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 			drawgfx(bs1tmpbitmap,Machine->gfx[2],
 					punchout_bigsprite1ram[offs] + 256 * (punchout_bigsprite1ram[offs + 1] & 0x1f),
-					(~punchout_bigsprite1ram[offs + 3] & 0x1f) + 32 * bottom_palette_bank,
+					(punchout_bigsprite1ram[offs + 3] & 0x1f) + 32 * bottom_palette_bank,
 					punchout_bigsprite1ram[offs + 3] & 0x80,0,
 					8*sx,8*sy,
 					0,TRANSPARENCY_NONE,0);
@@ -398,7 +522,7 @@ void punchout_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 			drawgfx(bs2tmpbitmap,Machine->gfx[3],
 					punchout_bigsprite2ram[offs] + 256 * (punchout_bigsprite2ram[offs + 1] & 0x0f),
-					(~punchout_bigsprite2ram[offs + 3] & 0x3f) + 64 * bottom_palette_bank,
+					(punchout_bigsprite2ram[offs + 3] & 0x3f) + 64 * bottom_palette_bank,
 					punchout_bigsprite2ram[offs + 3] & 0x80,0,
 					8*sx,8*sy,
 					0,TRANSPARENCY_NONE,0);
@@ -416,51 +540,55 @@ void punchout_vh_screenrefresh(struct osd_bitmap *bitmap)
 		for (offs = 0;offs < BOTTOM_MONITOR_ROWS;offs++)
 			scroll[TOP_MONITOR_ROWS + offs] = -(58 + punchout_scroll[2*offs] + 256 * (punchout_scroll[2*offs + 1] & 0x01));
 
-		copyscrollbitmap(bitmap,tmpbitmap,TOP_MONITOR_ROWS + BOTTOM_MONITOR_ROWS,scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,TOP_MONITOR_ROWS + BOTTOM_MONITOR_ROWS,scroll,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 	/* copy the two big sprites */
 	{
-		int sx,sy,zoom,height;
-
+		int zoom;
 
 		zoom = punchout_bigsprite1[0] + 256 * (punchout_bigsprite1[1] & 0x0f);
 		if (zoom)
 		{
-			sx = 1024 - (punchout_bigsprite1[2] + 256 * (punchout_bigsprite1[3] & 0x0f)) / 4;
-			if (sx > 1024-127) sx -= 1024;
-			sx = sx * 0x1000 / zoom / 4;	/* adjust x position basing on zoom */
-			sx -= 57;	/* adjustment to match the screen shots */
+			int sx,sy;
+			UINT32 startx,starty;
+			int incxx,incyy;
 
-			sy = -punchout_bigsprite1[4] + 256 * (punchout_bigsprite1[5] & 1);
-			sy = sy * 0x1000 / zoom / 4;	/* adjust y position basing on zoom */
+			sx = 4096 - (punchout_bigsprite1[2] + 256 * (punchout_bigsprite1[3] & 0x0f));
+			if (sx > 4096-4*127) sx -= 4096;
 
-			/* when the sprite is reduced, it fits more than */
-			/* once in the screen, so if the first draw is */
-			/* offscreen the second can be visible */
-			height = 256 * 0x1000 / zoom / 4;	/* height of the zoomed sprite */
-			if (sy <= -height+16) sy += 2*height;	/* if offscreen, try moving it lower */
+			sy = -(punchout_bigsprite1[4] + 256 * (punchout_bigsprite1[5] & 1));
+			if (sy <= -256 + zoom/0x40) sy += 512;
 
-			sy += 3;	/* adjustment to match the screen shots */
-				/* have to be at least 3, using 2 creates a blank line at the bottom */
-				/* of the screen when you win the championship and jump around with */
-				/* the belt */
+			incxx = zoom << 6;
+			incyy = zoom << 6;
+
+			startx = -sx * 0x4000;
+			starty = -sy * 0x10000;
+			startx += 3740 * zoom;	/* adjustment to match the screen shots */
+			starty -= 178 * zoom;	/* and make the hall of fame picture nice */
+
+			if (punchout_bigsprite1[6] & 1)	/* flip x */
+			{
+				startx = (bs1tmpbitmap->width << 16) - startx - 1;
+				incxx = -incxx;
+			}
 
 			if (punchout_bigsprite1[7] & 1)	/* display in top monitor */
 			{
-				copybitmapzoom(bitmap,bs1tmpbitmap,
-						punchout_bigsprite1[6] & 1,0,
-						sx,sy - 8*(32-TOP_MONITOR_ROWS),
-						&topvisiblearea,TRANSPARENCY_COLOR,0,
-						0x10000 * 0x1000 / zoom / 4,0x10000 * 0x1000 / zoom / 4);
+				copyrozbitmap(bitmap,bs1tmpbitmap,
+					startx,starty + 0x200*(32-TOP_MONITOR_ROWS) * zoom,
+					incxx,0,0,incyy,	/* zoom, no rotation */
+					0,	/* no wraparound */
+					&topvisiblearea,TRANSPARENCY_COLOR,1024,0);
 			}
 			if (punchout_bigsprite1[7] & 2)	/* display in bottom monitor */
 			{
-				copybitmapzoom(bitmap,bs1tmpbitmap,
-						punchout_bigsprite1[6] & 1,0,
-						sx,sy + 8*TOP_MONITOR_ROWS,
-						&bottomvisiblearea,TRANSPARENCY_COLOR,0,
-						0x10000 * 0x1000 / zoom / 4,0x10000 * 0x1000 / zoom / 4);
+				copyrozbitmap(bitmap,bs1tmpbitmap,
+					startx,starty - 0x200*TOP_MONITOR_ROWS * zoom,
+					incxx,0,0,incyy,	/* zoom, no rotation */
+					0,	/* no wraparound */
+					&bottomvisiblearea,TRANSPARENCY_COLOR,1024,0);
 			}
 		}
 	}
@@ -478,6 +606,194 @@ void punchout_vh_screenrefresh(struct osd_bitmap *bitmap)
 		copybitmap(bitmap,bs2tmpbitmap,
 				punchout_bigsprite2[4] & 1,0,
 				sx,sy + 8*TOP_MONITOR_ROWS,
-				&bottomvisiblearea,TRANSPARENCY_COLOR,0);
+				&bottomvisiblearea,TRANSPARENCY_COLOR,1024);
+	}
+}
+
+
+void armwrest_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	int offs;
+
+
+	/* for every character in the Video RAM, check if it has been modified */
+	/* since last time and update it accordingly. */
+	for (offs = punchout_videoram2_size - 2;offs >= 0;offs -= 2)
+	{
+		if (dirtybuffer2[offs] | dirtybuffer2[offs + 1])
+		{
+			int sx,sy;
+
+
+			dirtybuffer2[offs] = 0;
+			dirtybuffer2[offs + 1] = 0;
+
+			sx = offs/2 % 32;
+			sy = offs/2 / 32;
+
+			if (sy >= 32)
+			{
+				/* top screen */
+				sy -= 32;
+				drawgfx(tmpbitmap,Machine->gfx[0],
+						punchout_videoram2[offs] + 256 * (punchout_videoram2[offs + 1] & 0x03) +
+								8 * (punchout_videoram2[offs + 1] & 0x80),
+						((punchout_videoram2[offs + 1] & 0x7c) >> 2) + 64 * top_palette_bank,
+						0,0,
+						8*sx,8*sy - 8*(32-TOP_MONITOR_ROWS),
+						&topvisiblearea,TRANSPARENCY_NONE,0);
+			}
+			else
+				/* bottom screen background */
+				drawgfx(tmpbitmap,Machine->gfx[0],
+						punchout_videoram2[offs] + 256 * (punchout_videoram2[offs + 1] & 0x03),
+						128 + ((punchout_videoram2[offs + 1] & 0x7c) >> 2) + 64 * bottom_palette_bank,
+						punchout_videoram2[offs + 1] & 0x80,0,
+						8*sx,8*sy + 8*TOP_MONITOR_ROWS,
+						&backgroundvisiblearea,TRANSPARENCY_NONE,0);
+		}
+	}
+
+	for (offs = punchout_bigsprite1ram_size - 4;offs >= 0;offs -= 4)
+	{
+		if (bs1dirtybuffer[offs] | bs1dirtybuffer[offs + 1] | bs1dirtybuffer[offs + 3])
+		{
+			int sx,sy;
+
+
+			bs1dirtybuffer[offs] = 0;
+			bs1dirtybuffer[offs + 1] = 0;
+			bs1dirtybuffer[offs + 3] = 0;
+
+			sx = offs/4 % 16;
+			sy = offs/4 / 16;
+			if (sy >= 16)
+			{
+				sy -= 16;
+				sx += 16;
+			}
+
+			drawgfx(bs1tmpbitmap,Machine->gfx[2],
+					punchout_bigsprite1ram[offs] + 256 * (punchout_bigsprite1ram[offs + 1] & 0x1f),
+					(punchout_bigsprite1ram[offs + 3] & 0x1f) + 32 * bottom_palette_bank,
+					punchout_bigsprite1ram[offs + 3] & 0x80,0,
+					8*sx,8*sy,
+					0,TRANSPARENCY_NONE,0);
+		}
+	}
+
+	for (offs = punchout_bigsprite2ram_size - 4;offs >= 0;offs -= 4)
+	{
+		if (bs2dirtybuffer[offs] | bs2dirtybuffer[offs + 1] | bs2dirtybuffer[offs + 3])
+		{
+			int sx,sy;
+
+
+			bs2dirtybuffer[offs] = 0;
+			bs2dirtybuffer[offs + 1] = 0;
+			bs2dirtybuffer[offs + 3] = 0;
+
+			sx = offs/4 % 16;
+			sy = offs/4 / 16;
+
+			drawgfx(bs2tmpbitmap,Machine->gfx[3],
+					punchout_bigsprite2ram[offs] + 256 * (punchout_bigsprite2ram[offs + 1] & 0x0f),
+					(punchout_bigsprite2ram[offs + 3] & 0x3f) + 64 * bottom_palette_bank,
+					punchout_bigsprite2ram[offs + 3] & 0x80,0,
+					8*sx,8*sy,
+					0,TRANSPARENCY_NONE,0);
+		}
+	}
+
+
+	/* copy the character mapped graphics */
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
+
+
+	/* copy the two big sprites */
+	{
+		int zoom;
+
+		zoom = punchout_bigsprite1[0] + 256 * (punchout_bigsprite1[1] & 0x0f);
+		if (zoom)
+		{
+			int sx,sy;
+			UINT32 startx,starty;
+			int incxx,incyy;
+
+			sx = 4096 - (punchout_bigsprite1[2] + 256 * (punchout_bigsprite1[3] & 0x0f));
+			if (sx > 4096-4*127) sx -= 4096;
+
+			sy = -(punchout_bigsprite1[4] + 256 * (punchout_bigsprite1[5] & 1));
+			if (sy <= -256 + zoom/0x40) sy += 512;
+
+			incxx = zoom << 6;
+			incyy = zoom << 6;
+
+			startx = -sx * 0x4000;
+			starty = -sy * 0x10000;
+			startx += 3740 * zoom;	/* adjustment to match the screen shots */
+			starty -= 178 * zoom;	/* and make the hall of fame picture nice */
+
+			if (punchout_bigsprite1[6] & 1)	/* flip x */
+			{
+				startx = (bs1tmpbitmap->width << 16) - startx - 1;
+				incxx = -incxx;
+			}
+
+			if (punchout_bigsprite1[7] & 1)	/* display in top monitor */
+			{
+				copyrozbitmap(bitmap,bs1tmpbitmap,
+					startx,starty + 0x200*(32-TOP_MONITOR_ROWS) * zoom,
+					incxx,0,0,incyy,	/* zoom, no rotation */
+					0,	/* no wraparound */
+					&topvisiblearea,TRANSPARENCY_COLOR,1024,0);
+			}
+			if (punchout_bigsprite1[7] & 2)	/* display in bottom monitor */
+			{
+				copyrozbitmap(bitmap,bs1tmpbitmap,
+					startx,starty - 0x200*TOP_MONITOR_ROWS * zoom,
+					incxx,0,0,incyy,	/* zoom, no rotation */
+					0,	/* no wraparound */
+					&bottomvisiblearea,TRANSPARENCY_COLOR,1024,0);
+			}
+		}
+	}
+	{
+		int sx,sy;
+
+
+		sx = 512 - (punchout_bigsprite2[0] + 256 * (punchout_bigsprite2[1] & 1));
+		if (sx > 512-127) sx -= 512;
+		sx -= 55;	/* adjustment to match the screen shots */
+
+		sy = -punchout_bigsprite2[2] + 256 * (punchout_bigsprite2[3] & 1);
+		sy += 3;	/* adjustment to match the screen shots */
+
+		copybitmap(bitmap,bs2tmpbitmap,
+				punchout_bigsprite2[4] & 1,0,
+				sx,sy + 8*TOP_MONITOR_ROWS,
+				&bottomvisiblearea,TRANSPARENCY_COLOR,1024);
+	}
+
+
+	/* draw the foregound chars */
+	for (offs = videoram_size - 2;offs >= 0;offs -= 2)
+	{
+		int sx,sy;
+
+
+		dirtybuffer[offs] = 0;
+		dirtybuffer[offs + 1] = 0;
+
+		sx = offs/2 % 32;
+		sy = offs/2 / 32;
+
+		drawgfx(bitmap,Machine->gfx[1],
+				videoram[offs] + 256 * (videoram[offs + 1] & 0x07),
+				((videoram[offs + 1] & 0xf8) >> 3) + 32 * bottom_palette_bank,
+				videoram[offs + 1] & 0x80,0,
+				8*sx,8*sy + 8*TOP_MONITOR_ROWS,
+				&backgroundvisiblearea,TRANSPARENCY_PEN,7);
 	}
 }

@@ -9,12 +9,10 @@
 
 #include "driver.h"
 #include "vidhrdw/generic.h"
-#include "Z80/Z80.h"
+#include "cpu/z80/z80.h"
 
 unsigned char *xevious_sharedram;
-unsigned char *xevious_vlatches;
 static unsigned char interrupt_enable_1,interrupt_enable_2,interrupt_enable_3;
-/* static int    HiScore; */
 
 static unsigned char *rom2a;
 static unsigned char *rom2b;
@@ -23,21 +21,21 @@ static int xevious_bs[2];
 
 static void *nmi_timer;
 
-void xevious_halt_w(int offset,int data);
+WRITE_HANDLER( xevious_halt_w );
 
 /* namco stick number array */
 /*
   Input bitmap
-    bit0 = UP    KEY
+    bit0 = UP	 KEY
     bit1 = RIGHT KEY
     bit2 = DOWN  KEY
     bit3 = LEFT  KEY
 
   Output direction
 	      0
-	    7   1
+	    7	1
 	  6   8   2
-	    5   3
+	    5	3
 	      4
  */
 unsigned char namco_key[16] =
@@ -46,37 +44,22 @@ unsigned char namco_key[16] =
 
 void xevious_init_machine(void)
 {
-	/* halt the slave CPUs until they're reset */
-	cpu_halt(1,0);
-	cpu_halt(2,0);
-
-	Machine->memory_region[0][0x8c00] = 1;
-	Machine->memory_region[0][0x8c01] = 1;
-
-	rom2a = Machine->memory_region[4];
-	rom2b = Machine->memory_region[4]+0x1000;
-	rom2c = Machine->memory_region[4]+0x3000;
+	rom2a = memory_region(REGION_GFX4);
+	rom2b = memory_region(REGION_GFX4)+0x1000;
+	rom2c = memory_region(REGION_GFX4)+0x3000;
 
 	nmi_timer = 0;
 
 	xevious_halt_w (0, 0);
-
-#if 0		/* bypass initial rom & ram test , goto hot start(namco) */
-	Machine->memory_region[0][0x15f] = 0xc3;	/* check sum break */
-	Machine->memory_region[0][0x160] = 0xee;	/* check sum break */
-	Machine->memory_region[0][0x161] = 0x01;	/* check sum break */
-
-	Machine->memory_region[0][0x268] = 0xfe;	/* check sum break */
-#endif
 }
 
 /* emulation for schematic 9B */
-void xevious_bs_w(int offset, int data)
+WRITE_HANDLER( xevious_bs_w )
 {
 	xevious_bs[offset & 0x01] = data;
 }
 
-int xevious_bb_r(int offset )
+READ_HANDLER( xevious_bb_r )
 {
 	int adr_2b,adr_2c;
 	int dat1,dat2;
@@ -113,19 +96,19 @@ int xevious_bb_r(int offset )
 	return dat2;
 }
 
-int xevious_sharedram_r(int offset)
+READ_HANDLER( xevious_sharedram_r )
 {
 	return xevious_sharedram[offset];
 }
 
-void xevious_sharedram_w(int offset,int data)
+WRITE_HANDLER( xevious_sharedram_w )
 {
 	xevious_sharedram[offset] = data;
 }
 
 
 
-int xevious_dsw_r(int offset)
+READ_HANDLER( xevious_dsw_r )
 {
 	int bit0,bit1;
 
@@ -148,11 +131,11 @@ static int rightcoinpercred,rightcredpercoin;
 static unsigned char customio[16];
 
 
-void xevious_customio_data_w(int offset,int data)
+WRITE_HANDLER( xevious_customio_data_w )
 {
 	customio[offset] = data;
 
-if (errorlog) fprintf(errorlog,"%04x: custom IO offset %02x data %02x\n",cpu_getpc(),offset,data);
+logerror("%04x: custom IO offset %02x data %02x\n",cpu_get_pc(),offset,data);
 
 	switch (customio_command)
 	{
@@ -193,9 +176,10 @@ if (errorlog) fprintf(errorlog,"%04x: custom IO offset %02x data %02x\n",cpu_get
 }
 
 
-int xevious_customio_data_r(int offset)
+READ_HANDLER( xevious_customio_data_r )
 {
-if (errorlog && customio_command != 0x71) fprintf(errorlog,"%04x: custom IO read offset %02x\n",cpu_getpc(),offset);
+	if (customio_command != 0x71)
+		logerror("%04x: custom IO read offset %02x\n",cpu_get_pc(),offset);
 
 	switch (customio_command)
 	{
@@ -302,7 +286,7 @@ if (errorlog && customio_command != 0x71) fprintf(errorlog,"%04x: custom IO read
 }
 
 
-int xevious_customio_r(int offset)
+READ_HANDLER( xevious_customio_r )
 {
 	return customio_command;
 }
@@ -313,9 +297,10 @@ void xevious_nmi_generate (int param)
 }
 
 
-void xevious_customio_w(int offset,int data)
+WRITE_HANDLER( xevious_customio_w )
 {
-if (errorlog && data != 0x10 && data != 0x71) fprintf(errorlog,"%04x: custom IO command %02x\n",cpu_getpc(),data);
+	if (data != 0x10 && data != 0x71)
+		logerror("%04x: custom IO command %02x\n",cpu_get_pc(),data);
 
 	customio_command = data;
 
@@ -324,7 +309,7 @@ if (errorlog && data != 0x10 && data != 0x71) fprintf(errorlog,"%04x: custom IO 
 		case 0x10:
 			if (nmi_timer) timer_remove (nmi_timer);
 			nmi_timer = 0;
-			return;	/* nop */
+			return; /* nop */
 	}
 
 	nmi_timer = timer_pulse (TIME_IN_USEC (50), 0, xevious_nmi_generate);
@@ -332,30 +317,23 @@ if (errorlog && data != 0x10 && data != 0x71) fprintf(errorlog,"%04x: custom IO 
 
 
 
-void xevious_halt_w(int offset,int data)
+WRITE_HANDLER( xevious_halt_w )
 {
-	static int reset23;
-
-	data &= 1;
-	if (data && !reset23)
+	if (data & 1)
 	{
-		cpu_reset (1);
-		cpu_reset (2);
-		cpu_halt (1,1);
-		cpu_halt (2,1);
+		cpu_set_reset_line(1,CLEAR_LINE);
+		cpu_set_reset_line(2,CLEAR_LINE);
 	}
-	else if (!data)
+	else
 	{
-		cpu_halt (1,0);
-		cpu_halt (2,0);
+		cpu_set_reset_line(1,ASSERT_LINE);
+		cpu_set_reset_line(2,ASSERT_LINE);
 	}
-
-	reset23 = data;
 }
 
 
 
-void xevious_interrupt_enable_1_w(int offset,int data)
+WRITE_HANDLER( xevious_interrupt_enable_1_w )
 {
 	interrupt_enable_1 = (data&1);
 }
@@ -370,7 +348,7 @@ int xevious_interrupt_1(void)
 
 
 
-void xevious_interrupt_enable_2_w(int offset,int data)
+WRITE_HANDLER( xevious_interrupt_enable_2_w )
 {
 	interrupt_enable_2 = data & 1;
 }
@@ -385,7 +363,7 @@ int xevious_interrupt_2(void)
 
 
 
-void xevious_interrupt_enable_3_w(int offset,int data)
+WRITE_HANDLER( xevious_interrupt_enable_3_w )
 {
 	interrupt_enable_3 = !(data & 1);
 }

@@ -9,21 +9,19 @@
 #include "driver.h"
 #include "vidhrdw/generic.h"
 
+/* from sndhrdw/pleiads.c */
+WRITE_HANDLER( pleiads_sound_control_c_w );
 
-
-unsigned char *phoenix_videoram2;
-unsigned char *phoenix_scroll;
-
+static unsigned char *ram_page1;
+static unsigned char *ram_page2;
+static unsigned char *current_ram_page;
+static int current_ram_page_index;
+static unsigned char bg_scroll;
 static int palette_bank;
+static int protection_question;
 
 
-
-static struct rectangle backtmparea =
-{
-	6*8, 32*8-1,
-	0*8, 32*8-1
-};
-
+#define BACKGROUND_VIDEORAM_OFFSET   0x0800
 
 
 /***************************************************************************
@@ -47,7 +45,7 @@ static struct rectangle backtmparea =
   plus 270 ohm pullup and pulldown resistors on all lines
 
 ***************************************************************************/
-void phoenix_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void phoenix_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -104,17 +102,125 @@ void phoenix_vh_convert_color_prom(unsigned char *palette, unsigned char *colort
 }
 
 
+/***************************************************************************
 
-void phoenix_videoreg_w (int offset,int data)
+  Start the video hardware emulation.
+
+***************************************************************************/
+int phoenix_vh_start(void)
 {
+	if ((ram_page1 = malloc(0x1000)) == 0)
+		return 1;
+
+	if ((ram_page2 = malloc(0x1000)) == 0)
+		return 1;
+
+    current_ram_page = 0;
+    current_ram_page_index = -1;
+
+	videoram_size = 0x0340;
+	return generic_vh_start();
+}
+
+
+
+/***************************************************************************
+
+  Stop the video hardware emulation.
+
+***************************************************************************/
+void phoenix_vh_stop(void)
+{
+	free(ram_page1);
+	free(ram_page2);
+
+	ram_page1 = 0;
+	ram_page2 = 0;
+
+	generic_vh_stop();
+}
+
+
+
+READ_HANDLER( phoenix_paged_ram_r )
+{
+	return current_ram_page[offset];
+}
+
+
+WRITE_HANDLER( phoenix_paged_ram_w )
+{
+	if ((offset >= BACKGROUND_VIDEORAM_OFFSET) &&
+		(offset <  BACKGROUND_VIDEORAM_OFFSET + videoram_size))
+	{
+		/* Background video RAM */
+		if (data != current_ram_page[offset])
+		{
+			dirtybuffer[offset - BACKGROUND_VIDEORAM_OFFSET] = 1;
+		}
+	}
+
+	current_ram_page[offset] = data;
+}
+
+
+WRITE_HANDLER( phoenix_videoreg_w )
+{
+    if (current_ram_page_index != (data & 1))
+	{
+		/* Set memory bank */
+		current_ram_page_index = data & 1;
+
+		current_ram_page = current_ram_page_index ? ram_page2 : ram_page1;
+
+		memset(dirtybuffer,1,videoram_size);
+	}
+
 	if (palette_bank != ((data >> 1) & 1))
 	{
 		palette_bank = (data >> 1) & 1;
 
 		memset(dirtybuffer,1,videoram_size);
 	}
+
+	protection_question = data & 0xfc;
+
+	/* I think bits 2 and 3 are used for something else in Pleiads as well,
+	   they are set in the routine starting at location 0x06bc */
+
+	/* send two bits to sound control C (not sure if they are there) */
+	pleiads_sound_control_c_w(offset, data);
 }
 
+
+WRITE_HANDLER( phoenix_scroll_w )
+{
+	bg_scroll = data;
+}
+
+
+READ_HANDLER( phoenix_input_port_0_r )
+{
+	int ret = input_port_0_r(0) & 0xf7;
+
+	/* handle Pleiads protection */
+	switch (protection_question)
+	{
+	case 0x00:
+	case 0x20:
+		/* Bit 3 is 0 */
+		break;
+	case 0x0c:
+	case 0x30:
+		/* Bit 3 is 1 */
+		ret	|= 0x08;
+		break;
+	default:
+		logerror("Unknown protection question %02X at %04X\n", protection_question, cpu_get_pc());
+	}
+
+	return ret;
+}
 
 
 /***************************************************************************
@@ -124,7 +230,7 @@ void phoenix_videoreg_w (int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void phoenix_vh_screenrefresh(struct osd_bitmap *bitmap)
+void phoenix_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -135,20 +241,22 @@ void phoenix_vh_screenrefresh(struct osd_bitmap *bitmap)
 	{
 		if (dirtybuffer[offs])
 		{
-			int sx,sy;
+			int sx,sy,code;
 
 
 			dirtybuffer[offs] = 0;
 
-			sx = 31 - offs / 32;
-			sy = offs % 32;
+			code = current_ram_page[offs + BACKGROUND_VIDEORAM_OFFSET];
+
+			sx = offs % 32;
+			sy = offs / 32;
 
 			drawgfx(tmpbitmap,Machine->gfx[0],
-					videoram[offs],
-					(videoram[offs] >> 5) + 8 * palette_bank,
+					code,
+					(code >> 5) + 8 * palette_bank,
 					0,0,
 					8*sx,8*sy,
-					&backtmparea,TRANSPARENCY_NONE,0);
+					0,TRANSPARENCY_NONE,0);
 		}
 	}
 
@@ -158,36 +266,36 @@ void phoenix_vh_screenrefresh(struct osd_bitmap *bitmap)
 		int scroll;
 
 
-		scroll = -*phoenix_scroll;
+		scroll = -bg_scroll;
 
-		copyscrollbitmap(bitmap,tmpbitmap,0,0,1,&scroll,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,1,&scroll,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 
 	/* draw the frontmost playfield. They are characters, but draw them as sprites */
 	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
-		int sx,sy;
+		int sx,sy,code;
 
 
-		sx = 31 - offs / 32;
-		sy = offs % 32;
+		code = current_ram_page[offs];
 
-		if (sy >= 1)
-		{
+		sx = offs % 32;
+		sy = offs / 32;
+
+		if (sx >= 1)
 			drawgfx(bitmap,Machine->gfx[1],
-					phoenix_videoram2[offs],
-					(phoenix_videoram2[offs] >> 5) + 8 * palette_bank,
+					code,
+					(code >> 5) + 8 * palette_bank,
 					0,0,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
-		}
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
 		else
 			drawgfx(bitmap,Machine->gfx[1],
-					phoenix_videoram2[offs],
-					(phoenix_videoram2[offs] >> 5) + 8 * palette_bank,
+					code,
+					(code >> 5) + 8 * palette_bank,
 					0,0,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 }

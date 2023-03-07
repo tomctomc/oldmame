@@ -35,7 +35,7 @@ unsigned char *espial_column_scroll;
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void espial_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void espial_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -65,16 +65,11 @@ void espial_vh_convert_color_prom(unsigned char *palette, unsigned char *colorta
 
 		color_prom++;
 	}
-
-
-	/* characters and sprites use the same palette */
-	for (i = 0;i < TOTAL_COLORS(0);i++)
-		COLOR(0,i) = i;
 }
 
 
 
-void espial_attributeram_w(int offset,int data)
+WRITE_HANDLER( espial_attributeram_w )
 {
 	if (espial_attributeram[offset] != data)
 	{
@@ -92,7 +87,7 @@ void espial_attributeram_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void espial_vh_screenrefresh(struct osd_bitmap *bitmap)
+void espial_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -129,7 +124,7 @@ void espial_vh_screenrefresh(struct osd_bitmap *bitmap)
 		for (offs = 0;offs < 32;offs++)
 			scroll[offs] = -espial_column_scroll[offs];
 
-		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 
@@ -154,13 +149,13 @@ void espial_vh_screenrefresh(struct osd_bitmap *bitmap)
 					color,
 					flipx,flipy,
 					sx,sy - 16,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
 			drawgfx(bitmap,Machine->gfx[1],
 					code + 1,
 					color,
 					flipx,flipy,
 					sx,sy,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
 		}
 		else
 			drawgfx(bitmap,Machine->gfx[1],
@@ -168,6 +163,6 @@ void espial_vh_screenrefresh(struct osd_bitmap *bitmap)
 					color,
 					flipx,flipy,
 					sx,sy,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
 }

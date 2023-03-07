@@ -2,6 +2,9 @@
 
 Cops'n Robbers memory map (preliminary)
 
+driver by Zsolt Vasvari
+
+
 0000-00ff RAM
 0c00-0fff Video RAM
 1200-1fff ROM
@@ -45,93 +48,95 @@ extern unsigned char *copsnrob_bulletsram;
 extern unsigned char *copsnrob_carimage;
 extern unsigned char *copsnrob_cary;
 extern unsigned char *copsnrob_trucky;
+extern unsigned char *copsnrob_truckram;
 
-extern int  copsnrob_gun_position_r(int offset);
-extern void copsnrob_vh_screenrefresh(struct osd_bitmap *bitmap);
+READ_HANDLER( copsnrob_gun_position_r );
+int copsnrob_vh_start(void);
+void copsnrob_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
 static struct MemoryReadAddress readmem[] =
 {
-        { 0x0000, 0x01ff, MRA_RAM },
-        { 0x0800, 0x08ff, MRA_RAM },
-        { 0x0b00, 0x0bff, MRA_RAM },
-        { 0x0c00, 0x0fff, MRA_RAM },
-        { 0x1000, 0x1000, input_port_0_r },
-        { 0x1002, 0x100e, copsnrob_gun_position_r},
-        { 0x1012, 0x1012, input_port_3_r },
-        { 0x1016, 0x1016, input_port_1_r },
-        { 0x101a, 0x101a, input_port_2_r },
-        { 0x1200, 0x1fff, MRA_ROM },
-        { 0xfff8, 0xffff, MRA_ROM },
-        { -1 }  /* end of table */
+	{ 0x0000, 0x01ff, MRA_RAM },
+	{ 0x0800, 0x08ff, MRA_RAM },
+	{ 0x0b00, 0x0bff, MRA_RAM },
+	{ 0x0c00, 0x0fff, MRA_RAM },
+	{ 0x1000, 0x1000, input_port_0_r },
+	{ 0x1002, 0x100e, copsnrob_gun_position_r},
+	{ 0x1012, 0x1012, input_port_3_r },
+	{ 0x1016, 0x1016, input_port_1_r },
+	{ 0x101a, 0x101a, input_port_2_r },
+	{ 0x1200, 0x1fff, MRA_ROM },
+	{ 0xfff8, 0xffff, MRA_ROM },
+	{ -1 }  /* end of table */
 };
 
 static struct MemoryWriteAddress writemem[] =
 {
-        { 0x0000, 0x01ff, MWA_RAM },
-        { 0x0500, 0x0503, MWA_RAM },
-        { 0x0504, 0x0507, MWA_NOP },  // ???
-        { 0x0600, 0x0600, MWA_RAM, &copsnrob_trucky },
-        { 0x0700, 0x07ff, MWA_RAM },
-        { 0x0800, 0x08ff, MWA_RAM, &copsnrob_bulletsram },
-        { 0x0900, 0x0903, MWA_RAM, &copsnrob_carimage },
-        { 0x0a00, 0x0a03, MWA_RAM, &copsnrob_cary },
-        { 0x0b00, 0x0bff, MWA_RAM },
-        { 0x0c00, 0x0fff, videoram_w, &videoram, &videoram_size },
-        { 0x1000, 0x1003, MWA_NOP },
-        { 0x1200, 0x1fff, MWA_ROM },
-        { 0xfff8, 0xffff, MWA_ROM },
-        { -1 }  /* end of table */
+	{ 0x0000, 0x01ff, MWA_RAM },
+	{ 0x0500, 0x0503, MWA_RAM },
+	{ 0x0504, 0x0507, MWA_NOP },  // ???
+	{ 0x0600, 0x0600, MWA_RAM, &copsnrob_trucky },
+	{ 0x0700, 0x07ff, MWA_RAM, &copsnrob_truckram },
+	{ 0x0800, 0x08ff, MWA_RAM, &copsnrob_bulletsram },
+	{ 0x0900, 0x0903, MWA_RAM, &copsnrob_carimage },
+	{ 0x0a00, 0x0a03, MWA_RAM, &copsnrob_cary },
+	{ 0x0b00, 0x0bff, MWA_RAM },
+	{ 0x0c00, 0x0fff, MWA_RAM, &videoram, &videoram_size },
+	{ 0x1000, 0x1003, MWA_NOP },
+	{ 0x1200, 0x1fff, MWA_ROM },
+	{ 0xfff8, 0xffff, MWA_ROM },
+	{ -1 }  /* end of table */
 };
 
 
-INPUT_PORTS_START( copsnrob_input_ports )
-        PORT_START      /* IN0 */
-        PORT_BIT( 0xFF, IP_ACTIVE_LOW, IPT_VBLANK )
+INPUT_PORTS_START( copsnrob )
+	PORT_START      /* IN0 */
+	PORT_BIT( 0xff, IP_ACTIVE_LOW, IPT_VBLANK )
 
-        PORT_START      /* IN1 */
-        PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START1 )
-        PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN1 )
+	PORT_START      /* IN1 */
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START1 )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN1 )
 
-        PORT_START      /* IN2 */
-        PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START2 )
-        PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )
+	PORT_START      /* IN2 */
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START2 )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )
 
-        PORT_START      /* DIP1 */
-        PORT_DIPNAME( 0x03, 0x03, "Coinage", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x03, "1 Coin/1 Player" )
-        PORT_DIPSETTING(    0x02, "1 Coin/2 Players" )
-        PORT_DIPSETTING(    0x01, "1 Coin/Game" )
-        PORT_DIPSETTING(    0x00, "2 Coins/1 Player" )
-        PORT_DIPNAME( 0x0C, 0x00, "Time Limit", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x0C, "1min" )
-        PORT_DIPSETTING(    0x08, "1min 45sec" )
-        PORT_DIPSETTING(    0x04, "2min 20sec" )
-        PORT_DIPSETTING(    0x00, "3min" )
-        PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER4)
-        PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER3)
-        PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER2)
-        PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER1)
+	PORT_START      /* DIP1 */
+	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Coinage ) )
+	PORT_DIPSETTING(    0x03, "1 Coin/1 Player" )
+	PORT_DIPSETTING(    0x02, "1 Coin/2 Players" )
+	PORT_DIPSETTING(    0x01, "1 Coin/Game" )
+	PORT_DIPSETTING(    0x00, "2 Coins/1 Player" )
+	PORT_DIPNAME( 0x0c, 0x00, "Time Limit" )
+	PORT_DIPSETTING(    0x0c, "1min" )
+	PORT_DIPSETTING(    0x08, "1min 45sec" )
+	PORT_DIPSETTING(    0x04, "2min 20sec" )
+	PORT_DIPSETTING(    0x00, "3min" )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER4)
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER3)
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER2)
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER1)
 
-        /* These input ports are fake */
-        PORT_START      /* IN3 */
-        PORT_BIT( 0x01, IP_ACTIVE_HIGH,IPT_JOYSTICK_UP   | IPF_PLAYER1 | IPF_4WAY )
-        PORT_BIT( 0x02, IP_ACTIVE_HIGH,IPT_JOYSTICK_DOWN | IPF_PLAYER1 | IPF_4WAY )
-        PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER1 )
+	/* These input ports are fake */
+	PORT_START      /* IN3 */
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH,IPT_JOYSTICK_UP   | IPF_PLAYER1 | IPF_4WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH,IPT_JOYSTICK_DOWN | IPF_PLAYER1 | IPF_4WAY )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER1 )
 
-        PORT_START      /* IN4 */
-        PORT_BIT( 0x01, IP_ACTIVE_HIGH,IPT_JOYSTICK_UP   | IPF_PLAYER2 | IPF_4WAY )
-        PORT_BIT( 0x02, IP_ACTIVE_HIGH,IPT_JOYSTICK_DOWN | IPF_PLAYER2 | IPF_4WAY )
-        PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER2 )
+	PORT_START      /* IN4 */
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH,IPT_JOYSTICK_UP   | IPF_PLAYER2 | IPF_4WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH,IPT_JOYSTICK_DOWN | IPF_PLAYER2 | IPF_4WAY )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER2 )
 
-        PORT_START      /* IN5 */
-        PORT_BIT( 0x01, IP_ACTIVE_HIGH,IPT_JOYSTICK_UP   | IPF_PLAYER3 | IPF_4WAY )
-        PORT_BIT( 0x02, IP_ACTIVE_HIGH,IPT_JOYSTICK_DOWN | IPF_PLAYER3 | IPF_4WAY )
-        PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER3 )
+	PORT_START      /* IN5 */
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH,IPT_JOYSTICK_UP   | IPF_PLAYER3 | IPF_4WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH,IPT_JOYSTICK_DOWN | IPF_PLAYER3 | IPF_4WAY )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER3 )
 
-        PORT_START      /* IN6 */
-        PORT_BIT( 0x01, IP_ACTIVE_HIGH,IPT_JOYSTICK_UP   | IPF_PLAYER4 | IPF_4WAY )
-        PORT_BIT( 0x02, IP_ACTIVE_HIGH,IPT_JOYSTICK_DOWN | IPF_PLAYER4 | IPF_4WAY )
-        PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER4 )
+	PORT_START      /* IN6 */
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH,IPT_JOYSTICK_UP   | IPF_PLAYER4 | IPF_4WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH,IPT_JOYSTICK_DOWN | IPF_PLAYER4 | IPF_4WAY )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER4 )
 INPUT_PORTS_END
 
 
@@ -181,61 +186,57 @@ static struct GfxLayout trucklayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-        { 1, 0x0000, &charlayout, 0, 3 }, /* offset into colors, # of colors */
-        { 1, 0x0200, &carlayout,  0, 3 },
-        { 1, 0x0a00, &trucklayout,0, 3 },
-        { -1 } /* end of array */
+	{ REGION_GFX1, 0, &charlayout,  0, 1 },
+	{ REGION_GFX2, 0, &carlayout,   0, 1 },
+	{ REGION_GFX3, 0, &trucklayout, 0, 1 },
+	{ -1 } /* end of array */
 };
 
 static unsigned char palette[] =
 {
-        0x00,0x00,0x00, /* Black */
-        0x40,0x40,0xc0, /* Blue */
-        0xf0,0xf0,0x30, /* Yellow */
-        0xbd,0x9b,0x13, /* Amber */
-
-        0xff,0x00,0x00  /* Red for MAME's use only */
+	0x00,0x00,0x00, /* black */
+	0xff,0xff,0xff  /* white */
 };
-
-static unsigned char colortable[] =
+static unsigned short colortable[] =
 {
-        0x00, 0x01,
-        0x00, 0x02,
-        0x00, 0x03
+	0x00, 0x01
 };
-
-
-static
-struct MachineDriver machine_driver =
+static void init_palette(unsigned char *game_palette, unsigned short *game_colortable,const unsigned char *color_prom)
 {
-        /* basic machine hardware */
-        {
-                {
-                        CPU_M6502,
-                        14318180/16, /* 894886.25 kHz */
-                        0,
-                        readmem,writemem,0,0,
-                        ignore_interrupt,1
-                }
-        },
-        60, DEFAULT_REAL_60HZ_VBLANK_DURATION,  /* frames per second, vblank duration */
-        1,      /* single CPU, no need for interleaving */
-        0,
+	memcpy(game_palette,palette,sizeof(palette));
+	memcpy(game_colortable,colortable,sizeof(colortable));
+}
 
-        /* video hardware */
-        32*8, 32*8, { 0*8, 32*8-1, 0*8, 32*8-1 },
-        gfxdecodeinfo,
-        sizeof(palette)/3,sizeof(colortable),
-        0,
 
-        VIDEO_TYPE_RASTER,
-        0,
-        generic_vh_start,
-        generic_vh_stop,
-        copsnrob_vh_screenrefresh,
+static struct MachineDriver machine_driver_copsnrob =
+{
+	/* basic machine hardware */
+	{
+		{
+			CPU_M6502,
+			14318180/16, /* 894886.25 kHz */
+			readmem,writemem,0,0,
+			ignore_interrupt,1
+		}
+	},
+	60, DEFAULT_REAL_60HZ_VBLANK_DURATION,  /* frames per second, vblank duration */
+	1,      /* single CPU, no need for interleaving */
+	0,
 
-        /* sound hardware */
-        0,0,0,0
+	/* video hardware */
+	32*8, 32*8, { 0*8, 32*8-1, 0*8, 26*8-1 },
+	gfxdecodeinfo,
+	2+32768, 2,
+	init_palette,
+
+	VIDEO_TYPE_RASTER | VIDEO_MODIFIES_PALETTE,
+	0,
+	copsnrob_vh_start,
+	0,
+	copsnrob_vh_screenrefresh,
+
+	/* sound hardware */
+	0,0,0,0
 };
 
 
@@ -248,44 +249,34 @@ struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( copsnrob_rom )
-        ROM_REGION(0x10000)     /* 64k for code */
-        ROM_LOAD( "5777.l7", 0x1200, 0x0200, 0x70ed0b77 )
-        ROM_LOAD( "5776.k7", 0x1400, 0x0200, 0xe23d6097 )
-        ROM_LOAD( "5775.j7", 0x1600, 0x0200, 0x6862fb70 )
-        ROM_LOAD( "5774.h7", 0x1800, 0x0200, 0xceee84fa )
-        ROM_LOAD( "5773.e7", 0x1a00, 0x0200, 0xe786eb50 )
-        ROM_LOAD( "5772.d7", 0x1c00, 0x0200, 0xdac265e4 )
-        ROM_LOAD( "5771.b7", 0x1e00, 0x0200, 0xab54ea82 )
-        ROM_RELOAD(          0xfe00, 0x0200 ) // For 6502 vectors
+ROM_START( copsnrob )
+	ROM_REGION( 0x10000, REGION_CPU1 )     /* 64k for code */
+	ROM_LOAD( "5777.l7",      0x1200, 0x0200, 0x2b62d627 )
+	ROM_LOAD( "5776.k7",      0x1400, 0x0200, 0x7fb12a49 )
+	ROM_LOAD( "5775.j7",      0x1600, 0x0200, 0x627dee63 )
+	ROM_LOAD( "5774.h7",      0x1800, 0x0200, 0xdfbcb7f2 )
+	ROM_LOAD( "5773.e7",      0x1a00, 0x0200, 0xff7c95f4 )
+	ROM_LOAD( "5772.d7",      0x1c00, 0x0200, 0x8d26afdc )
+	ROM_LOAD( "5771.b7",      0x1e00, 0x0200, 0xd61758d6 )
+	ROM_RELOAD(               0xfe00, 0x0200 ) // For 6502 vectors
 
-        ROM_REGION(0x0b00)     /* 2.75k for graphics */
-        ROM_LOAD( "5782.m3", 0x0000, 0x0200, 0xb072021e )
-        ROM_LOAD( "5778.p1", 0x0200, 0x0200, 0x4efd0003 )
-        ROM_LOAD( "5779.m1", 0x0400, 0x0200, 0x431e0122 )
-        ROM_LOAD( "5780.l1", 0x0600, 0x0200, 0x613d4043 )
-        ROM_LOAD( "5781.j1", 0x0800, 0x0200, 0x99937341 )
-        ROM_LOAD( "5770.m2", 0x0a00, 0x0100, 0x06fd0901 )
+	ROM_REGION( 0x0200, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "5782.m3",      0x0000, 0x0200, 0x82b86852 )
+
+	ROM_REGION( 0x0800, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "5778.p1",      0x0000, 0x0200, 0x78bff86a )
+	ROM_LOAD( "5779.m1",      0x0200, 0x0200, 0x8b1d0d83 )
+	ROM_LOAD( "5780.l1",      0x0400, 0x0200, 0x6f4c6bab )
+	ROM_LOAD( "5781.j1",      0x0600, 0x0200, 0xc87f2f13 )
+
+	ROM_REGION( 0x0100, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "5770.m2",      0x0000, 0x0100, 0xb00bbe77 )
+
+	ROM_REGION( 0x0060, REGION_PROMS )	 /* misc. PROMs (timing?) */
+	ROM_LOAD( "5765.h8",      0x0000, 0x0020, 0x6cd58931 )
+	ROM_LOAD( "5766.k8",      0x0020, 0x0020, 0xe63edf4f )
+	ROM_LOAD( "5767.j8",      0x0040, 0x0020, 0x381b5ae4 )
 ROM_END
 
 
-struct GameDriver copsnrob_driver =
-{
-        "Cops'n Robbers",
-        "copsnrob",
-        "Zsolt Vasvari",
-        &machine_driver,
-
-        copsnrob_rom,
-        0, 0,
-        0,
-        0,      /* sound_prom */
-
-        copsnrob_input_ports,
-
-        0, palette, colortable,
-        ORIENTATION_DEFAULT,
-
-        // This game doesn't keep track of high scores
-        0, 0
-};
+GAMEX( 1976, copsnrob, 0, copsnrob, copsnrob, 0, ROT0, "Atari", "Cops'n Robbers", GAME_NO_SOUND )

@@ -10,14 +10,14 @@
 #include "vidhrdw/generic.h"
 
 unsigned char *tankbatt_bulletsram;
-int tankbatt_bulletsram_size;
+size_t tankbatt_bulletsram_size;
 
 /***************************************************************************
 
   Convert the color PROMs into a more useable format.
 
 ***************************************************************************/
-void tankbatt_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void tankbatt_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -73,7 +73,7 @@ void tankbatt_vh_convert_color_prom(unsigned char *palette, unsigned char *color
   the main emulation engine.
 
 ***************************************************************************/
-void tankbatt_vh_screenrefresh(struct osd_bitmap *bitmap)
+void tankbatt_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -97,12 +97,12 @@ void tankbatt_vh_screenrefresh(struct osd_bitmap *bitmap)
 					(videoram[offs]) >> 2,
 					0,0,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 	/* copy the temporary bitmap to the screen */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 	/* Draw the bullets */
 	for (offs = 0;offs < tankbatt_bulletsram_size;offs += 2)
@@ -121,7 +121,7 @@ void tankbatt_vh_screenrefresh(struct osd_bitmap *bitmap)
 				color,
 				0,0,
 				x,y,
-				&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+				&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 }

@@ -33,7 +33,7 @@ static int flipscreen;
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void rocnrope_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void rocnrope_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -76,7 +76,7 @@ void rocnrope_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 
 
 
-void rocnrope_flipscreen_w(int offset,int data)
+WRITE_HANDLER( rocnrope_flipscreen_w )
 {
 	if (flipscreen != (~data & 1))
 	{
@@ -94,7 +94,7 @@ void rocnrope_flipscreen_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void rocnrope_vh_screenrefresh(struct osd_bitmap *bitmap)
+void rocnrope_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -127,13 +127,13 @@ void rocnrope_vh_screenrefresh(struct osd_bitmap *bitmap)
 					colorram[offs] & 0x0f,
 					flipx,flipy,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
 	/* copy the temporary bitmap to the screen */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 
 	/* Draw the sprites. */
@@ -144,6 +144,6 @@ void rocnrope_vh_screenrefresh(struct osd_bitmap *bitmap)
 				spriteram_2[offs] & 0x0f,
 				spriteram_2[offs] & 0x40,~spriteram_2[offs] & 0x80,
 				240-spriteram[offs],spriteram_2[offs + 1],
-				&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+				&Machine->visible_area,TRANSPARENCY_COLOR,0);
 	}
 }

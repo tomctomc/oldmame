@@ -11,6 +11,9 @@
 
 
 
+static int gfxbank;
+
+
 /***************************************************************************
 
   Convert the color PROMs into a more useable format.
@@ -32,7 +35,7 @@
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void champbas_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void champbas_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -65,12 +68,25 @@ void champbas_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 
 	/* color_prom now points to the beginning of the lookup table */
 
+	/* TODO: there are 32 colors in the palette, but we are suing only 16 */
+	/* the only difference between the two banks is color #14, grey instead of green */
+
 	/* character lookup table */
 	/* sprites use the same color lookup table as characters */
 	for (i = 0;i < TOTAL_COLORS(0);i++)
-		COLOR(0,i) = *(color_prom++);
+		COLOR(0,i) = (*(color_prom++) & 0x0f);
 }
 
+
+
+WRITE_HANDLER( champbas_gfxbank_w )
+{
+	if (gfxbank != (data & 1))
+	{
+		gfxbank = data & 1;
+		memset(dirtybuffer,1,videoram_size);
+	}
+}
 
 
 /***************************************************************************
@@ -80,7 +96,7 @@ void champbas_vh_convert_color_prom(unsigned char *palette, unsigned char *color
   the main emulation engine.
 
 ***************************************************************************/
-void champbas_vh_screenrefresh(struct osd_bitmap *bitmap)
+void champbas_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -99,29 +115,29 @@ void champbas_vh_screenrefresh(struct osd_bitmap *bitmap)
 			sx = 8 * (offs % 32);
 			sy = 8 * (offs / 32);
 
-			drawgfx(tmpbitmap,Machine->gfx[0],
+			drawgfx(tmpbitmap,Machine->gfx[0 + gfxbank],
 					videoram[offs],
-					colorram[offs]+32,
+					(colorram[offs] & 0x1f) + 32,
 					0,0,
 					sx,sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
 	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 
 	/* Draw the sprites. Note that it is important to draw them exactly in this */
 	/* order, to have the correct priorities. */
-	for (offs = spriteram_size - 2;offs > 0;offs -= 2)
+	for (offs = spriteram_size - 2;offs >= 0;offs -= 2)
 	{
-		drawgfx(bitmap,Machine->gfx[1],
+		drawgfx(bitmap,Machine->gfx[2 + gfxbank],
 				spriteram[offs] >> 2,
 				spriteram[offs + 1],
 				spriteram[offs] & 1,spriteram[offs] & 2,
-				255 - spriteram_2[offs + 1],spriteram_2[offs] - 16,
-				&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+				((256+16 - spriteram_2[offs + 1]) & 0xff) - 16,spriteram_2[offs] - 16,
+				&Machine->visible_area,TRANSPARENCY_COLOR,0);
 	}
 }

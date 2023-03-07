@@ -6,336 +6,648 @@
 
 ***************************************************************************/
 
+#ifndef WILLIAMS_BLITTERS
+
+
 #include "driver.h"
 #include "vidhrdw/generic.h"
 
+/* globals from machine/williams.c */
+extern UINT8 williams2_bank;
+extern UINT16 sinistar_clip;
+extern UINT8 williams_cocktail;
 
-extern unsigned char *williams_bank_select;
-extern unsigned char *blaster_bank_ram;
+/* RAM globals */
+UINT8 *williams_videoram;
+UINT8 *williams2_paletteram;
 
-extern int sinistar_clip;
-extern int williams_cocktail;
+/* blitter variables */
+UINT8 *williams_blitterram;
+UINT8 williams_blitter_xor;
+UINT8 williams_blitter_remap;
+UINT8 williams_blitter_clip;
 
-extern void williams_vram_select_w (int offset, int data);
+/* Blaster extra variables */
+UINT8 *blaster_video_bits;
+UINT8 *blaster_color_zero_table;
+UINT8 *blaster_color_zero_flags;
+static const UINT8 *blaster_remap;
+static UINT8 *blaster_remap_lookup;
+static UINT8 blaster_erase_screen;
+static UINT16 blaster_back_color;
 
+/* tilemap variables */
+UINT8 williams2_tilemap_mask;
+const UINT8 *williams2_row_to_palette; /* take care of IC79 and J1/J2 */
+UINT8 williams2_M7_flip;
+INT8  williams2_videoshift;
+UINT8 williams2_special_bg_color;
+static UINT8 williams2_fg_color; /* IC90 */
+static UINT8 williams2_bg_color; /* IC89 */
 
-unsigned char *williams_blitterram;
-unsigned char *williams_paletteram;
-unsigned char *williams_videoram;
-unsigned char *williams_remap_select;
-int williams_paletteram_size;
+/* later-Williams video control variables */
+UINT8 *williams2_blit_inhibit;
+UINT8 *williams2_xscroll_low;
+UINT8 *williams2_xscroll_high;
 
-unsigned char *blaster_video_bits;
-unsigned char *blaster_color_zero_table;
-unsigned char *blaster_color_zero_flags;
+/* control routines */
+void williams2_vh_stop(void);
 
-
-static const unsigned char *williams_remap;
-static unsigned char *williams_remap_lookup;
-static struct osd_bitmap *williams_bitmap;
-
-static int blitter_xor;
-static int blitter_solid;
-
-static int blaster_erase_screen;
-
-
-/* pixel plotters */
-
-typedef void (*put_pix_func) (int offset, int pix);
-
-static put_pix_func put_pix;
-
-static void put_pix_normal (int offset, int pix);
-static void put_pix_fx (int offset, int pix);
-static void put_pix_fy (int offset, int pix);
-static void put_pix_fx_fy (int offset, int pix);
-
-static void put_pix_swap (int offset, int pix);
-static void put_pix_swap_fx (int offset, int pix);
-static void put_pix_swap_fy (int offset, int pix);
-static void put_pix_swap_fx_fy (int offset, int pix);
-
+/* pixel copiers */
+static UINT8 *scanline_dirty;
+static void copy_pixels_8(struct osd_bitmap *bitmap, const struct rectangle *clip);
+static void copy_pixels_remap_8(struct osd_bitmap *bitmap, const struct rectangle *clip);
+static void copy_pixels_transparent_8(struct osd_bitmap *bitmap, const struct rectangle *clip);
+static void copy_pixels_16(struct osd_bitmap *bitmap, const struct rectangle *clip);
+static void copy_pixels_remap_16(struct osd_bitmap *bitmap, const struct rectangle *clip);
+static void copy_pixels_transparent_16(struct osd_bitmap *bitmap, const struct rectangle *clip);
 
 /* blitter functions */
+static void williams_blit_opaque(int sstart, int dstart, int w, int h, int data);
+static void williams_blit_transparent(int sstart, int dstart, int w, int h, int data);
+static void williams_blit_opaque_solid(int sstart, int dstart, int w, int h, int data);
+static void williams_blit_transparent_solid(int sstart, int dstart, int w, int h, int data);
+static void sinistar_blit_opaque(int sstart, int dstart, int w, int h, int data);
+static void sinistar_blit_transparent(int sstart, int dstart, int w, int h, int data);
+static void sinistar_blit_opaque_solid(int sstart, int dstart, int w, int h, int data);
+static void sinistar_blit_transparent_solid(int sstart, int dstart, int w, int h, int data);
+static void blaster_blit_opaque(int sstart, int dstart, int w, int h, int data);
+static void blaster_blit_transparent(int sstart, int dstart, int w, int h, int data);
+static void blaster_blit_opaque_solid(int sstart, int dstart, int w, int h, int data);
+static void blaster_blit_transparent_solid(int sstart, int dstart, int w, int h, int data);
+static void williams2_blit_opaque(int sstart, int dstart, int w, int h, int data);
+static void williams2_blit_transparent(int sstart, int dstart, int w, int h, int data);
+static void williams2_blit_opaque_solid(int sstart, int dstart, int w, int h, int data);
+static void williams2_blit_transparent_solid(int sstart, int dstart, int w, int h, int data);
 
-typedef void (*blitter_func)(int, int, int);
+/* blitter tables */
+static void (**blitter_table)(int, int, int, int, int);
 
-static blitter_func transparent_blitter_w;
-static blitter_func transparent_solid_blitter_w;
-static blitter_func opaque_blitter_w;
-static blitter_func opaque_solid_blitter_w;
-
-static void williams_transparent_blitter_w (int offset, int data, int keepmask);
-static void williams_transparent_solid_blitter_w (int offset, int data, int keepmask);
-static void williams_opaque_blitter_w (int offset, int data, int keepmask);
-static void williams_opaque_solid_blitter_w (int offset, int data, int keepmask);
-
-static void remap_transparent_blitter_w (int offset, int data, int keepmask);
-static void remap_transparent_solid_blitter_w (int offset, int data, int keepmask);
-static void remap_opaque_blitter_w (int offset, int data, int keepmask);
-
-static void sinistar_transparent_blitter_w (int offset, int data, int keepmask);
-static void sinistar_transparent_solid_blitter_w (int offset, int data, int keepmask);
-static void sinistar_opaque_blitter_w (int offset, int data, int keepmask);
-static void sinistar_opaque_solid_blitter_w (int offset, int data, int keepmask);
-
-
-
-/***************************************************************************
-
-	Common Williams routines
-
-***************************************************************************/
-
-/*
- *  Create the palette
- */
-
-void williams_vh_convert_color_prom (unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+static void (*williams_blitters[])(int, int, int, int, int) =
 {
-	int i;
-	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
-	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
+	williams_blit_opaque,
+	williams_blit_transparent,
+	williams_blit_opaque_solid,
+	williams_blit_transparent_solid
+};
 
-	/* the palette will be initialized by the game. We just set it to some */
-	/* pre-cooked values so the startup copyright notice can be displayed. */
-	for (i = 0;i < Machine->drv->total_colors;i++)
+static void (*sinistar_blitters[])(int, int, int, int, int) =
+{
+	sinistar_blit_opaque,
+	sinistar_blit_transparent,
+	sinistar_blit_opaque_solid,
+	sinistar_blit_transparent_solid
+};
+
+static void (*blaster_blitters[])(int, int, int, int, int) =
+{
+	blaster_blit_opaque,
+	blaster_blit_transparent,
+	blaster_blit_opaque_solid,
+	blaster_blit_transparent_solid
+};
+
+static void (*williams2_blitters[])(int, int, int, int, int) =
+{
+	williams2_blit_opaque,
+	williams2_blit_transparent,
+	williams2_blit_opaque_solid,
+	williams2_blit_transparent_solid
+};
+
+
+
+/*************************************
+ *
+ *	Dirty marking
+ *
+ *************************************/
+
+static void mark_dirty(int x1, int y1, int x2, int y2)
+{
+	int temp;
+
+	/* swap X/Y */
+	if (Machine->orientation & ORIENTATION_SWAP_XY)
 	{
-		*(palette++) = ((i & 1) >> 0) * 0xff;
-		*(palette++) = ((i & 2) >> 1) * 0xff;
-		*(palette++) = ((i & 4) >> 2) * 0xff;
+		temp = x1; x1 = y1; y1 = temp;
+		temp = x2; x2 = y2; y2 = temp;
 	}
 
-	/* no remap table by default */
-	williams_remap_lookup = 0;
+	/* flip X */
+	if (Machine->orientation & ORIENTATION_FLIP_X)
+	{
+		temp = Machine->scrbitmap->width - 1;
+		x1 = temp - x1;
+		x2 = temp - x2;
+		temp = x1; x1 = x2; x2 = temp;
+	}
+
+	/* flip Y */
+	if (Machine->orientation & ORIENTATION_FLIP_Y)
+	{
+		temp = Machine->scrbitmap->height - 1;
+		y1 = temp - y1;
+		y2 = temp - y2;
+		temp = y1; y1 = y2; y2 = temp;
+	}
+
+	/* mark it */
+	osd_mark_dirty(x1, y1, x2, y2, 0);
 }
 
 
-/*
- *  Start the video hardware emulation
- */
 
-int williams_vh_start (void)
+/*************************************
+ *
+ *	Early Williams video startup/shutdown
+ *
+ *************************************/
+
+int williams_vh_start(void)
 {
-	/* Allocate the offscreen bitmap */
-	williams_bitmap = osd_create_bitmap (Machine->drv->screen_width, Machine->drv->screen_height);
-	if (!williams_bitmap)
+	/* allocate space for video RAM and dirty scanlines */
+	williams_videoram = malloc(videoram_size + 256);
+	if (!williams_videoram)
 		return 1;
+	scanline_dirty = williams_videoram + videoram_size;
+	memset(williams_videoram, 0, videoram_size);
+	memset(scanline_dirty, 1, 256);
 
-	/* Allocate space for video ram  */
-	if ((williams_videoram = malloc (videoram_size)) == 0)
-	{
-		osd_free_bitmap (williams_bitmap);
-		return 1;
-	}
-	memset (williams_videoram, 0, videoram_size);
+	/* pick the blitters */
+	blitter_table = williams_blitters;
+	if (williams_blitter_remap) blitter_table = blaster_blitters;
+	if (williams_blitter_clip) blitter_table = sinistar_blitters;
 
-	/* By default xor with 4 (SC1 chip) */
-	blitter_xor = 4;
-
-	/* Set up the standard blitters */
-	transparent_blitter_w = williams_remap_lookup ? remap_transparent_blitter_w : williams_transparent_blitter_w;
-	opaque_blitter_w = williams_remap_lookup ? remap_opaque_blitter_w : williams_opaque_blitter_w;
-	transparent_solid_blitter_w = williams_remap_lookup ? remap_transparent_solid_blitter_w : williams_transparent_solid_blitter_w;
-	opaque_solid_blitter_w = williams_opaque_solid_blitter_w;
-
-	/* Reset the erase screen flag */
+	/* reset special-purpose flags */
+	blaster_remap_lookup = 0;
 	blaster_erase_screen = 0;
-
-	/* Set up the pixel plotter */
-	if (Machine->orientation & ORIENTATION_SWAP_XY)
-	{
-		if (Machine->orientation & ORIENTATION_FLIP_Y)
-		{
-			if (Machine->orientation & ORIENTATION_FLIP_X)
-				put_pix = put_pix_swap_fx_fy;
-			else
-				put_pix = put_pix_swap_fy;
-		}
-		else
-		{
-			if (Machine->orientation & ORIENTATION_FLIP_X)
-				put_pix = put_pix_swap_fx;
-			else
-				put_pix = put_pix_swap;
-		}
-	}
-	else
-	{
-		if (Machine->orientation & ORIENTATION_FLIP_Y)
-		{
-			if (Machine->orientation & ORIENTATION_FLIP_X)
-				put_pix = put_pix_fx_fy;
-			else
-				put_pix = put_pix_fy;
-		}
-		else
-		{
-			if (Machine->orientation & ORIENTATION_FLIP_X)
-				put_pix = put_pix_fx;
-			else
-				put_pix = put_pix_normal;
-		}
-	}
+	blaster_back_color = 0;
+	sinistar_clip = 0xffff;
 
 	return 0;
 }
 
 
-/*
- *  Start the video hardware emulation, but for an SC2 chip game
- */
-
-int williams_vh_start_sc2 (void)
-{
-	int result = williams_vh_start ();
-
-	/* the SC2 chip fixes the xor bug */
-	blitter_xor = 0;
-
-	return result;
-}
-
-
-/*
- *  Stop the video hardware emulation
- */
-
-void williams_vh_stop (void)
+void williams_vh_stop(void)
 {
 	/* free any remap lookup tables */
-	if (williams_remap_lookup)
-		free (williams_remap_lookup);
-	williams_remap_lookup = 0;
+	if (blaster_remap_lookup)
+		free(blaster_remap_lookup);
+	blaster_remap_lookup = NULL;
 
-	/* free other stuff */
-	free (williams_videoram);
-	osd_free_bitmap (williams_bitmap);
+	/* free video RAM */
+	if (williams_videoram)
+		free(williams_videoram);
+	williams_videoram = NULL;
+	scanline_dirty = NULL;
 }
 
 
-/*
- *  Update part of the screen (note that we go directly to the scrbitmap here!)
- */
 
-void williams_vh_update (int counter)
+/*************************************
+ *
+ *	Early Williams video update
+ *
+ *************************************/
+
+void williams_vh_update(int counter)
 {
 	struct rectangle clip;
-
-	/* we only update every 16 scan lines to keep things moving reasonably */
-	if (counter & 0x0f) return;
 
 	/* wrap around at the bottom */
 	if (counter == 0) counter = 256;
 
 	/* determine the clip rect */
-	clip.min_x = 0;
-	clip.max_x = Machine->drv->screen_width - 1;
+	clip.min_x = Machine->visible_area.min_x;
+	clip.max_x = Machine->visible_area.max_x;
 	clip.min_y = counter - 16;
 	clip.max_y = clip.min_y + 15;
 
 	/* combine the clip rect with the visible rect */
-	if (Machine->drv->visible_area.min_x > clip.min_x)
-		clip.min_x = Machine->drv->visible_area.min_x;
-	if (Machine->drv->visible_area.max_x < clip.max_x)
-		clip.max_x = Machine->drv->visible_area.max_x;
-	if (Machine->drv->visible_area.min_y > clip.min_y)
-		clip.min_y = Machine->drv->visible_area.min_y;
-	if (Machine->drv->visible_area.max_y < clip.max_y)
-		clip.max_y = Machine->drv->visible_area.max_y;
+	if (Machine->visible_area.min_y > clip.min_y)
+		clip.min_y = Machine->visible_area.min_y;
+	if (Machine->visible_area.max_y < clip.max_y)
+		clip.max_y = Machine->visible_area.max_y;
 
 	/* copy */
-	copybitmap (Machine->scrbitmap, williams_bitmap, 0, 0, 0, 0, &clip, TRANSPARENCY_NONE, 0);
+	if (Machine->scrbitmap->depth == 8)
+	{
+		if (williams_blitter_remap)
+			copy_pixels_remap_8(Machine->scrbitmap, &clip);
+		else
+			copy_pixels_8(Machine->scrbitmap, &clip);
+	}
+	else
+	{
+		if (williams_blitter_remap)
+			copy_pixels_remap_16(Machine->scrbitmap, &clip);
+		else
+			copy_pixels_16(Machine->scrbitmap, &clip);
+	}
 
 	/* optionally erase from lines 24 downward */
 	if (blaster_erase_screen && clip.max_y > 24)
 	{
 		int offset, count;
 
-		/* erase the actual bitmap */
+		/* don't erase above row 24 */
 		if (clip.min_y < 24) clip.min_y = 24;
-		fillbitmap (williams_bitmap, Machine->pens[0], &clip);
 
 		/* erase the memory associated with this area */
 		count = clip.max_y - clip.min_y + 1;
 		for (offset = clip.min_y; offset < videoram_size; offset += 0x100)
-			memset (&williams_videoram[offset], 0, count);
+			memset(&williams_videoram[offset], 0, count);
 	}
 }
 
 
-/*
- *  Video update - not needed, the video is updated in chunks
- */
-
-void williams_vh_screenrefresh (struct osd_bitmap *bitmap)
+void williams_vh_screenrefresh(struct osd_bitmap *bitmap, int full_refresh)
 {
+	/* full refresh forces us to redraw everything */
+	if (palette_recalc() || full_refresh)
+		memset(scanline_dirty, 1, 256);
 }
 
 
-/*
- *  Generic videoram write function; works for every game
- */
 
-void williams_videoram_w (int offset, int data)
+/*************************************
+ *
+ *	Early Williams video I/O
+ *
+ *************************************/
+
+WRITE_HANDLER( williams_videoram_w )
 {
-	/* Put the byte in the videoram */
+	/* only update if different */
+	if (williams_videoram[offset] != data)
+	{
+		/* store to videoram and mark the scanline dirty */
+		williams_videoram[offset] = data;
+		scanline_dirty[offset % 256] = 1;
+	}
+}
+
+
+READ_HANDLER( williams_video_counter_r )
+{
+	return cpu_getscanline() & 0xfc;
+}
+
+
+
+/*************************************
+ *
+ *	Later Williams video startup/shutdown
+ *
+ *************************************/
+
+int williams2_vh_start(void)
+{
+	/* standard initialization */
+	if (williams_vh_start())
+		return 1;
+
+	/* override the blitters */
+	blitter_table = williams2_blitters;
+
+	/* allocate a buffer for palette RAM */
+	williams2_paletteram = malloc(4 * 1024 * 4 / 8);
+	if (!williams2_paletteram)
+	{
+		williams2_vh_stop();
+		return 1;
+	}
+
+	/* clear it */
+	memset(williams2_paletteram, 0, 4 * 1024 * 4 / 8);
+
+	/* reset the FG/BG colors */
+	williams2_fg_color = 0;
+	williams2_bg_color = 0;
+
+	return 0;
+}
+
+
+void williams2_vh_stop(void)
+{
+	/* free palette RAM */
+	if (williams2_paletteram)
+		free(williams2_paletteram);
+	williams2_paletteram = NULL;
+
+	/* clean up other stuff */
+	williams_vh_stop();
+}
+
+
+
+/*************************************
+ *
+ *	Later Williams video update
+ *
+ *************************************/
+
+static void williams2_update_tiles(int y, const struct rectangle *clip)
+{
+	UINT8 *tileram = &memory_region(REGION_CPU1)[0xc000];
+	int xpixeloffset, xtileoffset;
+	int color, col;
+
+	/* assemble the bits that describe the X scroll offset */
+	xpixeloffset = (*williams2_xscroll_high & 1) * 12 +
+	               (*williams2_xscroll_low >> 7) * 6 +
+	               (*williams2_xscroll_low & 7) +
+	               williams2_videoshift;
+	xtileoffset = *williams2_xscroll_high >> 1;
+
+	/* adjust the offset for the row and compute the palette index */
+	tileram += y / 16;
+	color = williams2_row_to_palette[y / 16];
+
+	/* 12 columns wide, each block is 24 pixels wide, 288 pixel lines */
+	for (col = 0; col <= 12; col++)
+	{
+		unsigned int map = tileram[((col + xtileoffset) * 16) & 0x07ff];
+
+		drawgfx(Machine->scrbitmap, Machine->gfx[0], map & williams2_tilemap_mask,
+				color, map & williams2_M7_flip, 0, col * 24 - xpixeloffset, y,
+				&Machine->visible_area, TRANSPARENCY_NONE, 0);
+	}
+}
+
+
+void williams2_vh_update(int counter)
+{
+	struct rectangle clip;
+
+	/* wrap around at the bottom */
+	if (counter == 0) counter = 256;
+
+	/* determine the clip rect */
+	clip.min_x = Machine->visible_area.min_x;
+	clip.max_x = Machine->visible_area.max_x;
+	clip.min_y = counter - 16;
+	clip.max_y = clip.min_y + 15;
+
+	/* combine the clip rect with the visible rect */
+	if (Machine->visible_area.min_y > clip.min_y)
+		clip.min_y = Machine->visible_area.min_y;
+	if (Machine->visible_area.max_y < clip.max_y)
+		clip.max_y = Machine->visible_area.max_y;
+
+	/* redraw the tiles */
+	williams2_update_tiles(counter - 16, &clip);
+
+	/* copy the bitmap data on top of that */
+	if (Machine->scrbitmap->depth == 8)
+		copy_pixels_transparent_8(Machine->scrbitmap, &clip);
+	else
+		copy_pixels_transparent_16(Machine->scrbitmap, &clip);
+}
+
+
+
+/*************************************
+ *
+ *	Later Williams palette I/O
+ *
+ *************************************/
+
+static void williams2_modify_color(int color, int offset)
+{
+	static const UINT8 ztable[16] =
+	{
+		0x0, 0x3, 0x4,  0x5, 0x6, 0x7, 0x8,  0x9,
+		0xa, 0xb, 0xc,  0xd, 0xe, 0xf, 0x10, 0x11
+	};
+
+	UINT8 entry_lo = williams2_paletteram[offset * 2];
+	UINT8 entry_hi = williams2_paletteram[offset * 2 + 1];
+	UINT8 i = ztable[(entry_hi >> 4) & 15];
+	UINT8 b = ((entry_hi >> 0) & 15) * i;
+	UINT8 g = ((entry_lo >> 4) & 15) * i;
+	UINT8 r = ((entry_lo >> 0) & 15) * i;
+
+	palette_change_color(color, r, g, b);
+}
+
+
+static void williams2_update_fg_color(unsigned int offset)
+{
+	unsigned int page_offset = williams2_fg_color * 16;
+
+	/* only modify the palette if we're talking to the current page */
+	if (offset >= page_offset && offset < page_offset + 16)
+		williams2_modify_color(offset - page_offset, offset);
+}
+
+
+static void williams2_update_bg_color(unsigned int offset)
+{
+	unsigned int page_offset = williams2_bg_color * 16;
+
+	/* non-Mystic Marathon variant */
+	if (!williams2_special_bg_color)
+	{
+		/* only modify the palette if we're talking to the current page */
+		if (offset >= page_offset && offset < page_offset + Machine->drv->total_colors - 16)
+			williams2_modify_color(offset - page_offset + 16, offset);
+	}
+
+	/* Mystic Marathon variant */
+	else
+	{
+		/* only modify the palette if we're talking to the current page */
+		if (offset >= page_offset && offset < page_offset + 16)
+			williams2_modify_color(offset - page_offset + 16, offset);
+
+		/* check the secondary palette as well */
+		page_offset |= 0x10;
+		if (offset >= page_offset && offset < page_offset + 16)
+			williams2_modify_color(offset - page_offset + 32, offset);
+	}
+}
+
+
+WRITE_HANDLER( williams2_fg_select_w )
+{
+	unsigned int i, palindex;
+
+	/* if we're already mapped, leave it alone */
+	if (williams2_fg_color == data)
+		return;
+	williams2_fg_color = data & 0x3f;
+
+	/* remap the foreground colors */
+	palindex = williams2_fg_color * 16;
+	for (i = 0; i < 16; i++)
+		williams2_modify_color(i, palindex++);
+}
+
+
+WRITE_HANDLER( williams2_bg_select_w )
+{
+	unsigned int i, palindex;
+
+	/* if we're already mapped, leave it alone */
+	if (williams2_bg_color == data)
+		return;
+	williams2_bg_color = data & 0x3f;
+
+	/* non-Mystic Marathon variant */
+	if (!williams2_special_bg_color)
+	{
+		/* remap the background colors */
+		palindex = williams2_bg_color * 16;
+		for (i = 16; i < Machine->drv->total_colors; i++)
+			williams2_modify_color(i, palindex++);
+	}
+
+	/* Mystic Marathon variant */
+	else
+	{
+		/* remap the background colors */
+		palindex = williams2_bg_color * 16;
+		for (i = 16; i < 32; i++)
+			williams2_modify_color(i, palindex++);
+
+		/* remap the secondary background colors */
+		palindex = (williams2_bg_color | 1) * 16;
+		for (i = 32; i < 48; i++)
+			williams2_modify_color(i, palindex++);
+	}
+}
+
+
+
+/*************************************
+ *
+ *	Later Williams video I/O
+ *
+ *************************************/
+
+WRITE_HANDLER( williams2_videoram_w )
+{
+	/* bank 3 doesn't touch the screen */
+	if ((williams2_bank & 0x03) == 0x03)
+	{
+		/* bank 3 from $8000 - $8800 affects palette RAM */
+		if (offset >= 0x8000 && offset < 0x8800)
+		{
+			offset -= 0x8000;
+			williams2_paletteram[offset] = data;
+
+			/* update the palette value if necessary */
+			offset >>= 1;
+			williams2_update_fg_color(offset);
+			williams2_update_bg_color(offset);
+		}
+		return;
+	}
+
+	/* everyone else talks to the screen */
 	williams_videoram[offset] = data;
-
-	/* Put the pixels in our bitmap */
-	(*put_pix) (offset, data);
 }
 
 
-/*
- *  Generic palette write function; works for every game
- */
 
-void williams_palette_w (int offset, int data)
+/*************************************
+ *
+ *	Blaster-specific video start
+ *
+ *************************************/
+
+int blaster_vh_start(void)
 {
-	int r, g, b;
-	int bit0,bit1,bit2;
+	int i, j;
 
-	williams_paletteram[offset] = data;
+	/* standard startup first */
+	if (williams_vh_start())
+		return 1;
 
-	/* red component */
-	bit0 = (data >> 0) & 0x01;
-	bit1 = (data >> 1) & 0x01;
-	bit2 = (data >> 2) & 0x01;
-	r = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-	/* green component */
-	bit0 = (data >> 3) & 0x01;
-	bit1 = (data >> 4) & 0x01;
-	bit2 = (data >> 5) & 0x01;
-	g = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-	/* blue component */
-	bit0 = 0;
-	bit1 = (data >> 6) & 0x01;
-	bit2 = (data >> 7) & 0x01;
-	b = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
+	/* Expand the lookup table so that we do one lookup per byte */
+	blaster_remap_lookup = malloc(256 * 256);
+	if (blaster_remap_lookup)
+		for (i = 0; i < 256; i++)
+		{
+			const UINT8 *table = memory_region(REGION_PROMS) + (i & 0x7f) * 16;
+			for (j = 0; j < 256; j++)
+				blaster_remap_lookup[i * 256 + j] = (table[j >> 4] << 4) | table[j & 0x0f];
+		}
 
-	osd_modify_pen (Machine->pens[offset], r, g, b);
+	/* mark color 0 as transparent. we will draw the rainbow background behind it */
+	palette_used_colors[0] = PALETTE_COLOR_TRANSPARENT;
+	for (i = 0; i < 256; i++)
+	{
+		/* mark as used only the colors used for the visible background lines */
+		if (i < Machine->visible_area.min_y || i > Machine->visible_area.max_y)
+			palette_used_colors[16 + i] = PALETTE_COLOR_UNUSED;
+
+		/* TODO: this leaves us with a total of 255+1 colors used, which is just */
+		/* a bit too much for the palette system to handle them efficiently. */
+		/* As a quick workaround, I set the top three lines to be always black. */
+		/* To do it correctly, vh_screenrefresh() should group the background */
+		/* lines of the same color and mark the others as COLOR_UNUSED. */
+		/* The background is very redundant so this can be done easily. */
+		palette_used_colors[16 + 0 + Machine->visible_area.min_y] = PALETTE_COLOR_TRANSPARENT;
+		palette_used_colors[16 + 1 + Machine->visible_area.min_y] = PALETTE_COLOR_TRANSPARENT;
+		palette_used_colors[16 + 2 + Machine->visible_area.min_y] = PALETTE_COLOR_TRANSPARENT;
+	}
+
+	return 0;
 }
 
 
-/*
- *	Remap table select
- */
 
-void williams_remap_select_w (int offset, int data)
+/*************************************
+ *
+ *	Blaster-specific video refresh
+ *
+ *************************************/
+
+void blaster_vh_screenrefresh(struct osd_bitmap *bitmap, int full_refresh)
 {
-	*williams_remap_select = data;
-	williams_remap = williams_remap_lookup + data * 256;
+	int j;
+
+	/* recalculate palette -- unfortunately, there is no recourse if a */
+	/* major change occurs; we'll just have to eat it for one frame    */
+	for (j = 0; j < 0x100; j++)
+		paletteram_BBGGGRRR_w(j + 16, blaster_color_zero_table[j] ^ 0xff);
+	palette_recalc();
+
+	/* reset the background color for the next frame */
+	blaster_back_color = 0;
 }
 
 
 
-/***************************************************************************
+/*************************************
+ *
+ *	Blaster-specific enhancements
+ *
+ *************************************/
 
-	Common blitter routines
+WRITE_HANDLER( blaster_remap_select_w )
+{
+	blaster_remap = blaster_remap_lookup + data * 256;
+}
 
-***************************************************************************/
+
+WRITE_HANDLER( blaster_video_bits_w )
+{
+	*blaster_video_bits = data;
+	blaster_erase_screen = data & 0x02;
+}
+
+
+
+/*************************************
+ *
+ *	Blitter core
+ *
+ *************************************/
 
 /*
 
@@ -388,46 +700,330 @@ void williams_remap_select_w (int offset, int data)
 */
 
 
-/*
- *  Macros for blitter destination read/write access
- */
 
-#define williams_blitter_dest_r(o) (((o) < videoram_size) ? williams_videoram[o] : cpu_readmem16 (o))
-#define williams_blitter_dest_w(o,v) if ((o) < videoram_size) { williams_videoram[o] = (v); (*put_pix)((o), (v)); } else cpu_writemem16 ((o), (v))
+/*************************************
+ *
+ *	Blitter I/O
+ *
+ *************************************/
 
-
-/*
- *  Handler for the actual writes to the blitter
- */
-
-void williams_blitter_w (int offset, int data)
+WRITE_HANDLER( williams_blitter_w )
 {
-	blitter_func blitter_w;
-	int source, sstart, sxadv, syadv;
-	int dest, dstart, dxadv, dyadv;
-	int i, j, w, h;
-	int keepmask;
+	int sstart, dstart, w, h, count;
+
+	/* store the data */
+	williams_blitterram[offset] = data;
 
 	/* only writes to location 0 trigger the blit */
-	if (offset)
-	{
-		williams_blitterram[offset] = data;
+	if (offset != 0)
 		return;
-	}
 
 	/* compute the starting locations */
 	sstart = (williams_blitterram[2] << 8) + williams_blitterram[3];
 	dstart = (williams_blitterram[4] << 8) + williams_blitterram[5];
 
 	/* compute the width and height */
-	w = williams_blitterram[6] ^ blitter_xor;
-	h = williams_blitterram[7] ^ blitter_xor;
+	w = williams_blitterram[6] ^ williams_blitter_xor;
+	h = williams_blitterram[7] ^ williams_blitter_xor;
 
 	/* adjust the width and height */
 	if (w == 0) w = 1;
 	if (h == 0) h = 1;
 	if (w == 255) w = 256;
 	if (h == 255) h = 256;
+
+	/* call the appropriate blitter */
+	(*blitter_table[(data >> 3) & 3])(sstart, dstart, w, h, data);
+
+	/* compute the ending address */
+	if (data & 0x02)
+		count = h;
+	else
+		count = w + w * h;
+	if (count > 256) count = 256;
+
+	/* mark dirty */
+	w = dstart % 256;
+	while (count-- > 0)
+		scanline_dirty[w++ % 256] = 1;
+
+	/* Log blits */
+	logerror("---------- Blit %02X--------------PC: %04X\n",data,cpu_get_pc());
+	logerror("Source : %02X %02X\n",williams_blitterram[2],williams_blitterram[3]);
+	logerror("Dest   : %02X %02X\n",williams_blitterram[4],williams_blitterram[5]);
+	logerror("W H    : %02X %02X (%d,%d)\n",williams_blitterram[6],williams_blitterram[7],williams_blitterram[6]^4,williams_blitterram[7]^4);
+	logerror("Mask   : %02X\n",williams_blitterram[1]);
+}
+
+
+
+/*************************************
+ *
+ *	Blitter macros
+ *
+ *************************************/
+
+/* blit with pixel color 0 == transparent */
+#define BLIT_TRANSPARENT(offset, data, keepmask)		\
+{														\
+	data = REMAP(data);									\
+	if (data)											\
+	{													\
+		int pix = BLITTER_DEST_READ(offset);			\
+		int tempmask = keepmask;						\
+														\
+		if (!(data & 0xf0)) tempmask |= 0xf0;			\
+		if (!(data & 0x0f)) tempmask |= 0x0f;			\
+														\
+		pix = (pix & tempmask) | (data & ~tempmask);	\
+		BLITTER_DEST_WRITE(offset, pix);				\
+	}													\
+}
+
+/* blit with pixel color 0 == transparent, other pixels == solid color */
+#define BLIT_TRANSPARENT_SOLID(offset, data, keepmask)	\
+{														\
+	data = REMAP(data);									\
+	if (data)											\
+	{													\
+		int pix = BLITTER_DEST_READ(offset);			\
+		int tempmask = keepmask;						\
+														\
+		if (!(data & 0xf0)) tempmask |= 0xf0;			\
+		if (!(data & 0x0f)) tempmask |= 0x0f;			\
+														\
+		pix = (pix & tempmask) | (solid & ~tempmask);	\
+		BLITTER_DEST_WRITE(offset, pix);				\
+	}													\
+}
+
+/* blit with no transparency */
+#define BLIT_OPAQUE(offset, data, keepmask)				\
+{														\
+	int pix = BLITTER_DEST_READ(offset);				\
+	data = REMAP(data);									\
+	pix = (pix & keepmask) | (data & ~keepmask);		\
+	BLITTER_DEST_WRITE(offset, pix);					\
+}
+
+/* blit with no transparency in a solid color */
+#define BLIT_OPAQUE_SOLID(offset, data, keepmask)		\
+{														\
+	int pix = BLITTER_DEST_READ(offset);				\
+	pix = (pix & keepmask) | (solid & ~keepmask);		\
+	BLITTER_DEST_WRITE(offset, pix);					\
+	(void)srcdata;	/* keeps compiler happy */			\
+}
+
+
+/* early Williams blitters */
+#define WILLIAMS_DEST_WRITE(d,v)		if (d < 0x9800) williams_videoram[d] = v; else cpu_writemem16(d, v)
+#define WILLIAMS_DEST_READ(d)    		((d < 0x9800) ? williams_videoram[d] : cpu_readmem16(d))
+
+/* Sinistar blitter checks clipping circuit */
+#define SINISTAR_DEST_WRITE(d,v)		if (d < sinistar_clip) { if (d < 0x9800) williams_videoram[d] = v; else cpu_writemem16(d, v); }
+#define SINISTAR_DEST_READ(d)    		((d < 0x9800) ? williams_videoram[d] : cpu_readmem16(d))
+
+/* Blaster blitter remaps through a lookup table */
+#define BLASTER_DEST_WRITE(d,v)			if (d < 0x9700) williams_videoram[d] = v; else cpu_writemem16(d, v)
+#define BLASTER_DEST_READ(d)    		((d < 0x9700) ? williams_videoram[d] : cpu_readmem16(d))
+
+/* later Williams blitters */
+#define WILLIAMS2_DEST_WRITE(d,v)		if (d < 0x9000 && (williams2_bank & 0x03) != 0x03) williams_videoram[d] = v; else if (d < 0x9000 || d >= 0xc000 || *williams2_blit_inhibit == 0) cpu_writemem16(d, v)
+#define WILLIAMS2_DEST_READ(d)    		((d < 0x9000 && (williams2_bank & 0x03) != 0x03) ? williams_videoram[d] : cpu_readmem16(d))
+
+/* to remap or not remap */
+#define REMAP_FUNC(r)					blaster_remap[(r) & 0xff]
+#define NOREMAP_FUNC(r)					(r)
+
+/* define this so that we get the blitter code when we #include ourself */
+#define WILLIAMS_BLITTERS				1
+
+
+/**************** original williams blitters ****************/
+#define BLITTER_DEST_WRITE				WILLIAMS_DEST_WRITE
+#define BLITTER_DEST_READ				WILLIAMS_DEST_READ
+#define REMAP 							NOREMAP_FUNC
+
+#define BLITTER_OP 						BLIT_TRANSPARENT
+#define BLITTER_NAME					williams_blit_transparent
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_TRANSPARENT_SOLID
+#define BLITTER_NAME					williams_blit_transparent_solid
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_OPAQUE
+#define BLITTER_NAME					williams_blit_opaque
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_OPAQUE_SOLID
+#define BLITTER_NAME					williams_blit_opaque_solid
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#undef REMAP
+#undef BLITTER_DEST_WRITE
+#undef BLITTER_DEST_READ
+
+
+/**************** Sinistar-specific (clipping) blitters ****************/
+#define BLITTER_DEST_WRITE				SINISTAR_DEST_WRITE
+#define BLITTER_DEST_READ				SINISTAR_DEST_READ
+#define REMAP 							NOREMAP_FUNC
+
+#define BLITTER_OP 						BLIT_TRANSPARENT
+#define BLITTER_NAME					sinistar_blit_transparent
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_TRANSPARENT_SOLID
+#define BLITTER_NAME					sinistar_blit_transparent_solid
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_OPAQUE
+#define BLITTER_NAME					sinistar_blit_opaque
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_OPAQUE_SOLID
+#define BLITTER_NAME					sinistar_blit_opaque_solid
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#undef REMAP
+#undef BLITTER_DEST_WRITE
+#undef BLITTER_DEST_READ
+
+
+/**************** Blaster-specific (remapping) blitters ****************/
+#define BLITTER_DEST_WRITE				BLASTER_DEST_WRITE
+#define BLITTER_DEST_READ				BLASTER_DEST_READ
+#define REMAP 							REMAP_FUNC
+
+#define BLITTER_OP 						BLIT_TRANSPARENT
+#define BLITTER_NAME					blaster_blit_transparent
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_TRANSPARENT_SOLID
+#define BLITTER_NAME					blaster_blit_transparent_solid
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_OPAQUE
+#define BLITTER_NAME					blaster_blit_opaque
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_OPAQUE_SOLID
+#define BLITTER_NAME					blaster_blit_opaque_solid
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#undef REMAP
+#undef BLITTER_DEST_WRITE
+#undef BLITTER_DEST_READ
+
+
+/**************** Williams2-specific blitters ****************/
+#define BLITTER_DEST_WRITE				WILLIAMS2_DEST_WRITE
+#define BLITTER_DEST_READ				WILLIAMS2_DEST_READ
+#define REMAP 							NOREMAP_FUNC
+
+#define BLITTER_OP 						BLIT_TRANSPARENT
+#define BLITTER_NAME					williams2_blit_transparent
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_TRANSPARENT_SOLID
+#define BLITTER_NAME					williams2_blit_transparent_solid
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_OPAQUE
+#define BLITTER_NAME					williams2_blit_opaque
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#define BLITTER_OP 						BLIT_OPAQUE_SOLID
+#define BLITTER_NAME					williams2_blit_opaque_solid
+#include "williams.c"
+#undef BLITTER_NAME
+#undef BLITTER_OP
+
+#undef REMAP
+#undef BLITTER_DEST_WRITE
+#undef BLITTER_DEST_READ
+
+
+
+/*************************************
+ *
+ *	Pixel copy macros
+ *
+ *************************************/
+
+/* define this so that we get the pixel copying code when we #include ourself */
+#define WILLIAMS_COPIES 				1
+
+#define COPY_NAME 						copy_pixels_8
+#define COPY_REMAP_NAME					copy_pixels_remap_8
+#define COPY_TRANSPARENT_NAME			copy_pixels_transparent_8
+#define TYPE							UINT8
+#include "williams.c"
+#undef TYPE
+#undef COPY_TRANSPARENT_NAME
+#undef COPY_REMAP_NAME
+#undef COPY_NAME
+
+#define COPY_NAME 						copy_pixels_16
+#define COPY_REMAP_NAME					copy_pixels_remap_16
+#define COPY_TRANSPARENT_NAME			copy_pixels_transparent_16
+#define TYPE							UINT16
+#include "williams.c"
+#undef TYPE
+#undef COPY_TRANSPARENT_NAME
+#undef COPY_REMAP_NAME
+#undef COPY_NAME
+
+
+
+#elif !defined(WILLIAMS_COPIES)
+
+
+
+/*************************************
+ *
+ *	Blitter cores
+ *
+ *************************************/
+
+static void BLITTER_NAME(int sstart, int dstart, int w, int h, int data)
+{
+	int source, sxadv, syadv;
+	int dest, dxadv, dyadv;
+	int i, j, solid;
+	int keepmask;
 
 	/* compute how much to advance in the x and y loops */
 	sxadv = (data & 0x01) ? 0x100 : 1;
@@ -443,13 +1039,7 @@ void williams_blitter_w (int offset, int data)
 		return;
 
 	/* set the solid pixel value to the mask value */
-	blitter_solid = williams_blitterram[1];
-
-	/* pick the blitter */
-	if (data & 0x10)
-		blitter_w = (data & 0x08) ? transparent_solid_blitter_w : opaque_solid_blitter_w;
-	else
-		blitter_w = (data & 0x08) ? transparent_blitter_w : opaque_blitter_w;
+	solid = williams_blitterram[1];
 
 	/* first case: no shifting */
 	if (!(data & 0x20))
@@ -463,7 +1053,8 @@ void williams_blitter_w (int offset, int data)
 			/* loop over the width */
 			for (j = w; j > 0; j--)
 			{
-				(*blitter_w) (dest, cpu_readmem16 (source), keepmask);
+				int srcdata = cpu_readmem16(source);
+				BLITTER_OP(dest, srcdata, keepmask);
 
 				source = (source + sxadv) & 0xffff;
 				dest   = (dest + dxadv) & 0xffff;
@@ -473,449 +1064,407 @@ void williams_blitter_w (int offset, int data)
 			dstart += dyadv;
 		}
 	}
-
 	/* second case: shifted one pixel */
 	else
 	{
 		/* swap halves of the keep mask and the solid color */
 		keepmask = ((keepmask & 0xf0) >> 4) | ((keepmask & 0x0f) << 4);
-		blitter_solid = ((blitter_solid & 0xf0) >> 4) | ((blitter_solid & 0x0f) << 4);
+		solid = ((solid & 0xf0) >> 4) | ((solid & 0x0f) << 4);
 
 		/* loop over the height */
 		for (i = 0; i < h; i++)
 		{
-			int pixdata;
+			int pixdata, srcdata, shiftedmask;
 
 			source = sstart & 0xffff;
 			dest = dstart & 0xffff;
 
 			/* left edge case */
-			pixdata = cpu_readmem16 (source);
-			(*blitter_w) (dest, (pixdata >> 4) & 0x0f, keepmask | 0xf0);
+			pixdata = cpu_readmem16(source);
+			srcdata = (pixdata >> 4) & 0x0f;
+			shiftedmask = keepmask | 0xf0;
+			BLITTER_OP(dest, srcdata, shiftedmask);
 
 			source = (source + sxadv) & 0xffff;
 			dest   = (dest + dxadv) & 0xffff;
 
 			/* loop over the width */
-			for (j = w-1; j > 0; j--)
+			for (j = w - 1; j > 0; j--)
 			{
-				pixdata = (pixdata << 8) | cpu_readmem16 (source);
-				(*blitter_w) (dest, (pixdata >> 4) & 0xff, keepmask);
+				pixdata = (pixdata << 8) | cpu_readmem16(source);
+				srcdata = (pixdata >> 4) & 0xff;
+				BLITTER_OP(dest, srcdata, keepmask);
 
 				source = (source + sxadv) & 0xffff;
 				dest   = (dest + dxadv) & 0xffff;
 			}
 
 			/* right edge case */
-			(*blitter_w) (dest, (pixdata << 4) & 0xf0, keepmask | 0x0f);
+			srcdata = (pixdata << 4) & 0xf0;
+			shiftedmask = keepmask | 0x0f;
+			BLITTER_OP(dest, srcdata, shiftedmask);
 
 			sstart += syadv;
 			dstart += dyadv;
 		}
 	}
+}
 
-	/* Log blits */
-	if (errorlog)
+
+#else
+
+
+/*************************************
+ *
+ *	Copy pixels from videoram to
+ *	the screen bitmap
+ *
+ *************************************/
+
+static void COPY_NAME(struct osd_bitmap *bitmap, const struct rectangle *clip)
+{
+	const UINT16 *pens = Machine->pens;
+	int pairs = (clip->max_x - clip->min_x + 1) / 2;
+	int xoffset = clip->min_x;
+	int x, y;
+
+	/* standard case */
+	if (!(Machine->orientation & ORIENTATION_SWAP_XY))
 	{
-		fprintf(errorlog,"---------- Blit %02X--------------PC: %04X\n",data,cpu_getpc());
-		fprintf(errorlog,"Source : %02X %02X\n",williams_blitterram[2],williams_blitterram[3]);
-		fprintf(errorlog,"Dest   : %02X %02X\n",williams_blitterram[4],williams_blitterram[5]);
-		fprintf(errorlog,"W H    : %02X %02X (%d,%d)\n",williams_blitterram[6],williams_blitterram[7],williams_blitterram[6]^4,williams_blitterram[7]^4);
-		fprintf(errorlog,"Mask   : %02X\n",williams_blitterram[1]);
-	}
-}
-
-
-/*
- *  Default blitting routines
- */
-
-static void williams_transparent_blitter_w (int offset, int data, int keepmask)
-{
-	if (data)
-	{
-		int pix = williams_blitter_dest_r (offset);
-
-		if (!(data & 0xf0)) keepmask |= 0xf0;
-		if (!(data & 0x0f)) keepmask |= 0x0f;
-
-		pix = (pix & keepmask) | (data & ~keepmask);
-		williams_blitter_dest_w (offset, pix);
-	}
-}
-
-static void williams_transparent_solid_blitter_w (int offset, int data, int keepmask)
-{
-	if (data)
-	{
-		int pix = williams_blitter_dest_r (offset);
-
-		if (!(data & 0xf0)) keepmask |= 0xf0;
-		if (!(data & 0x0f)) keepmask |= 0x0f;
-
-		pix = (pix & keepmask) | (blitter_solid & ~keepmask);
-		williams_blitter_dest_w (offset, pix);
-	}
-}
-
-static void williams_opaque_blitter_w (int offset, int data, int keepmask)
-{
-	int pix = williams_blitter_dest_r (offset);
-	pix = (pix & keepmask) | (data & ~keepmask);
-	williams_blitter_dest_w (offset, pix);
-}
-
-static void williams_opaque_solid_blitter_w (int offset, int data, int keepmask)
-{
-	int pix = williams_blitter_dest_r (offset);
-	pix = (pix & keepmask) | (blitter_solid & ~keepmask);
-	williams_blitter_dest_w (offset, pix);
-}
-
-
-/*
- *  Remapping blitting routines; used by Blaster, maybe others
- */
-
-static void remap_transparent_blitter_w (int offset, int data, int keepmask)
-{
-	data = williams_remap[data & 0xff];
-	if (data)
-	{
-		int pix = williams_blitter_dest_r (offset);
-
-		if (!(data & 0xf0)) keepmask |= 0xf0;
-		if (!(data & 0x0f)) keepmask |= 0x0f;
-
-		pix = (pix & keepmask) | (data & ~keepmask);
-		williams_blitter_dest_w (offset, pix);
-	}
-}
-
-static void remap_transparent_solid_blitter_w (int offset, int data, int keepmask)
-{
-	data = williams_remap[data & 0xff];
-	if (data)
-	{
-		int pix = williams_blitter_dest_r (offset);
-
-		if (!(data & 0xf0)) keepmask |= 0xf0;
-		if (!(data & 0x0f)) keepmask |= 0x0f;
-
-		pix = (pix & keepmask) | (blitter_solid & ~keepmask);
-		williams_blitter_dest_w (offset, pix);
-	}
-}
-
-static void remap_opaque_blitter_w (int offset, int data, int keepmask)
-{
-	int pix = williams_blitter_dest_r (offset);
-	data = williams_remap[data & 0xff];
-	pix = (pix & keepmask) | (data & ~keepmask);
-	williams_blitter_dest_w (offset, pix);
-}
-
-
-
-/***************************************************************************
-
-	Utility functions to put 2 Pixels in the real bitmap
-
-***************************************************************************/
-
-static void put_pix_normal (int offset, int pix)
-{
-	int p1 = Machine->pens[pix >> 4], p2 = Machine->pens[pix & 0x0f];
-	int x = (offset / 256) * 2, y = offset % 256;
-	unsigned char *dest = &williams_bitmap->line[y][x];
-	*dest++ = p1;
-	*dest = p2;
-	osd_mark_dirty (x,y,x+1,y,0);
-}
-
-static void put_pix_fx (int offset, int pix)
-{
-	int p1 = Machine->pens[pix >> 4], p2 = Machine->pens[pix & 0x0f];
-	int x = (williams_bitmap->width-2) - (offset / 256) * 2, y = offset % 256;
-	unsigned char *dest = &williams_bitmap->line[y][x];
-	*dest++ = p2;
-	*dest = p1;
-	osd_mark_dirty (x,y,x+1,y,0);
-}
-
-static void put_pix_fy (int offset, int pix)
-{
-	int p1 = Machine->pens[pix >> 4], p2 = Machine->pens[pix & 0x0f];
-	int x = (offset / 256) * 2, y = (williams_bitmap->height-1) - (offset % 256);
-	unsigned char *dest = &williams_bitmap->line[y][x];
-	*dest++ = p1;
-	*dest = p2;
-	osd_mark_dirty (x,y,x+1,y,0);
-}
-
-static void put_pix_fx_fy (int offset, int pix)
-{
-	int p1 = Machine->pens[pix >> 4], p2 = Machine->pens[pix & 0x0f];
-	int x = (williams_bitmap->width-2) - (offset / 256) * 2, y = (williams_bitmap->height-1) - (offset % 256);
-	unsigned char *dest = &williams_bitmap->line[y][x];
-	*dest++ = p2;
-	*dest = p1;
-	osd_mark_dirty (x,y,x+1,y,0);
-}
-
-static void put_pix_swap (int offset, int pix)
-{
-	int p1 = Machine->pens[pix >> 4], p2 = Machine->pens[pix & 0x0f];
-	int y = (offset / 256) * 2, x = offset % 256;
-	williams_bitmap->line[y][x] = p1;
-	williams_bitmap->line[y+1][x] = p2;
-	osd_mark_dirty (x,y,x,y+1,0);
-}
-
-static void put_pix_swap_fx (int offset, int pix)
-{
-	int p1 = Machine->pens[pix >> 4], p2 = Machine->pens[pix & 0x0f];
-	int y = (offset / 256) * 2, x = (williams_bitmap->width-1) - offset % 256;
-	williams_bitmap->line[y][x] = p1;
-	williams_bitmap->line[y+1][x] = p2;
-	osd_mark_dirty (x,y,x,y+1,0);
-}
-
-static void put_pix_swap_fy (int offset, int pix)
-{
-	int p1 = Machine->pens[pix >> 4], p2 = Machine->pens[pix & 0x0f];
-	int y = (williams_bitmap->height-2) - (offset / 256) * 2, x = offset % 256;
-	williams_bitmap->line[y][x] = p2;
-	williams_bitmap->line[y+1][x] = p1;
-	osd_mark_dirty (x,y,x,y+1,0);
-}
-
-static void put_pix_swap_fx_fy (int offset, int pix)
-{
-	int p1 = Machine->pens[pix >> 4], p2 = Machine->pens[pix & 0x0f];
-	int y = (williams_bitmap->height-2) - (offset / 256) * 2, x = (williams_bitmap->width-1) - offset % 256;
-	williams_bitmap->line[y][x] = p2;
-	williams_bitmap->line[y+1][x] = p1;
-	osd_mark_dirty (x,y,x,y+1,0);
-}
-
-
-
-/***************************************************************************
-
-	Defender-specific routines
-
-***************************************************************************/
-
-/*
- * Defender video ram Write
- * Same as the others but Write in RAM[]
- */
-
-void defender_videoram_w (int offset, int data)
-{
-	/* Write to the real video RAM */
-	videoram[offset] = data;
-
-	/* Put the pixels in our bitmap */
-	(*put_pix) (offset, data);
-}
-
-
-
-/***************************************************************************
-
-	Sinistar-specific routines
-
-***************************************************************************/
-
-int sinistar_vh_start (void)
-{
-	int result = williams_vh_start ();
-
-	/* Sinistar uses special blitters with a clipping circuit */
-	transparent_blitter_w = sinistar_transparent_blitter_w;
-	transparent_solid_blitter_w = sinistar_transparent_solid_blitter_w;
-	opaque_blitter_w = sinistar_opaque_blitter_w;
-	opaque_solid_blitter_w = sinistar_opaque_solid_blitter_w;
-
-	return result;
-}
-
-
-/*
- *  Sinistar blitting routines -- same as above, but also perform clipping
- */
-
-static void sinistar_transparent_blitter_w (int offset, int data, int keepmask)
-{
-	if (data && (!sinistar_clip || offset < 0x7400))
-	{
-		int pix = williams_blitter_dest_r (offset);
-
-		if (!(data & 0xf0)) keepmask |= 0xf0;
-		if (!(data & 0x0f)) keepmask |= 0x0f;
-
-		pix = (pix & keepmask) | (data & ~keepmask);
-		williams_blitter_dest_w (offset, pix);
-	}
-}
-
-static void sinistar_transparent_solid_blitter_w (int offset, int data, int keepmask)
-{
-	if (data && (!sinistar_clip || offset < 0x7400))
-	{
-		int pix = williams_blitter_dest_r (offset);
-
-		if (!(data & 0xf0)) keepmask |= 0xf0;
-		if (!(data & 0x0f)) keepmask |= 0x0f;
-
-		pix = (pix & keepmask) | (blitter_solid & ~keepmask);
-		williams_blitter_dest_w (offset, pix);
-	}
-}
-
-static void sinistar_opaque_blitter_w (int offset, int data, int keepmask)
-{
-	if (!sinistar_clip || offset < 0x7400)
-	{
-		int pix = williams_blitter_dest_r (offset);
-		pix = (pix & keepmask) | (data & ~keepmask);
-		williams_blitter_dest_w (offset, pix);
-	}
-}
-
-static void sinistar_opaque_solid_blitter_w (int offset, int data, int keepmask)
-{
-	if (!sinistar_clip || offset < 0x7400)
-	{
-		int pix = williams_blitter_dest_r (offset);
-		pix = (pix & keepmask) | (blitter_solid & ~keepmask);
-		williams_blitter_dest_w (offset, pix);
-	}
-}
-
-
-
-/***************************************************************************
-
-	Blaster-specific routines
-
-***************************************************************************/
-
-/*
- *  Create the palette
- */
-
-void blaster_vh_convert_color_prom (unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
-{
-	int i;
-	unsigned char *pal;
-	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
-	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
-
-	pal = palette;
-
-	/* Set all the 256 colors because we need them to remap the color 0 */
-	for (i = 0;i < Machine->drv->total_colors;i++)
-	{
-		int bit0,bit1,bit2;
-
-		/* red component */
-		bit0 = (i >> 0) & 0x01;
-		bit1 = (i >> 1) & 0x01;
-		bit2 = (i >> 2) & 0x01;
-		*(palette++) = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-		/* green component */
-		bit0 = (i >> 3) & 0x01;
-		bit1 = (i >> 4) & 0x01;
-		bit2 = (i >> 5) & 0x01;
-		*(palette++) = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-		/* blue component */
-		bit0 = 0;
-		bit1 = (i >> 6) & 0x01;
-		bit2 = (i >> 7) & 0x01;
-		*(palette++) = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
-	}
-
-	/* Keep at least the pure red ones since the first 16 will be used for the game */
-	/* This important because the Robot grid uses those reds */
-	for (i = 0; i < 16*3; i++)
-		pal[i+64*3] = pal[i];
-
-	/* Expand the lookup table so that we do one lookup per byte */
-	williams_remap_lookup = malloc (256 * 256);
-	if (williams_remap_lookup)
-	{
-		for (i = 0; i < 256; i++)
+		/* loop over rows */
+		for (y = clip->min_y; y <= clip->max_y; y++)
 		{
-			const unsigned char *table = color_prom + (i & 0x7f) * 16;
-			int j;
-			for (j = 0; j < 256; j++)
-				williams_remap_lookup[i * 256 + j] = (table[j >> 4] << 4) | table[j & 0x0f];
+			const UINT8 *source = williams_videoram + y + 256 * (xoffset / 2);
+			TYPE *dest;
+
+			/* skip if not dirty */
+			if (!scanline_dirty[y]) continue;
+			scanline_dirty[y] = 0;
+			mark_dirty(clip->min_x, y, clip->max_x, y);
+
+			/* compute starting destination pixel based on flip */
+			if (!(Machine->orientation & ORIENTATION_FLIP_Y))
+				dest = &((TYPE *)bitmap->line[y])[0];
+			else
+				dest = &((TYPE *)bitmap->line[bitmap->height - 1 - y])[0];
+
+			/* non-X-flipped case */
+			if (!(Machine->orientation & ORIENTATION_FLIP_X))
+			{
+				dest += xoffset;
+				for (x = 0; x < pairs; x++, source += 256, dest += 2)
+				{
+					int pix = *source;
+					dest[0] = pens[pix >> 4];
+					dest[1] = pens[pix & 0x0f];
+				}
+			}
+
+			/* X-flipped case */
+			else
+			{
+				dest += bitmap->width - xoffset;
+				for (x = 0; x < pairs; x++, source += 256, dest -= 2)
+				{
+					int pix = *source;
+					dest[-1] = pens[pix >> 4];
+					dest[-2] = pens[pix & 0x0f];
+				}
+			}
+		}
+	}
+
+	/* X/Y swapped case */
+	else
+	{
+		int dy = (bitmap->line[1] - bitmap->line[0]) / sizeof(TYPE);
+
+		/* loop over rows */
+		for (y = clip->min_y; y <= clip->max_y; y++)
+		{
+			const UINT8 *source = williams_videoram + y + 256 * (xoffset / 2);
+			TYPE *dest;
+
+			/* skip if not dirty */
+			if (!scanline_dirty[y]) continue;
+			scanline_dirty[y] = 0;
+			mark_dirty(clip->min_x, y, clip->max_x, y);
+
+			/* compute starting destination pixel based on flip */
+			if (!(Machine->orientation & ORIENTATION_FLIP_X))
+				dest = &((TYPE *)bitmap->line[0])[y];
+			else
+				dest = &((TYPE *)bitmap->line[0])[bitmap->width - 1 - y];
+
+			/* non-Y-flipped case */
+			if (!(Machine->orientation & ORIENTATION_FLIP_Y))
+			{
+				dest += xoffset * dy;
+				for (x = 0; x < pairs; x++, source += 256, dest += dy + dy)
+				{
+					int pix = *source;
+					dest[0] = pens[pix >> 4];
+					dest[dy] = pens[pix & 0x0f];
+				}
+			}
+
+			/* Y-flipped case */
+			else
+			{
+				dest += (bitmap->height - xoffset) * dy;
+				for (x = 0; x < pairs; x++, source += 256, dest -= dy + dy)
+				{
+					int pix = *source;
+					dest[-dy] = pens[pix >> 4];
+					dest[-dy-dy] = pens[pix & 0x0f];
+				}
+			}
 		}
 	}
 }
 
 
-/*
- *  Blaster-specific screen refresh; handles the zero color palette change
- */
 
-void blaster_vh_screenrefresh (struct osd_bitmap *bitmap)
+/*************************************
+ *
+ *	Copy pixels from videoram to
+ *	the screen bitmap, handling
+ *	Blaster's color 0 latching
+ *
+ *************************************/
+
+static void COPY_REMAP_NAME(struct osd_bitmap *bitmap, const struct rectangle *clip)
 {
-	int i, j;
-	int back_color;
-	int pen0 = Machine->pens[0];
-	int back_pen;
-	int first = -1;
+	int pairs = (clip->max_x - clip->min_x + 1) / 2;
+	int xoffset = clip->min_x;
+	UINT16 pens[16];
+	int x, y;
 
-	/* Copy williams_bitmap in bitmap */
-	williams_vh_screenrefresh (bitmap);
+	/* copy the pens to start */
+	memcpy(pens, Machine->pens, sizeof(pens));
 
-	/* The color 0 of the palette can change at each video line */
-	/* Since we cannot do that on a PC, we do that in a copy of the bitmap */
-	/* This cannot be done in williams_bitmap because we have to keep the original bitmap intact */
-	if ((*blaster_video_bits & 0x01) != 0)
+	/* standard case */
+	if (!(Machine->orientation & ORIENTATION_SWAP_XY))
 	{
-		back_color = 0;
-
-		for (j = 0; j < 0x100; j++)
+		/* loop over rows */
+		for (y = clip->min_y; y <= clip->max_y; y++)
 		{
-			if ((blaster_color_zero_flags[j] & 0x01) != 0)
+			const UINT8 *source = williams_videoram + y + 256 * (xoffset / 2);
+			TYPE *dest;
+
+			/* pick the background pen */
+			if (*blaster_video_bits & 1)
 			{
-				back_color = blaster_color_zero_table[j] ^ 0xff;
-				if (back_color != 0)
-					if (back_color < 16)
-						back_color += 64; /* Since we lose the 16 first colors point elsewhere */
+				if (blaster_color_zero_flags[y] & 1)
+					blaster_back_color = (blaster_color_zero_table[y] != 0xff) ? 16 + y : 0;
+			}
+			else
+				blaster_back_color = 0;
+			pens[0] = Machine->pens[blaster_back_color];
+
+			/* compute starting destination pixel based on flip */
+			if (!(Machine->orientation & ORIENTATION_FLIP_Y))
+				dest = &((TYPE *)bitmap->line[y])[0];
+			else
+				dest = &((TYPE *)bitmap->line[bitmap->height - 1 - y])[0];
+
+			/* non-X-flipped case */
+			if (!(Machine->orientation & ORIENTATION_FLIP_X))
+			{
+				dest += xoffset;
+				for (x = 0; x < pairs; x++, source += 256, dest += 2)
+				{
+					int pix = *source;
+					dest[0] = pens[pix >> 4];
+					dest[1] = pens[pix & 0x0f];
+				}
 			}
 
-			/* Update the dirty marking */
-			if (back_color == 0)
+			/* X-flipped case */
+			else
 			{
-				if (first != -1) osd_mark_dirty (0, first, Machine->drv->screen_width - 1, j-1, 0);
-				continue;
+				dest += bitmap->width - xoffset;
+				for (x = 0; x < pairs; x++, source += 256, dest -= 2)
+				{
+					int pix = *source;
+					dest[-1] = pens[pix >> 4];
+					dest[-2] = pens[pix & 0x0f];
+				}
 			}
-			if (first == -1) first = j;
-
-			/* change all 0-colored pixels on this line */
-			back_pen = Machine->pens[back_color];
-			for (i = 0; i < Machine->drv->screen_width - 2; i++)
-				if (bitmap->line[j][i] == pen0)
-					bitmap->line[j][i] = back_pen;
 		}
+	}
 
-		if (first != -1) osd_mark_dirty (0, first, Machine->drv->screen_width - 1, 0xff, 0);
+	/* X/Y swapped case */
+	else
+	{
+		int dy = (bitmap->line[1] - bitmap->line[0]) / sizeof(TYPE);
+
+		/* loop over rows */
+		for (y = clip->min_y; y <= clip->max_y; y++)
+		{
+			const UINT8 *source = williams_videoram + y + 256 * (xoffset / 2);
+			TYPE *dest;
+
+			/* pick the background pen */
+			if (*blaster_video_bits & 1)
+			{
+				if (blaster_color_zero_flags[y] & 1)
+					blaster_back_color = (blaster_color_zero_table[y] != 0xff) ? 16 + y : 0;
+			}
+			else
+				blaster_back_color = 0;
+			pens[0] = Machine->pens[blaster_back_color];
+
+			/* compute starting destination pixel based on flip */
+			if (!(Machine->orientation & ORIENTATION_FLIP_X))
+				dest = &((TYPE *)bitmap->line[0])[y];
+			else
+				dest = &((TYPE *)bitmap->line[0])[bitmap->width - 1 - y];
+
+			/* non-Y-flipped case */
+			if (!(Machine->orientation & ORIENTATION_FLIP_Y))
+			{
+				dest += xoffset * dy;
+				for (x = 0; x < pairs; x++, source += 256, dest += dy + dy)
+				{
+					int pix = *source;
+					dest[0] = pens[pix >> 4];
+					dest[dy] = pens[pix & 0x0f];
+				}
+			}
+
+			/* Y-flipped case */
+			else
+			{
+				dest += (bitmap->height - xoffset) * dy;
+				for (x = 0; x < pairs; x++, source += 256, dest -= dy + dy)
+				{
+					int pix = *source;
+					dest[-dy] = pens[pix >> 4];
+					dest[-dy-dy] = pens[pix & 0x0f];
+				}
+			}
+		}
 	}
 }
 
 
-/*
- *  Blaster-specific video flags handler
- */
 
-void blaster_video_bits_w (int offset, int data)
+/*************************************
+ *
+ *	Copy pixels from videoram to
+ *	the screen bitmap, treating
+ *	color 0 pixels as transparent.
+ *
+ *************************************/
+
+static void COPY_TRANSPARENT_NAME(struct osd_bitmap *bitmap, const struct rectangle *clip)
 {
-	*blaster_video_bits = data;
-	blaster_erase_screen = data & 0x02;
+	const UINT16 *pens = Machine->pens;
+	int pairs = (clip->max_x - clip->min_x + 1) / 2;
+	int xoffset = clip->min_x;
+	int x, y;
+
+	/* standard case */
+	if (!(Machine->orientation & ORIENTATION_SWAP_XY))
+	{
+		/* loop over rows */
+		for (y = clip->min_y; y <= clip->max_y; y++)
+		{
+			const UINT8 *source = williams_videoram + y + 256 * (xoffset / 2);
+			TYPE *dest;
+
+			/* compute starting destination pixel based on flip */
+			if (!(Machine->orientation & ORIENTATION_FLIP_Y))
+				dest = &((TYPE *)bitmap->line[y])[0];
+			else
+				dest = &((TYPE *)bitmap->line[bitmap->height - 1 - y])[0];
+
+			/* non-X-flipped case */
+			if (!(Machine->orientation & ORIENTATION_FLIP_X))
+			{
+				dest += xoffset;
+				for (x = 0; x < pairs; x++, source += 256, dest += 2)
+				{
+					int pix = *source;
+					if (pix)
+					{
+						int p1 = pix >> 4, p2 = pix & 0x0f;
+						if (p1) dest[0] = pens[p1];
+						if (p2) dest[1] = pens[p2];
+					}
+				}
+			}
+
+			/* X-flipped case */
+			else
+			{
+				dest += bitmap->width - xoffset;
+				for (x = 0; x < pairs; x++, source += 256, dest -= 2)
+				{
+					int pix = *source;
+					if (pix)
+					{
+						int p1 = pix >> 4, p2 = pix & 0x0f;
+						if (p1) dest[-1] = pens[p1];
+						if (p2) dest[-2] = pens[p2];
+					}
+				}
+			}
+		}
+	}
+
+	/* X/Y swapped case */
+	else
+	{
+		int dy = (bitmap->line[1] - bitmap->line[0]) / sizeof(TYPE);
+
+		/* loop over rows */
+		for (y = clip->min_y; y <= clip->max_y; y++)
+		{
+			const UINT8 *source = williams_videoram + y + 256 * (xoffset / 2);
+			TYPE *dest;
+
+			/* compute starting destination pixel based on flip */
+			if (!(Machine->orientation & ORIENTATION_FLIP_X))
+				dest = &((TYPE *)bitmap->line[0])[y];
+			else
+				dest = &((TYPE *)bitmap->line[0])[bitmap->width - 1 - y];
+
+			/* non-Y-flipped case */
+			if (!(Machine->orientation & ORIENTATION_FLIP_Y))
+			{
+				dest += xoffset * dy;
+				for (x = 0; x < pairs; x++, source += 256, dest += dy + dy)
+				{
+					int pix = *source;
+					if (pix)
+					{
+						int p1 = pix >> 4, p2 = pix & 0x0f;
+						if (p1) dest[0] = pens[p1];
+						if (p2) dest[dy] = pens[p2];
+					}
+				}
+			}
+
+			/* Y-flipped case */
+			else
+			{
+				dest += (bitmap->height - xoffset) * dy;
+				for (x = 0; x < pairs; x++, source += 256, dest -= dy + dy)
+				{
+					int pix = *source;
+					if (pix)
+					{
+						int p1 = pix >> 4, p2 = pix & 0x0f;
+						if (p1) dest[-dy] = pens[p1];
+						if (p2) dest[-dy-dy] = pens[p2];
+					}
+				}
+			}
+		}
+	}
 }
+
+
+#endif

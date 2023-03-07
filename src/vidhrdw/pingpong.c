@@ -7,7 +7,7 @@
 ***************************************************************************/
 
 #include "driver.h"
-#include "generic.h"
+#include "vidhrdw/generic.h"
 
 
 
@@ -41,7 +41,7 @@ static struct rectangle spritevisiblearea =
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void pingpong_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void pingpong_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -100,7 +100,7 @@ void pingpong_vh_convert_color_prom(unsigned char *palette, unsigned char *color
   Draw the game screen in the given osd_bitmap.
 
 ***************************************************************************/
-void pingpong_vh_screenrefresh(struct osd_bitmap *bitmap)
+void pingpong_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -129,13 +129,13 @@ void pingpong_vh_screenrefresh(struct osd_bitmap *bitmap)
 					color,
 					flipx,flipy,
 					8 * sx,8 * sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
 	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 
 	/* Draw the sprites. Note that it is important to draw them exactly in this */

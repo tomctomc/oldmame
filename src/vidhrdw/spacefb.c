@@ -10,9 +10,7 @@
 #include "vidhrdw/generic.h"
 
 
-
-unsigned char spacefb_vref=0;
-
+static int video_control;
 
 
 /***************************************************************************
@@ -32,7 +30,7 @@ unsigned char spacefb_vref=0;
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void spacefb_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void spacefb_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 
@@ -64,6 +62,17 @@ void spacefb_vh_convert_color_prom(unsigned char *palette, unsigned char *colort
 }
 
 
+WRITE_HANDLER( spacefb_video_control_w )
+{
+	video_control = data;
+}
+
+
+WRITE_HANDLER( spacefb_port_2_w )
+{
+logerror("Port #2 = %02d\n",data);
+}
+
 
 /***************************************************************************
 
@@ -73,48 +82,74 @@ void spacefb_vh_convert_color_prom(unsigned char *palette, unsigned char *colort
 
 ***************************************************************************/
 
-void spacefb_vh_screenrefresh(struct osd_bitmap *bitmap)
+void spacefb_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
-	int spriteno;
+	int spriteno, col_bit2, flipscreen;
 
 
 
 	/* Clear the bitmap */
-	fillbitmap(bitmap,Machine->pens[0],&Machine->drv->visible_area);
+	fillbitmap(bitmap,Machine->pens[0],&Machine->visible_area);
 
 	/* Draw the sprite/chars */
-	for (offs = 0,spriteno = spacefb_vref;offs < 128;offs++,spriteno++)
+	spriteno = (video_control & 0x20) ? 0x80 : 0x00;
+	flipscreen = video_control & 0x01;
+
+	/* A4 of the color PROM, depending on a jumper setting, can either come
+	   from the CREF line or from sprite memory. CREF is the default
+	   according to the schematics */
+	col_bit2 = (video_control & 0x40) ? 0x04 : 0x00;
+
+	for (offs = 0; offs < 128; offs++, spriteno++)
 	{
-		unsigned char h,v,chr,cnt;
-		h = videoram[spriteno];
-		v = videoram[spriteno+0x100];
+		int sx,sy,code,cnt,col;
 
-		h = ((255-h)*256)/260;
-		v = 255-v;
 
-		chr = videoram[spriteno+0x200];
-		cnt = videoram[spriteno+0x300];
+		sx = 255 - videoram[spriteno];
+		sy = videoram[spriteno+0x100];
 
-		if (cnt) {
-			if (cnt & 0x20) {
-			/* Draw bullets */
-				unsigned char charnum = chr & 63;
+		code = videoram[spriteno+0x200];
+		cnt  = videoram[spriteno+0x300];
+
+		col = (~cnt & 0x03) | col_bit2;
+
+		if (cnt)
+		{
+			if (cnt & 0x20)
+			{
+				/* Draw bullets */
+
+				if (flipscreen)
+				{
+					sx = 260 - sx;
+					sy = 252 - sy;
+				}
+
 				drawgfx(bitmap,Machine->gfx[1],
-						charnum,
-						2,
-						0,0,v,h,
-						&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+						code & 0x3f,
+						col,
+						flipscreen,flipscreen,
+						sx,sy,
+						&Machine->visible_area,TRANSPARENCY_PEN,0);
 
-			} else if (cnt & 0x40) {
-				unsigned char charnum = 255-chr;
-				unsigned char pal = 7-(cnt & 0x7);
+			}
+			else if (cnt & 0x40)
+			{
+				sy -= 5;	/* aligns the spaceship and the bullet */
+
+				if (flipscreen)
+				{
+					sx = 256 - sx;
+					sy = 248 - sy;
+				}
 
 				drawgfx(bitmap,Machine->gfx[0],
-						charnum,
-						pal,
-						0,0,v,h,
-						&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+						255 - code,
+						col,
+						flipscreen,flipscreen,
+						sx,sy,
+						&Machine->visible_area,TRANSPARENCY_NONE,0);
 			}
 		}
 	}

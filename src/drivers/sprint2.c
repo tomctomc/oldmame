@@ -39,218 +39,220 @@ ask.  - Mike Balfour (mab22@po.cwru.edu)
 #include "vidhrdw/generic.h"
 
 /* vidhrdw/sprint2.c */
-extern void sprint1_vh_screenrefresh(struct osd_bitmap *bitmap);
-extern void sprint2_vh_screenrefresh(struct osd_bitmap *bitmap);
+extern void sprint1_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
+extern void sprint2_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 extern int sprint2_vh_start(void);
 extern void sprint2_vh_stop(void);
 extern unsigned char *sprint2_vert_car_ram;
 extern unsigned char *sprint2_horiz_ram;
 
 /* machine/sprint2.c */
-int sprint1_read_ports(int offset);
-int sprint2_read_ports(int offset);
-int sprint2_read_sync(int offset);
-int sprint2_coins(int offset);
-int sprint2_steering1(int offset);
-int sprint2_steering2(int offset);
-int sprint2_collision1(int offset);
-int sprint2_collision2(int offset);
-void sprint2_collision_reset1(int offset, int value);
-void sprint2_collision_reset2(int offset, int value);
-void sprint2_steering_reset1(int offset, int value);
-void sprint2_steering_reset2(int offset, int value);
-void sprint2_lamp1(int offset, int value);
-void sprint2_lamp2(int offset, int value);
+READ_HANDLER( sprint1_read_ports_r );
+READ_HANDLER( sprint2_read_ports_r );
+READ_HANDLER( sprint2_read_sync_r );
+READ_HANDLER( sprint2_coins_r );
+READ_HANDLER( sprint2_steering1_r );
+READ_HANDLER( sprint2_steering2_r );
+READ_HANDLER( sprint2_collision1_r );
+READ_HANDLER( sprint2_collision2_r );
+WRITE_HANDLER( sprint2_collision_reset1_w );
+WRITE_HANDLER( sprint2_collision_reset2_w );
+WRITE_HANDLER( sprint2_steering_reset1_w );
+WRITE_HANDLER( sprint2_steering_reset2_w );
+WRITE_HANDLER( sprint2_lamp1_w );
+WRITE_HANDLER( sprint2_lamp2_w );
 
 
 static struct MemoryReadAddress readmem[] =
 {
-        { 0x0010, 0x0013, MRA_RAM, &sprint2_horiz_ram }, /* WRAM */
-        { 0x0018, 0x001f, MRA_RAM, &sprint2_vert_car_ram }, /* WRAM */
-        { 0x0000, 0x03ff, MRA_RAM }, /* WRAM */
-        { 0x0400, 0x07ff, MRA_RAM }, /* DISPLAY RAM */
-        { 0x0800, 0x083f, sprint2_read_ports }, /* SWITCH */
-        { 0x0840, 0x087f, sprint2_coins },
-        { 0x0880, 0x08bf, sprint2_steering1 },
-        { 0x08c0, 0x08ff, sprint2_steering2 },
-        { 0x0900, 0x093f, sprint2_read_ports }, /* SWITCH */
-        { 0x0940, 0x097f, sprint2_coins },
-        { 0x0980, 0x09bf, sprint2_steering1 },
-        { 0x09c0, 0x09ff, sprint2_steering2 },
-        { 0x0a00, 0x0a3f, sprint2_read_ports }, /* SWITCH */
-        { 0x0a40, 0x0a7f, sprint2_coins },
-        { 0x0a80, 0x0abf, sprint2_steering1 },
-        { 0x0ac0, 0x0aff, sprint2_steering2 },
-        { 0x0b00, 0x0b3f, sprint2_read_ports }, /* SWITCH */
-        { 0x0b40, 0x0b7f, sprint2_coins },
-        { 0x0b80, 0x0bbf, sprint2_steering1 },
-        { 0x0bc0, 0x0bff, sprint2_steering2 },
-        { 0x0c00, 0x0fff, sprint2_read_sync }, /* SYNC */
-        { 0x1000, 0x13ff, sprint2_collision1 }, /* COLLISION 1 */
-        { 0x1400, 0x17ff, sprint2_collision2 }, /* COLLISION 2 */
-        { 0x2000, 0x3fff, MRA_ROM }, /* PROM1-PROM8 */
-        { 0xfff0, 0xffff, MRA_ROM }, /* PROM8 for 6502 vectors */
+	{ 0x0000, 0x03ff, MRA_RAM }, /* WRAM */
+	{ 0x0400, 0x07ff, MRA_RAM }, /* DISPLAY RAM */
+	{ 0x0800, 0x083f, sprint2_read_ports_r }, /* SWITCH */
+	{ 0x0840, 0x087f, sprint2_coins_r },
+	{ 0x0880, 0x08bf, sprint2_steering1_r },
+	{ 0x08c0, 0x08ff, sprint2_steering2_r },
+	{ 0x0900, 0x093f, sprint2_read_ports_r }, /* SWITCH */
+	{ 0x0940, 0x097f, sprint2_coins_r },
+	{ 0x0980, 0x09bf, sprint2_steering1_r },
+	{ 0x09c0, 0x09ff, sprint2_steering2_r },
+	{ 0x0a00, 0x0a3f, sprint2_read_ports_r }, /* SWITCH */
+	{ 0x0a40, 0x0a7f, sprint2_coins_r },
+	{ 0x0a80, 0x0abf, sprint2_steering1_r },
+	{ 0x0ac0, 0x0aff, sprint2_steering2_r },
+	{ 0x0b00, 0x0b3f, sprint2_read_ports_r }, /* SWITCH */
+	{ 0x0b40, 0x0b7f, sprint2_coins_r },
+	{ 0x0b80, 0x0bbf, sprint2_steering1_r },
+	{ 0x0bc0, 0x0bff, sprint2_steering2_r },
+	{ 0x0c00, 0x0fff, sprint2_read_sync_r }, /* SYNC */
+	{ 0x1000, 0x13ff, sprint2_collision1_r }, /* COLLISION 1 */
+	{ 0x1400, 0x17ff, sprint2_collision2_r }, /* COLLISION 2 */
+	{ 0x2000, 0x3fff, MRA_ROM }, /* PROM1-PROM8 */
+	{ 0xfff0, 0xffff, MRA_ROM }, /* PROM8 for 6502 vectors */
 	{ -1 }	/* end of table */
 };
 
 static struct MemoryWriteAddress writemem[] =
 {
-        { 0x0000, 0x03ff, MWA_RAM }, /* WRAM */
-        { 0x0400, 0x07ff, videoram_w, &videoram, &videoram_size }, /* DISPLAY */
-        { 0x0c00, 0x0c0f, MWA_RAM }, /* ATTRACT */
-        { 0x0c10, 0x0c1f, MWA_RAM }, /* SKID1 */
-        { 0x0c20, 0x0c2f, MWA_RAM }, /* SKID2 */
-        { 0x0c30, 0x0c3f, sprint2_lamp1 }, /* LAMP1 */
-        { 0x0c40, 0x0c4f, sprint2_lamp2 }, /* LAMP2 */
-        { 0x0c60, 0x0c6f, MWA_RAM }, /* SPARE */
-        { 0x0c80, 0x0cff, MWA_NOP }, /* TIMER RESET (watchdog) */
-        { 0x0d00, 0x0d7f, sprint2_collision_reset1 }, /* COLLISION RESET 1 */
-        { 0x0d80, 0x0dff, sprint2_collision_reset2 }, /* COLLISION RESET 2 */
-        { 0x0e00, 0x0e7f, sprint2_steering_reset1 }, /* STEERING RESET 1 */
-        { 0x0e80, 0x0eff, sprint2_steering_reset2 }, /* STEERING RESET 2 */
-        { 0x0f00, 0x0f7f, MWA_RAM }, /* NOISE RESET */
-        { 0x2000, 0x3fff, MWA_ROM }, /* PROM1-PROM8 */
+	{ 0x0000, 0x03ff, MWA_RAM }, /* WRAM */
+	{ 0x0010, 0x0013, MWA_RAM, &sprint2_horiz_ram }, /* WRAM */
+	{ 0x0018, 0x001f, MWA_RAM, &sprint2_vert_car_ram }, /* WRAM */
+	{ 0x0400, 0x07ff, videoram_w, &videoram, &videoram_size }, /* DISPLAY */
+	{ 0x0c00, 0x0c0f, MWA_RAM }, /* ATTRACT */
+	{ 0x0c10, 0x0c1f, MWA_RAM }, /* SKID1 */
+	{ 0x0c20, 0x0c2f, MWA_RAM }, /* SKID2 */
+	{ 0x0c30, 0x0c3f, sprint2_lamp1_w }, /* LAMP1 */
+	{ 0x0c40, 0x0c4f, sprint2_lamp2_w }, /* LAMP2 */
+	{ 0x0c60, 0x0c6f, MWA_RAM }, /* SPARE */
+	{ 0x0c80, 0x0cff, MWA_NOP }, /* TIMER RESET (watchdog) */
+	{ 0x0d00, 0x0d7f, sprint2_collision_reset1_w }, /* COLLISION RESET 1 */
+	{ 0x0d80, 0x0dff, sprint2_collision_reset2_w }, /* COLLISION RESET 2 */
+	{ 0x0e00, 0x0e7f, sprint2_steering_reset1_w }, /* STEERING RESET 1 */
+	{ 0x0e80, 0x0eff, sprint2_steering_reset2_w }, /* STEERING RESET 2 */
+	{ 0x0f00, 0x0f7f, MWA_RAM }, /* NOISE RESET */
+	{ 0x2000, 0x3fff, MWA_ROM }, /* PROM1-PROM8 */
 	{ -1 }	/* end of table */
 };
 
 /* The only difference is that we use "sprint1_read_ports" */
 static struct MemoryReadAddress sprint1_readmem[] =
 {
-        { 0x0010, 0x0013, MRA_RAM, &sprint2_horiz_ram }, /* WRAM */
-        { 0x0018, 0x001f, MRA_RAM, &sprint2_vert_car_ram }, /* WRAM */
-        { 0x0000, 0x03ff, MRA_RAM }, /* WRAM */
-        { 0x0400, 0x07ff, MRA_RAM }, /* DISPLAY RAM */
-        { 0x0800, 0x083f, sprint1_read_ports }, /* SWITCH */
-        { 0x0840, 0x087f, sprint2_coins },
-        { 0x0880, 0x08bf, sprint2_steering1 },
-        { 0x08c0, 0x08ff, sprint2_steering2 },
-        { 0x0900, 0x093f, sprint1_read_ports }, /* SWITCH */
-        { 0x0940, 0x097f, sprint2_coins },
-        { 0x0980, 0x09bf, sprint2_steering1 },
-        { 0x09c0, 0x09ff, sprint2_steering2 },
-        { 0x0a00, 0x0a3f, sprint1_read_ports }, /* SWITCH */
-        { 0x0a40, 0x0a7f, sprint2_coins },
-        { 0x0a80, 0x0abf, sprint2_steering1 },
-        { 0x0ac0, 0x0aff, sprint2_steering2 },
-        { 0x0b00, 0x0b3f, sprint1_read_ports }, /* SWITCH */
-        { 0x0b40, 0x0b7f, sprint2_coins },
-        { 0x0b80, 0x0bbf, sprint2_steering1 },
-        { 0x0bc0, 0x0bff, sprint2_steering2 },
-        { 0x0c00, 0x0fff, sprint2_read_sync }, /* SYNC */
-        { 0x1000, 0x13ff, sprint2_collision1 }, /* COLLISION 1 */
-        { 0x1400, 0x17ff, sprint2_collision2 }, /* COLLISION 2 */
-        { 0x2000, 0x3fff, MRA_ROM }, /* PROM1-PROM8 */
-        { 0xfff0, 0xffff, MRA_ROM }, /* PROM8 for 6502 vectors */
+	{ 0x0000, 0x03ff, MRA_RAM }, /* WRAM */
+	{ 0x0400, 0x07ff, MRA_RAM }, /* DISPLAY RAM */
+	{ 0x0800, 0x083f, sprint1_read_ports_r }, /* SWITCH */
+	{ 0x0840, 0x087f, sprint2_coins_r },
+	{ 0x0880, 0x08bf, sprint2_steering1_r },
+	{ 0x08c0, 0x08ff, sprint2_steering2_r },
+	{ 0x0900, 0x093f, sprint1_read_ports_r }, /* SWITCH */
+	{ 0x0940, 0x097f, sprint2_coins_r },
+	{ 0x0980, 0x09bf, sprint2_steering1_r },
+	{ 0x09c0, 0x09ff, sprint2_steering2_r },
+	{ 0x0a00, 0x0a3f, sprint1_read_ports_r }, /* SWITCH */
+	{ 0x0a40, 0x0a7f, sprint2_coins_r },
+	{ 0x0a80, 0x0abf, sprint2_steering1_r },
+	{ 0x0ac0, 0x0aff, sprint2_steering2_r },
+	{ 0x0b00, 0x0b3f, sprint1_read_ports_r }, /* SWITCH */
+	{ 0x0b40, 0x0b7f, sprint2_coins_r },
+	{ 0x0b80, 0x0bbf, sprint2_steering1_r },
+	{ 0x0bc0, 0x0bff, sprint2_steering2_r },
+	{ 0x0c00, 0x0fff, sprint2_read_sync_r }, /* SYNC */
+	{ 0x1000, 0x13ff, sprint2_collision1_r }, /* COLLISION 1 */
+	{ 0x1400, 0x17ff, sprint2_collision2_r }, /* COLLISION 2 */
+	{ 0x2000, 0x3fff, MRA_ROM }, /* PROM1-PROM8 */
+	{ 0xfff0, 0xffff, MRA_ROM }, /* PROM8 for 6502 vectors */
 	{ -1 }	/* end of table */
 };
 
-INPUT_PORTS_START( sprint2_input_ports )
-        PORT_START      /* DSW - fake port, gets mapped to Sprint2 ports */
-        PORT_DIPNAME( 0x01, 0x01, "Misc.", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x01, "Cycle 12 Tracks" )
-        PORT_DIPSETTING(    0x00, "Show Easy Track" )
-        PORT_DIPNAME( 0x02, 0x00, "Misc.", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x02, "No Oil Slicks" )
-        PORT_DIPSETTING(    0x00, "Oil Slicks" )
-        PORT_DIPNAME( 0x0C, 0x00, "Cost", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x0C, "Free" )
-        PORT_DIPSETTING(    0x08, "2 coins/player" )
-        PORT_DIPSETTING(    0x04, "1 coin/2 players" )
-        PORT_DIPSETTING(    0x00, "1 coin/player" )
-        PORT_DIPNAME( 0x10, 0x10, "Ext. Play", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x10, "None" )
-        PORT_DIPSETTING(    0x00, "30% of game length" )
-        PORT_DIPNAME( 0xC0, 0xC0, "Game Length", IP_KEY_NONE )
-        PORT_DIPSETTING(    0xC0, "60 seconds" )
-        PORT_DIPSETTING(    0x80, "90 seconds" )
-        PORT_DIPSETTING(    0x40, "120 seconds" )
-        PORT_DIPSETTING(    0x00, "150 seconds" )
+INPUT_PORTS_START( sprint2 )
+	PORT_START      /* DSW - fake port, gets mapped to Sprint2 ports */
+	PORT_DIPNAME( 0x01, 0x00, "Tracks on Demo" )
+	PORT_DIPSETTING(    0x00, "Easy Track Only" )
+	PORT_DIPSETTING(    0x01, "Cycle 12 Tracks" )
+	PORT_DIPNAME( 0x02, 0x00, "Oil Slicks" )
+	PORT_DIPSETTING(    0x02, DEF_STR( No ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Yes ) )
+	PORT_DIPNAME( 0x0c, 0x00, DEF_STR( Coinage )  )
+	PORT_DIPSETTING(    0x08, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x10, 0x00, DEF_STR( Unused) )
+	PORT_DIPSETTING(    0x10, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x20, 0x00, "Allow Extended Play" )
+	PORT_DIPSETTING(    0x20, DEF_STR( No ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Yes ) )
+	PORT_DIPNAME( 0xc0, 0x00, "Real Game Length" )
+	PORT_DIPSETTING(    0xc0, "60 seconds" )
+	PORT_DIPSETTING(    0x80, "90 seconds" )
+	PORT_DIPSETTING(    0x40, "120 seconds" )
+	PORT_DIPSETTING(    0x00, "150 seconds" )
 
-        PORT_START      /* IN0 - fake port, gets mapped to Sprint2 ports */
-        PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN, "1st gear (P1)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT, "2nd gear (P1)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x04, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT, "3rd gear (P1)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP, "4th gear (P1)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x10, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN | IPF_PLAYER2, "1st gear (P2)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x20, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT | IPF_PLAYER2, "2nd gear (P2)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x40, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT | IPF_PLAYER2, "3rd gear (P2)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x80, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP | IPF_PLAYER2, "4th gear (P2)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
+	PORT_START      /* IN0 - fake port, gets mapped to Sprint2 ports */
+	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN,  "P1 1st gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT,  "P1 2nd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x04, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT, "P1 3rd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP,    "P1 4th gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x10, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN  | IPF_PLAYER2, "P2 1st gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x20, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT  | IPF_PLAYER2, "P2 2nd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x40, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT | IPF_PLAYER2, "P2 3rd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x80, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP    | IPF_PLAYER2, "P2 4th gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
 
-        PORT_START      /* IN1 - fake port, gets mapped to Sprint2 ports */
-        PORT_BITX(0x01, IP_ACTIVE_LOW, IPT_BUTTON1, "Gas (P1)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x02, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER2, "Gas (P2)", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x04, IP_ACTIVE_LOW, IPT_SERVICE, "Self Test", OSD_KEY_F2, IP_JOY_NONE, 0 )
-        PORT_BIT ( 0x08, IP_ACTIVE_LOW, IPT_START1 )
-        PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_START2 )
-        PORT_BITX(0x20, IP_ACTIVE_LOW, IPT_BUTTON2, "Track Select", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
+	PORT_START      /* IN1 - fake port, gets mapped to Sprint2 ports */
+	PORT_BITX(0x01, IP_ACTIVE_LOW, IPT_BUTTON1, "P1 Gas", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x02, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER2, "P2 Gas", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x04, IP_ACTIVE_LOW, IPT_SERVICE, "Self Test", KEYCODE_F2, IP_JOY_NONE )
+	PORT_BIT (0x08, IP_ACTIVE_LOW, IPT_START1 )
+	PORT_BIT (0x10, IP_ACTIVE_LOW, IPT_START2 )
+	PORT_BITX(0x20, IP_ACTIVE_LOW, IPT_BUTTON2, "Track Select", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
 
-        PORT_START      /* IN2 */
-        PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_VBLANK )
-        PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_START      /* IN2 */
+	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_VBLANK )
+	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
 
-        PORT_START      /* IN3 */
-        PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )
-        PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )
+	PORT_START      /* IN3 */
+	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )
+	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )
 
-        PORT_START      /* IN4 */
-        PORT_ANALOG ( 0xff, 0x00, IPT_DIAL, 100, 0, 0, 0 )
+	PORT_START      /* IN4 */
+	PORT_ANALOG( 0xff, 0x00, IPT_DIAL, 100, 10, 0, 0 )
 
 
-        PORT_START      /* IN5 */
-        PORT_ANALOG ( 0xff, 0x00, IPT_DIAL | IPF_PLAYER2, 100, 0, 0, 0 )
-
+	PORT_START      /* IN5 */
+	PORT_ANALOG( 0xff, 0x00, IPT_DIAL | IPF_PLAYER2, 100, 10, 0, 0 )
 INPUT_PORTS_END
 
 
-INPUT_PORTS_START( sprint1_input_ports )
-        PORT_START      /* DSW - fake port, gets mapped to Sprint2 ports */
-        PORT_DIPNAME( 0x01, 0x01, "Misc.", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x01, "Cycle Tracks Every Lap" )
-        PORT_DIPSETTING(    0x00, "Cycle Tracks Every 2 Laps" )
-        PORT_DIPNAME( 0x02, 0x00, "Misc.", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x02, "No Oil Slicks" )
-        PORT_DIPSETTING(    0x00, "Oil Slicks" )
-        PORT_DIPNAME( 0x0C, 0x00, "Cost", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x0C, "Free" )
-        PORT_DIPSETTING(    0x08, "2 coins/game" )
-        PORT_DIPSETTING(    0x04, "2 games/coin" )
-        PORT_DIPSETTING(    0x00, "1 coin/game" )
-        PORT_DIPNAME( 0x10, 0x10, "Ext. Play", IP_KEY_NONE )
-        PORT_DIPSETTING(    0x10, "None" )
-        PORT_DIPSETTING(    0x00, "30% of game length" )
-        PORT_DIPNAME( 0xC0, 0xC0, "Game Length", IP_KEY_NONE )
-        PORT_DIPSETTING(    0xC0, "60 seconds" )
-        PORT_DIPSETTING(    0x80, "90 seconds" )
-        PORT_DIPSETTING(    0x40, "120 seconds" )
-        PORT_DIPSETTING(    0x00, "150 seconds" )
+INPUT_PORTS_START( sprint1 )
+	PORT_START      /* DSW - fake port, gets mapped to Sprint2 ports */
+	PORT_DIPNAME( 0x01, 0x00, "Change Track" )
+	PORT_DIPSETTING(    0x01, "Every Lap" )
+	PORT_DIPSETTING(    0x00, "Every 2 Laps" )
+	PORT_DIPNAME( 0x02, 0x00, "Oil Slicks" )
+	PORT_DIPSETTING(    0x02, DEF_STR( No ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Yes ) )
+	PORT_DIPNAME( 0x0c, 0x00, DEF_STR( Coinage )  )
+	PORT_DIPSETTING(    0x08, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x10, 0x00, DEF_STR( Unused) )
+	PORT_DIPSETTING(    0x10, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x20, 0x00, "Allow Extended Play" )
+	PORT_DIPSETTING(    0x20, DEF_STR( No ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Yes ) )
+	PORT_DIPNAME( 0xc0, 0x00, "Real Game Length" )
+	PORT_DIPSETTING(    0xc0, "60 seconds" )
+	PORT_DIPSETTING(    0x80, "90 seconds" )
+	PORT_DIPSETTING(    0x40, "120 seconds" )
+	PORT_DIPSETTING(    0x00, "150 seconds" )
 
-        PORT_START      /* IN0 - fake port, gets mapped to Sprint2 ports */
-        PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN, "1st gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT, "2nd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x04, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT, "3rd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP, "4th gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BIT (0xF0, IP_ACTIVE_HIGH, IPT_UNKNOWN )
+	PORT_START      /* IN0 - fake port, gets mapped to Sprint2 ports */
+	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN,  "1st gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x02, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT,  "2nd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x04, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT, "3rd gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP,    "4th gear", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BIT (0xf0, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 
-        PORT_START      /* IN1 - fake port, gets mapped to Sprint2 ports */
-        PORT_BITX(0x01, IP_ACTIVE_LOW, IPT_BUTTON1, "Gas", IP_KEY_DEFAULT, IP_JOY_DEFAULT, 0 )
-        PORT_BITX(0x02, IP_ACTIVE_LOW, IPT_SERVICE, "Self Test", OSD_KEY_F2, IP_JOY_NONE, 0 )
-        PORT_BIT (0x04, IP_ACTIVE_LOW, IPT_START1 )
+	PORT_START      /* IN1 - fake port, gets mapped to Sprint2 ports */
+	PORT_BITX(0x01, IP_ACTIVE_LOW, IPT_BUTTON1, "Gas", IP_KEY_DEFAULT, IP_JOY_DEFAULT )
+	PORT_BITX(0x02, IP_ACTIVE_LOW, IPT_SERVICE, "Self Test", KEYCODE_F2, IP_JOY_NONE )
+	PORT_BIT (0x04, IP_ACTIVE_LOW, IPT_START1 )
 
-        PORT_START      /* IN2 */
-        PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_VBLANK )
-        PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_START      /* IN2 */
+	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_VBLANK )
+	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
 
-        PORT_START      /* IN3 */
-        PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )
-        PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )
+	PORT_START      /* IN3 */
+	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )
+	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )
 
-        PORT_START      /* IN4 */
-        PORT_ANALOG ( 0xff, 0x00, IPT_DIAL, 100, 0, 0, 0 )
+	PORT_START      /* IN4 */
+	PORT_ANALOG( 0xff, 0x00, IPT_DIAL, 100, 10, 0, 0 )
 
 
-        PORT_START      /* IN5 */
-        PORT_BIT ( 0xff, IP_ACTIVE_LOW, IPT_UNKNOWN )
-
+	PORT_START      /* IN5 */
+	PORT_BIT ( 0xff, IP_ACTIVE_LOW, IPT_UNKNOWN )
 INPUT_PORTS_END
 
 
@@ -279,8 +281,8 @@ static struct GfxLayout carlayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-        { 1, 0x0000, &charlayout, 0x00, 0x02 }, /* offset into colors, # of colors */
-        { 1, 0x0400, &carlayout, 0x04, 0x04 }, /* offset into colors, # of colors */
+	{ REGION_GFX1, 0, &charlayout, 0, 2 },
+	{ REGION_GFX2, 0, &carlayout,  4, 4 },
 	{ -1 } /* end of array */
 };
 
@@ -291,8 +293,7 @@ static unsigned char palette[] =
         0x80,0x80,0x80, /* LT GREY - grey cars */
         0xff,0xff,0xff, /* WHITE - track, text, white car */
 };
-
-static unsigned char colortable[] =
+static unsigned short colortable[] =
 {
         0x01, 0x00, /* Black playfield */
         0x01, 0x03, /* White playfield */
@@ -301,18 +302,22 @@ static unsigned char colortable[] =
         0x01, 0x02, /* Grey car 1 */
         0x01, 0x02  /* Grey car 2 */
 };
+static void init_palette(unsigned char *game_palette, unsigned short *game_colortable,const unsigned char *color_prom)
+{
+	memcpy(game_palette,palette,sizeof(palette));
+	memcpy(game_colortable,colortable,sizeof(colortable));
+}
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_sprint2 =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
-                        333333,        /* 0.3 Mhz ???? */
-			0,
+			333333,        /* 0.3 Mhz ???? */
 			readmem,writemem,0,0,
-                        interrupt,1
+			interrupt,1
 		}
 	},
 	60, DEFAULT_REAL_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
@@ -320,35 +325,30 @@ static struct MachineDriver machine_driver =
 	0,
 
 	/* video hardware */
-        32*8, 32*8, { 0*8, 32*8-1, 0*8, 32*8-1 }, /* it's actually 32x28, but we'll leave room for our gear indicator */
+	32*8, 32*8, { 0*8, 32*8-1, 0*8, 32*8-1 }, /* it's actually 32x28, but we'll leave room for our gear indicator */
 	gfxdecodeinfo,
-	sizeof(palette)/3,sizeof(colortable),
-        0,
+	sizeof(palette) / sizeof(palette[0]) / 3, sizeof(colortable) / sizeof(colortable[0]),
+	init_palette,
 
-        VIDEO_TYPE_RASTER,
+	VIDEO_TYPE_RASTER,
 	0,
-        sprint2_vh_start,
-        sprint2_vh_stop,
-        sprint2_vh_screenrefresh,
+	sprint2_vh_start,
+	sprint2_vh_stop,
+	sprint2_vh_screenrefresh,
 
 	/* sound hardware */
-	0,
-        0,
-	0,
-        0
-
+	0,0,0,0
 };
 
-static struct MachineDriver sprint1_machine_driver =
+static struct MachineDriver machine_driver_sprint1 =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
-                        333333,        /* 0.3 Mhz ???? */
-			0,
-                        sprint1_readmem,writemem,0,0,
-                        interrupt,1
+			333333,        /* 0.3 Mhz ???? */
+			sprint1_readmem,writemem,0,0,
+			interrupt,1
 		}
 	},
 	60, DEFAULT_REAL_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
@@ -356,22 +356,19 @@ static struct MachineDriver sprint1_machine_driver =
 	0,
 
 	/* video hardware */
-        32*8, 32*8, { 0*8, 32*8-1, 0*8, 32*8-1 }, /* it's actually 32x28, but we'll leave room for our gear indicator */
+	32*8, 32*8, { 0*8, 32*8-1, 0*8, 32*8-1 }, /* it's actually 32x28, but we'll leave room for our gear indicator */
 	gfxdecodeinfo,
-	sizeof(palette)/3,sizeof(colortable),
-        0,
+	sizeof(palette) / sizeof(palette[0]) / 3, sizeof(colortable) / sizeof(colortable[0]),
+	init_palette,
 
-        VIDEO_TYPE_RASTER,
+	VIDEO_TYPE_RASTER,
 	0,
-        sprint2_vh_start,
-        sprint2_vh_stop,
-        sprint1_vh_screenrefresh,
+	sprint2_vh_start,
+	sprint2_vh_stop,
+	sprint1_vh_screenrefresh,
 
 	/* sound hardware */
-	0,
-        0,
-	0,
-        0
+	0,0,0,0
 
 };
 
@@ -385,122 +382,43 @@ static struct MachineDriver sprint1_machine_driver =
 
 ***************************************************************************/
 
-ROM_START( sprint1_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-        ROM_LOAD( "6290-01.B1", 0x2000, 0x0800, 0xf185762d )
-        ROM_LOAD( "6291-01.C1", 0x2800, 0x0800, 0x52b14383 )
-        ROM_LOAD( "6442-01.D1", 0x3000, 0x0800, 0x7b5209cc )
-        ROM_RELOAD(             0xF000, 0x0800 )
-        ROM_LOAD( "6443-01.E1", 0x3800, 0x0800, 0x1ce6dace )
-        ROM_RELOAD(             0xF800, 0x0800 )
+ROM_START( sprint1 )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "6290-01.b1",   0x2000, 0x0800, 0x41fc985e )
+	ROM_LOAD( "6291-01.c1",   0x2800, 0x0800, 0x07f7a920 )
+	ROM_LOAD( "6442-01.d1",   0x3000, 0x0800, 0xe9ff0124 )
+	ROM_RELOAD(               0xf000, 0x0800 )
+	ROM_LOAD( "6443-01.e1",   0x3800, 0x0800, 0xd6bb00d0 )
+	ROM_RELOAD(               0xf800, 0x0800 )
 
-        ROM_REGION(0x800)     /* 2k for graphics */
-        ROM_LOAD( "6396-01.P4", 0x0000, 0x0200, 0x84d00708 )
-        ROM_LOAD( "6397-01.R4", 0x0200, 0x0200, 0x98fa080e )
-        ROM_LOAD( "6398-01.K6", 0x0400, 0x0200, 0x5fea0402 )
-        ROM_LOAD( "6399-01.J6", 0x0600, 0x0200, 0x18d60900 )
+	ROM_REGION( 0x0400, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "6396-01.p4",   0x0000, 0x0200, 0x801b42dd )
+	ROM_LOAD( "6397-01.r4",   0x0200, 0x0200, 0x135ba1aa )
 
-
+	ROM_REGION( 0x0400, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "6398-01.k6",   0x0000, 0x0200, 0xc9e1017e )
+	ROM_LOAD( "6399-01.j6",   0x0200, 0x0200, 0x63d685b2 )
 ROM_END
 
-ROM_START( sprint2_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-        ROM_LOAD( "6290SP2.A1", 0x2000, 0x0800, 0xf185762d )
-        ROM_LOAD( "6291SP2.C1", 0x2800, 0x0800, 0x52b14383 )
-        ROM_LOAD( "6404SP2.D1", 0x3000, 0x0800, 0xd6c1d621 )
-        ROM_RELOAD(             0xF000, 0x0800 )
-        ROM_LOAD( "6405SP2.E1", 0x3800, 0x0800, 0x33c55e21 )
-        ROM_RELOAD(             0xF800, 0x0800 )
+ROM_START( sprint2 )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "6290-01.b1",   0x2000, 0x0800, 0x41fc985e )
+	ROM_LOAD( "6291-01.c1",   0x2800, 0x0800, 0x07f7a920 )
+	ROM_LOAD( "6404sp2.d1",   0x3000, 0x0800, 0xd2878ff6 )
+	ROM_RELOAD(               0xf000, 0x0800 )
+	ROM_LOAD( "6405sp2.e1",   0x3800, 0x0800, 0x6c991c80 )
+	ROM_RELOAD(               0xf800, 0x0800 )
 
-        ROM_REGION(0x800)     /* 2k for graphics */
-        ROM_LOAD( "6396SP2.P4", 0x0000, 0x0200, 0x84d00708 )
-        ROM_LOAD( "6397SP2.R4", 0x0200, 0x0200, 0x98fa080e )
-        ROM_LOAD( "6398SP2.K6", 0x0400, 0x0200, 0x5fea0402 )
-        ROM_LOAD( "6399SP2.J6", 0x0600, 0x0200, 0x18d60900 )
+	ROM_REGION( 0x0400, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "6396-01.p4",   0x0000, 0x0200, 0x801b42dd )
+	ROM_LOAD( "6397-01.r4",   0x0200, 0x0200, 0x135ba1aa )
 
-
+	ROM_REGION( 0x0400, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "6398-01.k6",   0x0000, 0x0200, 0xc9e1017e )
+	ROM_LOAD( "6399-01.j6",   0x0200, 0x0200, 0x63d685b2 )
 ROM_END
 
-/***************************************************************************
-
-  Hi Score Routines
-
-***************************************************************************/
-
-static int sprint1_hiload(void)
-{
-	/* check if the hi score table has already been initialized */
-        if (memcmp(&RAM[0x0057],"000",3) == 0)
-	{
-		void *f;
 
 
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-                        osd_fread(f,&RAM[0x0057],3);
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;	/* we can't load the hi scores yet */
-}
-
-
-
-static void sprint1_hisave(void)
-{
-	void *f;
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-                osd_fwrite(f,&RAM[0x0057],3);
-		osd_fclose(f);
-	}
-
-}
-
-
-/***************************************************************************
-
-  Game driver(s)
-
-***************************************************************************/
-
-struct GameDriver sprint1_driver =
-{
-        "Sprint1",
-        "sprint1",
-        "Mike Balfour",
-        &sprint1_machine_driver,
-
-        sprint1_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-        sprint1_input_ports,
-
-        0, palette, colortable,
-	ORIENTATION_DEFAULT,
-        sprint1_hiload,sprint1_hisave
-};
-
-struct GameDriver sprint2_driver =
-{
-        "Sprint2",
-        "sprint2",
-        "Mike Balfour",
-	&machine_driver,
-
-        sprint2_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-        sprint2_input_ports,
-
-        0, palette, colortable,
-	ORIENTATION_DEFAULT,
-        0,0
-};
+GAMEX( 1978, sprint1, 0,       sprint1, sprint1, 0, ROT0, "Atari", "Sprint 1", GAME_NO_SOUND )
+GAMEX( 1976, sprint2, sprint1, sprint2, sprint2, 0, ROT0, "Atari", "Sprint 2", GAME_NO_SOUND )

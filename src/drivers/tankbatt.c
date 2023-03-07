@@ -2,6 +2,8 @@
 
 Tank Battalion memory map (preliminary)
 
+driver by Brad Oliver
+
 $0000-$000f : bullet ram, first entry is player's bullet
 $0010-$01ff : zero page & stack
 $0200-$07ff : RAM
@@ -55,24 +57,23 @@ Known issues:
 
 #include "driver.h"
 #include "vidhrdw/generic.h"
-
-#include "M6502/M6502.h"
+#include "cpu/m6502/m6502.h"
 
 extern unsigned char *tankbatt_bulletsram;
-extern int tankbatt_bulletsram_size;
+extern size_t tankbatt_bulletsram_size;
 
 static int tankbatt_nmi_enable; /* No need to init this - the game will set it on reset */
 static int tankbatt_sound_enable;
 
-void tankbatt_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
-void tankbatt_vh_screenrefresh(struct osd_bitmap *bitmap);
+void tankbatt_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
+void tankbatt_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
-void tankbatt_led_w(int offset,int data)
+WRITE_HANDLER( tankbatt_led_w )
 {
 	osd_led_w(offset, data);
 }
 
-int tankbatt_in0_r (int offset)
+READ_HANDLER( tankbatt_in0_r )
 {
 	int val;
 
@@ -80,7 +81,7 @@ int tankbatt_in0_r (int offset)
 	return ((val << (7-offset)) & 0x80);
 }
 
-int tankbatt_in1_r (int offset)
+READ_HANDLER( tankbatt_in1_r )
 {
 	int val;
 
@@ -88,7 +89,7 @@ int tankbatt_in1_r (int offset)
 	return ((val << (7-offset)) & 0x80);
 }
 
-int tankbatt_dsw_r (int offset)
+READ_HANDLER( tankbatt_dsw_r )
 {
 	int val;
 
@@ -96,7 +97,7 @@ int tankbatt_dsw_r (int offset)
 	return ((val << (7-offset)) & 0x80);
 }
 
-void tankbatt_interrupt_enable_w (int offset, int data)
+WRITE_HANDLER( tankbatt_interrupt_enable_w )
 {
 	tankbatt_nmi_enable = !data;
 	tankbatt_sound_enable = !data;
@@ -106,20 +107,20 @@ void tankbatt_interrupt_enable_w (int offset, int data)
 //	interrupt_enable_w (offset, !data);
 }
 
-void tankbatt_demo_interrupt_enable_w (int offset, int data)
+WRITE_HANDLER( tankbatt_demo_interrupt_enable_w )
 {
 	tankbatt_nmi_enable = data;
 	if (data != 0) cpu_clear_pending_interrupts(0);
 //	interrupt_enable_w (offset, data);
 }
 
-void tankbatt_sh_expl_w (int offset, int data)
+WRITE_HANDLER( tankbatt_sh_expl_w )
 {
 	if (tankbatt_sound_enable)
 		sample_start (1, 3, 0);
 }
 
-void tankbatt_sh_engine_w (int offset, int data)
+WRITE_HANDLER( tankbatt_sh_engine_w )
 {
 	if (tankbatt_sound_enable)
 	{
@@ -131,7 +132,7 @@ void tankbatt_sh_engine_w (int offset, int data)
 	else sample_stop (2);
 }
 
-void tankbatt_sh_fire_w (int offset, int data)
+WRITE_HANDLER( tankbatt_sh_fire_w )
 {
 	if (tankbatt_sound_enable)
 		sample_start (0, 0, 0);
@@ -173,15 +174,14 @@ int tankbatt_interrupt (void)
 	else return ignore_interrupt ();
 }
 
-INPUT_PORTS_START( tankbatt_input_ports )
+INPUT_PORTS_START( tankbatt )
 	PORT_START	/* IN0 */
 	PORT_BIT ( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_4WAY )
 	PORT_BIT ( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_4WAY )
 	PORT_BIT ( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_4WAY )
 	PORT_BIT ( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_4WAY )
 	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 )
-	PORT_BITX( 0x60, IP_ACTIVE_LOW, IPT_COIN1 | IPF_IMPULSE,
-			IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 2 )
+	PORT_BIT_IMPULSE( 0x60, IP_ACTIVE_LOW, IPT_COIN1, 2 )
 	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_TILT )
 
 	PORT_START	/* IN1 */
@@ -192,33 +192,31 @@ INPUT_PORTS_START( tankbatt_input_ports )
 	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
 	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_START1 )
 	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_START2 )
-	PORT_BITX( 0x80, 0x80, IPT_DIPSWITCH_NAME | IPF_TOGGLE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
-	PORT_DIPSETTING(    0x80, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_SERVICE( 0x80, IP_ACTIVE_LOW )
 
 	PORT_START	/* DSW */
-	PORT_DIPNAME( 0x01, 0x01, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x01, "Upright" )
-	PORT_DIPSETTING(    0x00, "Cocktail" )
- 	PORT_DIPNAME( 0x06, 0x06, "Coinage", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x04, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x06, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x02, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
-	PORT_DIPNAME( 0x18, 0x08, "Bonus Life", IP_KEY_NONE )
+	PORT_DIPNAME( 0x01, 0x01, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Cocktail ) )
+ 	PORT_DIPNAME( 0x06, 0x06, DEF_STR( Coinage ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x06, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x18, 0x08, DEF_STR( Bonus_Life ) )
 	PORT_DIPSETTING(    0x00, "10000" )
 	PORT_DIPSETTING(    0x10, "15000" )
 	PORT_DIPSETTING(    0x08, "20000" )
 	PORT_DIPSETTING(    0x18, "None" )
-	PORT_DIPNAME( 0x20, 0x00, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0x20, 0x00, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x20, "2" )
 	PORT_DIPSETTING(    0x00, "3" )
-	PORT_DIPNAME( 0x40, 0x40, "Unknown 1", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x40, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x80, 0x80, "Unknown 2", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x80, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_DIPNAME( 0x40, 0x40, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x80, 0x80, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 INPUT_PORTS_END
 
 
@@ -248,57 +246,39 @@ static struct GfxLayout bulletlayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout,   0, 64 },
-	{ 1, 0x0000, &bulletlayout, 0, 64 },
+	{ REGION_GFX1, 0, &charlayout,   0, 64 },
+	{ REGION_GFX1, 0, &bulletlayout, 0, 64 },
 	{ -1 } /* end of array */
 };
 
 
-static unsigned char tankbatt_color_prom[] =
+
+static const char *tankbatt_sample_names[] =
 {
-	/* palette */
-	0x0f,0x02,0x0e,0x02,0x00,0x02,0x0e,0x02,0x00,0x02,0x0e,0x02,0x00,0x03,0x0e,0x03,
-	0x00,0x05,0x00,0x05,0x00,0x03,0x0e,0x03,0x00,0x07,0x0e,0x07,0x00,0x0f,0x0e,0x0f,
-
-	0x00,0x03,0x0e,0x03,0x00,0x03,0x0e,0x03,0x00,0x03,0x0e,0x03,0x00,0x03,0x0e,0x03,
-	0x00,0x0f,0x0e,0x0f,0x00,0x0f,0x0e,0x0f,0x00,0x0f,0x0e,0x0f,0x00,0x0f,0x0e,0x0f,
-
-	0x00,0x07,0x0e,0x07,0x00,0x07,0x0e,0x07,0x00,0x07,0x0e,0x07,0x00,0x07,0x0e,0x07,
-	0x00,0x0c,0x0e,0x0c,0x00,0x0c,0x0e,0x0c,0x00,0x0c,0x0e,0x0c,0x00,0x0c,0x0e,0x0c,
-
-	0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,
-	0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,
-
-	0x00,0x07,0x0e,0x07,0x00,0x07,0x0e,0x07,0x00,0x07,0x0e,0x07,0x00,0x0a,0x0e,0x0a,
-	0x00,0x0b,0x0e,0x0b,0x00,0x0b,0x0e,0x0b,0x00,0x07,0x0e,0x07,0x00,0x0a,0x0e,0x0a,
-
-	0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x03,0x0e,0x03,
-	0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,
-
-	0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0c,0x0e,0x0c,
-	0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x03,0x0e,0x03,
-
-	0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,
-	0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0e,0x0e,0x0e,0x00,0x0c,0x0e,0x0c
+	"*tankbatt",
+	"fire.wav",
+	"engine1.wav",
+	"engine2.wav",
+	"explode1.wav",
+    0	/* end of array */
 };
-
-
 
 static struct Samplesinterface samples_interface =
 {
-	3	/* 3 channels */
+	3,	/* 3 channels */
+	25,	/* volume */
+	tankbatt_sample_names
 };
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_tankbatt =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
 			1000000,	/* 1 Mhz ???? */
-			0,
 			readmem,writemem,0,0,
 			tankbatt_interrupt,1
 		}
@@ -337,79 +317,21 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-static const char *tankbatt_sample_names[] =
-{
-	"*tankbatt",
-	"fire.sam",
-	"engine1.sam",
-	"engine2.sam",
-	"explode1.sam",
-    0	/* end of array */
-};
+ROM_START( tankbatt )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "tb1-1.bin",    0x6000, 0x0800, 0x278a0b8c )
+	ROM_LOAD( "tb1-2.bin",    0x6800, 0x0800, 0xe0923370 )
+	ROM_LOAD( "tb1-3.bin",    0x7000, 0x0800, 0x85005ea4 )
+	ROM_LOAD( "tb1-4.bin",    0x7800, 0x0800, 0x3dfb5bcf )
+	ROM_RELOAD(               0xf800, 0x0800 )	/* for the reset and interrupt vectors */
 
-ROM_START( tankbatt_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "tb1-1.bin", 0x6000, 0x0800, 0x1ea14ff3 )
-	ROM_LOAD( "tb1-2.bin", 0x6800, 0x0800, 0x626762d7 )
-	ROM_LOAD( "tb1-3.bin", 0x7000, 0x0800, 0xb32ee1f6 )
-	ROM_LOAD( "tb1-4.bin", 0x7800, 0x0800, 0x8c2751c3 )
-	ROM_RELOAD(            0xf800, 0x0800 )	/* for the reset and interrupt vectors */
+	ROM_REGION( 0x0800, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "tb1-5.bin",    0x0000, 0x0800, 0xaabd4fb1 )
 
-	ROM_REGION(0x800)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "tb1-5.bin", 0x0000, 0x0800, 0x1bab1563 )
+	ROM_REGION( 0x0100, REGION_PROMS )
+	ROM_LOAD( "tankbatt.clr", 0x0000, 0x0100, 0x1150d613 )
 ROM_END
 
 
-static int hiload(void)
-{
-	/* wait for the checkerboard pattern to be on screen */
-	if (memcmp(&RAM[0x840],"\xda\xdb",2) == 0)
-	{
-		void *f;
 
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0xc3],2);
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;	/* we can't load the hi scores yet */
-}
-
-
-
-static void hisave(void)
-{
-	void *f;
-
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0xc3],2);
-		osd_fclose(f);
-	}
-}
-
-
-struct GameDriver tankbatt_driver =
-{
-	"Tank Battalion",
-	"tankbatt",
-	"Brad Oliver",
-	&machine_driver,
-
-	tankbatt_rom,
-	0, 0,
-	tankbatt_sample_names,
-	0,	/* sound_prom */
-
-	tankbatt_input_ports,
-
-	tankbatt_color_prom, 0, 0,
-	ORIENTATION_ROTATE_90,
-
-	hiload, hisave
-};
+GAME( 1980, tankbatt, 0, tankbatt, tankbatt, 0, ROT90, "Namco", "Tank Battalion" )

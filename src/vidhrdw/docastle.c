@@ -4,6 +4,8 @@
 
   Functions to emulate the video hardware of the machine.
 
+  (Cocktail mode implemented by Chad Hendrickson Aug 1, 1999)
+
 ***************************************************************************/
 
 #include "driver.h"
@@ -13,7 +15,6 @@
 
 static struct osd_bitmap *tmpbitmap1;
 static char sprite_transparency[256];
-
 
 
 /***************************************************************************
@@ -33,7 +34,7 @@ static char sprite_transparency[256];
   bit 0 -- 390 ohm resistor  -- BLUE
 
 ***************************************************************************/
-static void convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom,
+static void convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom,
 		int priority)
 {
 	int i,j;
@@ -41,7 +42,7 @@ static void convert_color_prom(unsigned char *palette, unsigned char *colortable
 	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
 
 
-	for (i = 0;i < Machine->drv->total_colors;i++)
+	for (i = 0;i < 256;i++)
 	{
 		int bit0,bit1,bit2;
 
@@ -64,6 +65,16 @@ static void convert_color_prom(unsigned char *palette, unsigned char *colortable
 
 		color_prom++;
 	}
+
+	/* reserve one color for the transparent pen (none of the game colors can have */
+	/* these RGB components) */
+	*(palette++) = 1;
+	*(palette++) = 1;
+	*(palette++) = 1;
+	/* and the last color for the sprite covering pen */
+	*(palette++) = 2;
+	*(palette++) = 2;
+	*(palette++) = 2;
 
 
 	/* characters */
@@ -88,13 +99,13 @@ static void convert_color_prom(unsigned char *palette, unsigned char *colortable
 		{
 			if (priority == 0)	/* Do's Castle */
 			{
-				colortable[32*16+16*i+j] = 0;	/* high bit clear means less priority than sprites */
+				colortable[32*16+16*i+j] = 256;	/* high bit clear means less priority than sprites */
 				colortable[32*16+16*i+j+8] = 8*i+j;
 			}
 			else	/* Do Wild Ride, Do Run Run, Kick Rider */
 			{
 				colortable[32*16+16*i+j] = 8*i+j;
-				colortable[32*16+16*i+j+8] = 0;	/* high bit set means less priority than sprites */
+				colortable[32*16+16*i+j+8] = 256;	/* high bit set means less priority than sprites */
 			}
 		}
 	}
@@ -106,15 +117,13 @@ static void convert_color_prom(unsigned char *palette, unsigned char *colortable
 	{
 		for (j = 0;j < 8;j++)
 		{
-			colortable[64*16+16*i+j] = 0;	/* high bit clear means transparent */
-			colortable[64*16+16*i+j+8] = 8*i+j;
+			colortable[64*16+16*i+j] = 256;	/* high bit clear means transparent */
+			if (j != 7)
+				colortable[64*16+16*i+j+8] = 8*i+j;
+			else
+				colortable[64*16+16*i+j+8] = 257;	/* sprite covering color */
 		}
 	}
-
-	/* find a non trasparent black */
-	i = 1;
-	while (color_prom[i] != 0) i++;
-	colortable[64*16+8] = i;	/* replace pen 0 with a non trasparent black */
 
 
    /* now check our sprites and mark which ones have color 15 ('draw under') */
@@ -128,28 +137,31 @@ static void convert_color_prom(unsigned char *palette, unsigned char *colortable
 		{
 			sprite_transparency[i] = 0;
 
+			dp = gfx->gfxdata + i * gfx->char_modulo;
 			for (y=0;y<gfx->height;y++)
 			{
-				dp = gfx->gfxdata->line[i * gfx->height + y];
 				for (x=0;x<gfx->width;x++)
-				if (dp[x] == 15)
-					sprite_transparency[i] = 1;
+				{
+					if (dp[x] == 15)
+						sprite_transparency[i] = 1;
+				}
+				dp += gfx->line_modulo;
 			}
 
 			if (sprite_transparency[i])
-if (errorlog) fprintf(errorlog,"sprite %i has transparency.\n",i);
+logerror("sprite %i has transparency.\n",i);
 		}
 	}
 }
 
 
 
-void docastle_vh_convert_color_prom(unsigned char *palette,unsigned char *colortable,const unsigned char *color_prom)
+void docastle_vh_convert_color_prom(unsigned char *palette,unsigned short *colortable,const unsigned char *color_prom)
 {
 	convert_color_prom(palette,colortable,color_prom,0);
 }
 
-void dowild_vh_convert_color_prom(unsigned char *palette,unsigned char *colortable,const unsigned char *color_prom)
+void dorunrun_vh_convert_color_prom(unsigned char *palette,unsigned short *colortable,const unsigned char *color_prom)
 {
 	convert_color_prom(palette,colortable,color_prom,1);
 }
@@ -166,7 +178,7 @@ int docastle_vh_start(void)
 	if (generic_vh_start() != 0)
 		return 1;
 
-	if ((tmpbitmap1 = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
+	if ((tmpbitmap1 = bitmap_alloc(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 	{
 		generic_vh_stop();
 		return 1;
@@ -184,8 +196,31 @@ int docastle_vh_start(void)
 ***************************************************************************/
 void docastle_vh_stop(void)
 {
-	osd_free_bitmap(tmpbitmap1);
+	bitmap_free(tmpbitmap1);
 	generic_vh_stop();
+}
+
+
+READ_HANDLER( docastle_flipscreen_off_r )
+{
+	flip_screen_w(offset, 0);
+	return 0;
+}
+
+READ_HANDLER( docastle_flipscreen_on_r )
+{
+	flip_screen_w(offset, 1);
+	return 0;
+}
+
+WRITE_HANDLER( docastle_flipscreen_off_w )
+{
+	flip_screen_w(offset, 0);
+}
+
+WRITE_HANDLER( docastle_flipscreen_on_w )
+{
+	flip_screen_w(offset, 1);
 }
 
 
@@ -197,9 +232,15 @@ void docastle_vh_stop(void)
   the main emulation engine.
 
 ***************************************************************************/
-void docastle_vh_screenrefresh(struct osd_bitmap *bitmap)
+void docastle_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
+
+
+	if (full_refresh)
+	{
+		memset(dirtybuffer,1,videoram_size);
+	}
 
 
 	/* for every character in the Video RAM, check if it has been modified */
@@ -216,50 +257,69 @@ void docastle_vh_screenrefresh(struct osd_bitmap *bitmap)
 			sx = offs % 32;
 			sy = offs / 32;
 
+			if (flip_screen)
+			{
+				sx = 31 - sx;
+				sy = 31 - sy;
+			}
+
 			drawgfx(tmpbitmap,Machine->gfx[0],
 					videoram[offs] + 8*(colorram[offs] & 0x20),
 					colorram[offs] & 0x1f,
-					0,0,
+					flip_screen,flip_screen,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 			/* also draw the part of the character which has priority over the */
 			/* sprites in another bitmap */
 			drawgfx(tmpbitmap1,Machine->gfx[0],
 					videoram[offs] + 8*(colorram[offs] & 0x20),
 					32 + (colorram[offs] & 0x1f),
-					0,0,
+					flip_screen,flip_screen,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
 	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 
 	/* Draw the sprites. Note that it is important to draw them exactly in this */
 	/* order, to have the correct priorities. */
 	for (offs = 0;offs < spriteram_size;offs += 4)
 	{
-		int sx,sy,code,color;
+		int sx,sy,flipx,flipy,code,color;
 
 
 		code = spriteram[offs + 3];
 		color = spriteram[offs + 2] & 0x1f;
 		sx = spriteram[offs + 1];
 		sy = spriteram[offs];
+		flipx = spriteram[offs + 2] & 0x40;
+		flipy = spriteram[offs + 2] & 0x80;
+
+
+		if (flip_screen)
+		{
+			sx = 240 - sx;
+			sy = 240 - sy;
+			flipx = !flipx;
+			flipy = !flipy;
+		}
 
 		drawgfx(bitmap,Machine->gfx[1],
-			code,
-			color,
-			spriteram[offs + 2] & 0x40,spriteram[offs + 2] & 0x80,
-			sx,sy,
-			&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+				code,
+				color,
+				flipx,flipy,
+				sx,sy,
+				&Machine->visible_area,TRANSPARENCY_COLOR,256);
+
 
 		/* sprites use color 0 for background pen and 8 for the 'under tile' pen.
 		   The color 7 is used to cover over other sprites.
+
 		   At the beginning we scanned all sprites and marked the ones that contained
 		   at least one pixel of color 7, so we only need to worry about these few. */
 		if (sprite_transparency[code])
@@ -271,11 +331,11 @@ void docastle_vh_screenrefresh(struct osd_bitmap *bitmap)
 			clip.min_y = sy;
 			clip.max_y = sy+31;
 
-			copybitmap(bitmap,tmpbitmap,0,0,0,0,&clip,TRANSPARENCY_THROUGH,7+(color*8));
+			copybitmap(bitmap,tmpbitmap,0,0,0,0,&clip,TRANSPARENCY_THROUGH,Machine->pens[257]);
 		}
 	}
 
 
 	/* now redraw the portions of the background which have priority over sprites */
-	copybitmap(bitmap,tmpbitmap1,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+	copybitmap(bitmap,tmpbitmap1,0,0,0,0,&Machine->visible_area,TRANSPARENCY_COLOR,256);
 }

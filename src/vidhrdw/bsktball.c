@@ -18,7 +18,7 @@ unsigned char *bsktball_motion;
   the main emulation engine.
 
 ***************************************************************************/
-void bsktball_vh_screenrefresh(struct osd_bitmap *bitmap)
+void bsktball_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
     int offs,motion;
 
@@ -47,12 +47,12 @@ void bsktball_vh_screenrefresh(struct osd_bitmap *bitmap)
                         drawgfx(tmpbitmap,Machine->gfx[0],
                                 charcode, color,
 								flipx,0,sx,sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
                 }
 	}
 
 	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 	for (motion=0;motion<16;motion++)
 	{
@@ -70,7 +70,7 @@ void bsktball_vh_screenrefresh(struct osd_bitmap *bitmap)
         drawgfx(bitmap,Machine->gfx[1],
                 pic, color,
 				flipx,0,sx,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
 }
 

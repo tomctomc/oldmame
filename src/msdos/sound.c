@@ -1,58 +1,89 @@
+#define USE_SEAL
+//#define USE_ALLEGRO
+
+#include "mamalleg.h"
 #include "driver.h"
 #include <dos.h>
 #include <conio.h>
-#include <time.h>
+#include "ticker.h"
+#ifdef USE_SEAL
 #include <audio.h>
-#include <allegro.h>
-#include "ym2203.h"
+#endif
+
+#ifdef USE_ALLEGRO
 
 /* cut down Allegro size */
-DECLARE_DIGI_DRIVER_LIST()
-DECLARE_MIDI_DRIVER_LIST()
+BEGIN_DIGI_DRIVER_LIST
+   DIGI_DRIVER_SOUNDSCAPE
+   DIGI_DRIVER_AUDIODRIVE
+   DIGI_DRIVER_WINSOUNDSYS
+   DIGI_DRIVER_SB
+END_DIGI_DRIVER_LIST
 
 
+BEGIN_MIDI_DRIVER_LIST
+END_MIDI_DRIVER_LIST
+
+#endif
+
+
+#ifdef USE_SEAL
 /* audio related stuff */
-#define NUMVOICES 16
-HAC hVoice[NUMVOICES];
-LPAUDIOWAVE lpWave[NUMVOICES];
-int Volumi[NUMVOICES];
-int MasterVolume = 100;
-unsigned char No_FM = 1;
-unsigned char No_OPL = 1;
-unsigned char RegistersYM[264*5];  /* MAX 5 YM-2203 */
-int nominal_sample_rate;
-int soundcard,usefm;
-
+#define SOUND_CHANNELS 2	/* left and right */
+HAC hVoice[SOUND_CHANNELS];
+LPAUDIOWAVE lpWave[SOUND_CHANNELS];
 AUDIOINFO info;
 AUDIOCAPS caps;
+#endif
+
+#ifdef USE_ALLEGRO
+SAMPLE *mysample;
+int myvoice;
+#endif
+
+
+static int num_used_opl;
+int nominal_sample_rate;
+int soundcard,usestereo;
+int attenuation = 0;
+static int master_volume = 256;
+
+
+static int stream_playing;
+static INT16 *stream_cache_data;
+static int stream_cache_len;
+static int stream_cache_stereo;
 
 
 int msdos_init_seal (void)
 {
+#ifdef USE_SEAL
 	if (AInitialize() == AUDIO_ERROR_NONE)
 		return 0;
 	else
 		return 1;
+#else
+	return 0;
+#endif
 }
 
 int msdos_init_sound(void)
 {
+#ifdef USE_SEAL
 	int i;
-	char *blaster_env;
-
-	No_OPL = No_FM = !usefm;
 
 	/* Ask the user if no soundcard was chosen */
 	if (soundcard == -1)
 	{
 		unsigned int k;
 
-		printf("\nSelect the audio device:\n"
-		       "If you have an AWE 32, choose Sound Blaster for a more faithful emulation)\n");
+		printf("\nSelect the audio device:\n");
 
 		for (k = 0;k < AGetAudioNumDevs();k++)
 		{
-			if (AGetAudioDevCaps(k,&caps) == AUDIO_ERROR_NONE)
+			/* don't show the AWE32, it's too slow, users must choose Sound Blaster */
+			if (AGetAudioDevCaps(k,&caps) == AUDIO_ERROR_NONE &&
+					strcmp(caps.szProductName,"Sound Blaster AWE32"))
 				printf("  %2d. %s\n",k,caps.szProductName);
 		}
 		printf("\n");
@@ -78,7 +109,15 @@ int msdos_init_sound(void)
 	/*                              info.nDeviceId = AUDIO_DEVICE_MAPPER;*/
 	info.nDeviceId = soundcard;
 	/* always use 16 bit mixing if possible - better quality and same speed of 8 bit */
-	info.wFormat = AUDIO_FORMAT_16BITS | AUDIO_FORMAT_MONO;
+	info.wFormat = AUDIO_FORMAT_16BITS | AUDIO_FORMAT_MONO | AUDIO_FORMAT_RAW_SAMPLE;
+
+	/* use stereo output if supported */
+	if (usestereo)
+	{
+		if (Machine->drv->sound_attributes & SOUND_SUPPORTS_STEREO)
+			info.wFormat = AUDIO_FORMAT_16BITS | AUDIO_FORMAT_STEREO | AUDIO_FORMAT_RAW_SAMPLE;
+	}
+
 	info.nSampleRate = Machine->sample_rate;
 	if (AOpenAudio(&info) != AUDIO_ERROR_NONE)
 	{
@@ -87,44 +126,47 @@ int msdos_init_sound(void)
 	}
 
 	AGetAudioDevCaps(info.nDeviceId,&caps);
-	if (errorlog) fprintf(errorlog,"Using %s at %d-bit %s %u Hz\n",
+	logerror("Using %s at %d-bit %s %u Hz\n",
 			caps.szProductName,
 			info.wFormat & AUDIO_FORMAT_16BITS ? 16 : 8,
 			info.wFormat & AUDIO_FORMAT_STEREO ? "stereo" : "mono",
 			info.nSampleRate);
 
 	/* open and allocate voices, allocate waveforms */
-	if (AOpenVoices(NUMVOICES) != AUDIO_ERROR_NONE)
+	if (AOpenVoices(SOUND_CHANNELS) != AUDIO_ERROR_NONE)
 	{
 		printf("voices initialization failed\n");
 		return 1;
 	}
 
-	for (i = 0; i < NUMVOICES; i++)
+	for (i = 0; i < SOUND_CHANNELS; i++)
 	{
-		if (ACreateAudioVoice(&hVoice[i]) != AUDIO_ERROR_NONE)
-		{
-			printf("voice #%d creation failed\n",i);
-			return 1;
-		}
-
-		ASetVoicePanning(hVoice[i],128);
-
 		lpWave[i] = 0;
 	}
+
+	stream_playing = 0;
+	stream_cache_data = 0;
+	stream_cache_len = 0;
+	stream_cache_stereo = 0;
 
 	/* update the Machine structure to reflect the actual sample rate */
 	Machine->sample_rate = info.nSampleRate;
 
-	if (errorlog) fprintf(errorlog,"set sample rate: %d\n",Machine->sample_rate);
+	logerror("set sample rate: %d\n",Machine->sample_rate);
 
 	{
-		uclock_t a,b;
-		DWORD start,end;
+		TICKER a,b;
+		LONG start,end;
 
+
+		if (ACreateAudioVoice(&hVoice[0]) != AUDIO_ERROR_NONE)
+			return 1;
 
 		if ((lpWave[0] = (LPAUDIOWAVE)malloc(sizeof(AUDIOWAVE))) == 0)
+		{
+			ADestroyAudioVoice(hVoice[0]);
 			return 1;
+		}
 
 		lpWave[0]->wFormat = AUDIO_FORMAT_8BITS | AUDIO_FORMAT_MONO;
 		lpWave[0]->nSampleRate = Machine->sample_rate;
@@ -142,68 +184,50 @@ int msdos_init_sound(void)
 		memset(lpWave[0]->lpData,0,3*Machine->sample_rate);
 		/* upload the data to the audio DRAM local memory */
 		AWriteAudioData(lpWave[0],0,3*Machine->sample_rate);
-		APlayVoice(hVoice[0],lpWave[0]);
+		APrimeVoice(hVoice[0],lpWave[0]);
 		ASetVoiceFrequency(hVoice[0],Machine->sample_rate);
 		ASetVoiceVolume(hVoice[0],0);
+		AStartVoice(hVoice[0]);
 
-		a = uclock();
+		a = ticker();
 		/* wait some time to let everything stabilize */
 		do
 		{
-			osd_update_audio();
-			b = uclock();
-		} while (b-a < UCLOCKS_PER_SEC/10);
+			AUpdateAudioEx(Machine->sample_rate / Machine->drv->frames_per_second);
+			b = ticker();
+		} while (b-a < TICKS_PER_SEC/10);
 
-		a = uclock();
+		a = ticker();
 		AGetVoicePosition(hVoice[0],&start);
 		do
 		{
-			osd_update_audio();
-			b = uclock();
-		} while (b-a < UCLOCKS_PER_SEC);
+			AUpdateAudioEx(Machine->sample_rate / Machine->drv->frames_per_second);
+			b = ticker();
+		} while (b-a < TICKS_PER_SEC);
 		AGetVoicePosition(hVoice[0],&end);
 
 		nominal_sample_rate = Machine->sample_rate;
 		Machine->sample_rate = end - start;
-		if (errorlog) fprintf(errorlog,"actual sample rate: %d\n",Machine->sample_rate);
+		logerror("actual sample rate: %d\n",Machine->sample_rate);
 
 		AStopVoice(hVoice[0]);
 		ADestroyAudioData(lpWave[0]);
 		free(lpWave[0]);
 		lpWave[0] = 0;
+		ADestroyAudioVoice(hVoice[0]);
 	}
 
 
+#if 0
 	{
-		int totalsound = 0;
-
-
-		while (Machine->drv->sound[totalsound].sound_type != 0 && totalsound < MAX_SOUND)
-		{
-			if (Machine->drv->sound[totalsound].sound_type == SOUND_YM2203 &&
-					((struct YM2203interface *)Machine->drv->sound[totalsound].sound_interface)->handler[0])
-				No_OPL = No_FM = 1;      /* YM2203 must trigger interrupts, cannot emulate it with the OPL */
-
-			if (Machine->drv->sound[totalsound].sound_type == SOUND_YM3812)
-                        {
-                                No_FM = 1;      /* can't use the OPL chip to emulate the YM2203 */
-                                No_OPL = 0;     /* but the OPL chip is used */
-                        }
-
-                        totalsound++;
-		}
-
-		osd_update_audio();
-	}
-
-	if (!No_FM) {
+		char *blaster_env;
 		/* Get Soundblaster base address from environment variabler BLASTER   */
 		/* Soundblaster OPL base port, at some compatibles this must be 0x388 */
 
 		if(!getenv("BLASTER"))
 		{
 			printf("\nBLASTER variable not found, disabling fm sound!\n");
-                        No_OPL = No_FM = 1;
+                        No_OPL = options.no_fm = 1;
 		}
 		else
 		{
@@ -213,12 +237,27 @@ int msdos_init_sound(void)
 			while (blaster_env[++i] != 0x20) {
 				BaseSb = (BaseSb << 4) + (blaster_env[i]-0x30);
 			}
-
-			DelayReg=4;   /* Delay after an OPL register write increase it to avoid problems ,but you'll lose speed */
-			DelayData=7;  /* same as above but after an OPL data write this usually is greater than above */
-			InitYM();     /* inits OPL in mode OPL3 and 4ops per channel,also reset YM2203 registers */
 		}
 	}
+#endif
+
+#endif
+
+#ifdef USE_ALLEGRO
+	reserve_voices(1,0);
+	if (install_sound(DIGI_AUTODETECT,MIDI_NONE,0) != 0)
+	{
+		logerror("Allegro install_sound error: %s\n",allegro_error);
+		return 1;
+	}
+
+	nominal_sample_rate = Machine->sample_rate;
+#endif
+
+	num_used_opl = 0;
+
+	osd_set_mastervolume(attenuation);	/* set the startup volume */
+
 	return 0;
 }
 
@@ -226,274 +265,439 @@ void msdos_shutdown_sound(void)
 {
 	if (Machine->sample_rate != 0)
 	{
-		int n;
+		int chip,n;
 
-		if (!No_OPL)
-		   InitOpl();  /* Do this only before quiting , or some cards will make noise during playing */
-				   /* It resets entire OPL registers to zero */
-
-		/* stop and release voices */
-		for (n = 0; n < NUMVOICES; n++)
+		for(chip=0;chip<num_used_opl;chip++)
 		{
-			AStopVoice(hVoice[n]);
-			ADestroyAudioVoice(hVoice[n]);
-			if (lpWave[n])
+			/* silence the OPL */
+			for (n = 0x40;n <= 0x55;n++)
 			{
-				ADestroyAudioData(lpWave[n]);
-				free(lpWave[n]);
-				lpWave[n] = 0;
+				osd_opl_control(chip,n);
+				osd_opl_write(chip,0x3f);
+			}
+			for (n = 0x60;n <= 0x95;n++)
+			{
+				osd_opl_control(chip,n);
+				osd_opl_write(chip,0xff);
+			}
+			for (n = 0xa0;n <= 0xb0;n++)
+			{
+				osd_opl_control(chip,n);
+				osd_opl_write(chip,0);
 			}
 		}
+
+#ifdef USE_SEAL
 		ACloseVoices();
 		ACloseAudio();
+#endif
 	}
 }
 
 
 
-void osd_update_audio(void)
+
+#define NUM_BUFFERS 3	/* raising this number should improve performance with frameskip, */
+						/* but also increases the latency. */
+
+static int voice_pos;
+static int audio_buffer_length;
+
+/* global sample tracking */
+static double samples_per_frame;
+static double samples_left_over;
+static UINT32 samples_this_frame;
+
+int osd_start_audio_stream(int stereo)
 {
+#ifdef USE_SEAL
+	int channel;
+#endif
+
+	if (stereo) stereo = 1;	/* make sure it's either 0 or 1 */
+
+	stream_cache_stereo = stereo;
+
+	/* determine the number of samples per frame */
+	samples_per_frame = (double)Machine->sample_rate / (double)Machine->drv->frames_per_second;
+
+	/* compute how many samples to generate this frame */
+	samples_left_over = samples_per_frame;
+	samples_this_frame = (UINT32)samples_left_over;
+	samples_left_over -= (double)samples_this_frame;
+
+	audio_buffer_length = NUM_BUFFERS * samples_per_frame + 20;
+
+
+	if (Machine->sample_rate == 0) return 0;
+
+#ifdef USE_SEAL
+	for (channel = 0;channel <= stereo;channel++)
+	{
+		if (ACreateAudioVoice(&hVoice[channel]) != AUDIO_ERROR_NONE)
+			return 0;
+
+		if ((lpWave[channel] = (LPAUDIOWAVE)malloc(sizeof(AUDIOWAVE))) == 0)
+		{
+			ADestroyAudioVoice(hVoice[channel]);
+			return 0;
+		}
+
+		lpWave[channel]->wFormat = AUDIO_FORMAT_16BITS | AUDIO_FORMAT_MONO | AUDIO_FORMAT_LOOP;
+		lpWave[channel]->nSampleRate = nominal_sample_rate;
+		lpWave[channel]->dwLength = 2*audio_buffer_length;
+		lpWave[channel]->dwLoopStart = 0;
+		lpWave[channel]->dwLoopEnd = lpWave[channel]->dwLength;
+		if (ACreateAudioData(lpWave[channel]) != AUDIO_ERROR_NONE)
+		{
+			free(lpWave[channel]);
+			lpWave[channel] = 0;
+
+			return 0;
+		}
+
+		memset(lpWave[channel]->lpData,0,lpWave[channel]->dwLength);
+		APrimeVoice(hVoice[channel],lpWave[channel]);
+		ASetVoiceFrequency(hVoice[channel],nominal_sample_rate);
+	}
+
+	if (stereo)
+	{
+		/* SEAL doubles volume for panned channels, so we have to compensate */
+		ASetVoiceVolume(hVoice[0],32);
+		ASetVoiceVolume(hVoice[1],32);
+
+		ASetVoicePanning(hVoice[0],0);
+		ASetVoicePanning(hVoice[1],255);
+
+		AStartVoice(hVoice[0]);
+		AStartVoice(hVoice[1]);
+	}
+	else
+	{
+		ASetVoiceVolume(hVoice[0],64);
+		ASetVoicePanning(hVoice[0],128);
+		AStartVoice(hVoice[0]);
+	}
+#endif
+
+#ifdef USE_ALLEGRO
+	mysample = create_sample(16,stereo,nominal_sample_rate,audio_buffer_length);
+	if (mysample == 0) return 0;
+	myvoice = allocate_voice(mysample);
+	voice_set_playmode(myvoice,PLAYMODE_LOOP);
+	if (stereo)
+	{
+		INT16 *buf = mysample->data;
+		int p = 0;
+		while (p != audio_buffer_length)
+		{
+			buf[2*p] = (INT16)0x8000;
+			buf[2*p+1] = (INT16)0x8000;
+			p++;
+		}
+	}
+	else
+	{
+		INT16 *buf = mysample->data;
+		int p = 0;
+		while (p != audio_buffer_length)
+		{
+			buf[p] = (INT16)0x8000;
+			p++;
+		}
+	}
+	voice_start(myvoice);
+#endif
+
+	stream_playing = 1;
+	voice_pos = 0;
+
+	return samples_this_frame;
+}
+
+void osd_stop_audio_stream(void)
+{
+#ifdef USE_SEAL
+	int i;
+#endif
+
+
 	if (Machine->sample_rate == 0) return;
 
-	AUpdateAudio();
-}
-
-
-
-static void playsample(int channel,signed char *data,int len,int freq,int volume,int loop,int bits)
-{
-	if (Machine->sample_rate == 0 || channel >= NUMVOICES) return;
-
-	if (lpWave[channel] && lpWave[channel]->dwLength != len)
+#ifdef USE_SEAL
+	/* stop and release voices */
+	for (i = 0;i < SOUND_CHANNELS;i++)
 	{
-		AStopVoice(hVoice[channel]);
-		ADestroyAudioData(lpWave[channel]);
-		free(lpWave[channel]);
-		lpWave[channel] = 0;
-	}
-
-	if (lpWave[channel] == 0)
-	{
-		if ((lpWave[channel] = (LPAUDIOWAVE)malloc(sizeof(AUDIOWAVE))) == 0)
-			return;
-
-		if (loop) lpWave[channel]->wFormat = (bits == 8 ? AUDIO_FORMAT_8BITS : AUDIO_FORMAT_16BITS)
-				| AUDIO_FORMAT_MONO | AUDIO_FORMAT_LOOP;
-		else lpWave[channel]->wFormat = (bits == 8 ? AUDIO_FORMAT_8BITS : AUDIO_FORMAT_16BITS)
-				| AUDIO_FORMAT_MONO;
-		lpWave[channel]->nSampleRate = nominal_sample_rate;
-		lpWave[channel]->dwLength = len;
-		lpWave[channel]->dwLoopStart = 0;
-		lpWave[channel]->dwLoopEnd = len;
-		if (ACreateAudioData(lpWave[channel]) != AUDIO_ERROR_NONE)
+		if (lpWave[i])
 		{
-			free(lpWave[channel]);
-			lpWave[channel] = 0;
-
-			return;
+			AStopVoice(hVoice[i]);
+			ADestroyAudioData(lpWave[i]);
+			free(lpWave[i]);
+			lpWave[i] = 0;
+			ADestroyAudioVoice(hVoice[i]);
 		}
 	}
-	else
-	{
-		if (loop) lpWave[channel]->wFormat = AUDIO_FORMAT_8BITS | AUDIO_FORMAT_MONO | AUDIO_FORMAT_LOOP;
-		else lpWave[channel]->wFormat = AUDIO_FORMAT_8BITS | AUDIO_FORMAT_MONO;
-	}
+#endif
+#ifdef USE_ALLEGRO
+	voice_stop(myvoice);
+	deallocate_voice(myvoice);
+	destroy_sample(mysample);
+	mysample = 0;
+#endif
 
-	memcpy(lpWave[channel]->lpData,data,len);
-	/* upload the data to the audio DRAM local memory */
-	AWriteAudioData(lpWave[channel],0,len);
-	APlayVoice(hVoice[channel],lpWave[channel]);
-	/* need to cast to double because freq*nominal_sample_rate can exceed the size of an int */
-	ASetVoiceFrequency(hVoice[channel],(double)freq*nominal_sample_rate/Machine->sample_rate);
-	ASetVoiceVolume(hVoice[channel],MasterVolume*volume/400);
-
-	Volumi[channel] = volume/4;
+	stream_playing = 0;
 }
 
-void osd_play_sample(int channel,signed char *data,int len,int freq,int volume,int loop)
+static void updateaudiostream(void)
 {
-	playsample(channel,data,len,freq,volume,loop,8);
-}
+	extern int throttle;
+	INT16 *data = stream_cache_data;
+	int stereo = stream_cache_stereo;
+	int len = stream_cache_len;
+	int buflen;
+	int start,end;
 
-void osd_play_sample_16(int channel,signed short *data,int len,int freq,int volume,int loop)
-{
-	playsample(channel,(signed char *)data,2*len,freq,volume,loop,16);
-}
+	if (!stream_playing) return;	/* error */
 
+	buflen = audio_buffer_length;
+	start = voice_pos;
+	end = voice_pos + len;
+	if (end > buflen) end -= buflen;
 
-
-static void playstreamedsample(int channel,signed char *data,int len,int freq,int volume,int bits)
-{
-	static int playing[NUMVOICES];
-	static int c[NUMVOICES];
-
-
-	if (Machine->sample_rate == 0 || channel >= NUMVOICES) return;
-
-	if (!playing[channel])
+#ifdef USE_SEAL
+	if (throttle)   /* sync with audio only when speed throttling is not turned off */
 	{
-		if (lpWave[channel])
+		profiler_mark(PROFILER_IDLE);
+		for (;;)
 		{
-			AStopVoice(hVoice[channel]);
-			ADestroyAudioData(lpWave[channel]);
-			free(lpWave[channel]);
-			lpWave[channel] = 0;
-		}
+			LONG curpos;
 
-		if ((lpWave[channel] = (LPAUDIOWAVE)malloc(sizeof(AUDIOWAVE))) == 0)
-			return;
-
-		lpWave[channel]->wFormat = (bits == 8 ? AUDIO_FORMAT_8BITS : AUDIO_FORMAT_16BITS)
-				| AUDIO_FORMAT_MONO | AUDIO_FORMAT_LOOP;
-		lpWave[channel]->nSampleRate = nominal_sample_rate;
-		lpWave[channel]->dwLength = 3*len;
-		lpWave[channel]->dwLoopStart = 0;
-		lpWave[channel]->dwLoopEnd = 3*len;
-		if (ACreateAudioData(lpWave[channel]) != AUDIO_ERROR_NONE)
-		{
-			free(lpWave[channel]);
-			lpWave[channel] = 0;
-
-			return;
-		}
-
-		memset(lpWave[channel]->lpData,0,3*len);
-		memcpy(lpWave[channel]->lpData,data,len);
-		/* upload the data to the audio DRAM local memory */
-		AWriteAudioData(lpWave[channel],0,3*len);
-		APlayVoice(hVoice[channel],lpWave[channel]);
-	/* need to cast to double because freq*nominal_sample_rate can exceed the size of an int */
-		ASetVoiceFrequency(hVoice[channel],(double)freq*nominal_sample_rate/Machine->sample_rate);
-		ASetVoiceVolume(hVoice[channel],MasterVolume*volume/400);
-		playing[channel] = 1;
-		c[channel] = 1;
-	}
-	else
-	{
-		DWORD pos;
-		extern int throttle;
-
-
-		if (throttle)   /* sync with audio only when speed throttling is not turned off */
-		{
-			for(;;)
+			AGetVoicePosition(hVoice[0],&curpos);
+			if (start < end)
 			{
-				AGetVoicePosition(hVoice[channel],&pos);
-				if (c[channel] == 0 && pos >= len) break;
-				if (c[channel] == 1 && (pos < len || pos >= 2*len)) break;
-				if (c[channel] == 2 && pos < 2*len) break;
-				osd_update_audio();
+				if (curpos < start || curpos >= end) break;
+			}
+			else
+			{
+				if (curpos < start && curpos >= end) break;
+			}
+			AUpdateAudioEx(Machine->sample_rate / Machine->drv->frames_per_second);
+		}
+		profiler_mark(PROFILER_END);
+	}
+
+	if (stereo)
+	{
+		INT16 *bufL,*bufR;
+		int p;
+
+
+		bufL = (INT16 *)lpWave[0]->lpData;
+		bufR = (INT16 *)lpWave[1]->lpData;
+		p = start;
+		while (p != end)
+		{
+			if (p >= buflen) p -= buflen;
+			bufL[p] = *data++;
+			bufR[p] = *data++;
+			p++;
+		}
+	}
+	else
+	{
+		INT16 *buf;
+		int p;
+
+
+		buf = (INT16 *)lpWave[0]->lpData;
+		p = start;
+		while (p != end)
+		{
+			if (p >= buflen) p -= buflen;
+			buf[p] = *data++;
+			p++;
+		}
+	}
+
+	if (start < end)
+	{
+		AWriteAudioData(lpWave[0],2*start,2*len);
+		if (stereo)
+			AWriteAudioData(lpWave[1],2*start,2*len);
+	}
+	else
+	{
+		int remain = buflen-start;
+		AWriteAudioData(lpWave[0],2*start,2*remain);
+		AWriteAudioData(lpWave[0],0,2*(len-remain));
+		if (stereo)
+		{
+			AWriteAudioData(lpWave[1],2*start,2*remain);
+			AWriteAudioData(lpWave[1],0,2*(len-remain));
+		}
+	}
+#endif
+#ifdef USE_ALLEGRO
+{
+	if (throttle)   /* sync with audio only when speed throttling is not turned off */
+	{
+		profiler_mark(PROFILER_IDLE);
+		for (;;)
+		{
+			int curpos;
+
+			curpos = voice_get_position(myvoice);
+			if (start < end)
+			{
+				if (curpos < start || curpos >= end) break;
+			}
+			else
+			{
+				if (curpos < start && curpos >= end) break;
 			}
 		}
-
-		memcpy(&lpWave[channel]->lpData[len * c[channel]],data,len);
-		AWriteAudioData(lpWave[channel],len*c[channel],len);
-		c[channel]++;
-		if (c[channel] == 3) c[channel] = 0;
+		profiler_mark(PROFILER_END);
 	}
 
-	Volumi[channel] = volume/4;
-}
-
-void osd_play_streamed_sample(int channel,signed char *data,int len,int freq,int volume)
-{
-	playstreamedsample(channel,data,len,freq,volume,8);
-}
-
-void osd_play_streamed_sample_16(int channel,signed short *data,int len,int freq,int volume)
-{
-	playstreamedsample(channel,(signed char *)data,2*len,freq,volume,16);
-}
-
-
-
-void osd_adjust_sample(int channel,int freq,int volume)
-{
-	if (Machine->sample_rate == 0 || channel >= NUMVOICES) return;
-
-	Volumi[channel] = volume/4;
-	/* need to cast to double because freq*nominal_sample_rate can exceed the size of an int */
-	if (freq != -1)
-		ASetVoiceFrequency(hVoice[channel],(double)freq*nominal_sample_rate/Machine->sample_rate);
-	if (volume != -1)
-		ASetVoiceVolume(hVoice[channel],MasterVolume*volume/400);
-}
-
-
-
-void osd_stop_sample(int channel)
-{
-	if (Machine->sample_rate == 0 || channel >= NUMVOICES) return;
-
-	AStopVoice(hVoice[channel]);
-}
-
-
-void osd_restart_sample(int channel)
-{
-	if (Machine->sample_rate == 0 || channel >= NUMVOICES) return;
-
-	AStartVoice(hVoice[channel]);
-}
-
-
-int osd_get_sample_status(int channel)
-{
-	int stopped=0;
-	if (Machine->sample_rate == 0 || channel >= NUMVOICES) return -1;
-
-	AGetVoiceStatus(hVoice[channel], &stopped);
-	return stopped;
-}
-
-
-void osd_ym2203_write(int n, int r, int v)
-{
-      if (No_FM) return;
-      else {
-	YMNumber = n;
-	RegistersYM[r+264*n] = v;
-	if (r == 0x28) SlotCh();
-	return;
-      }
-}
-
-
-void osd_ym2203_update(void)
-{
-      if (No_FM) return;
-      YM2203();  /* this is absolutely necesary */
-}
-
-
-void osd_set_mastervolume(int volume)
-{
-	int channel;
-
-	MasterVolume = volume;
-	for (channel=0; channel < NUMVOICES; channel++) {
-	  ASetVoiceVolume(hVoice[channel],MasterVolume*Volumi[channel]/100);
+	if (stereo)
+	{
+		INT16 *buf = mysample->data;
+		int p = start;
+		while (p != end)
+		{
+			if (p >= buflen) p -= buflen;
+			buf[2*p] = (*data++ * master_volume / 256) ^ 0x8000;
+			buf[2*p+1] = (*data++ * master_volume / 256) ^ 0x8000;
+			p++;
+		}
+	}
+	else
+	{
+		INT16 *buf = mysample->data;
+		int p = start;
+		while (p != end)
+		{
+			if (p >= buflen) p -= buflen;
+			buf[p] = (*data++ * master_volume / 256) ^ 0x8000;
+			p++;
+		}
 	}
 }
+#endif
 
-
-
-int osd_ym3812_status(void)
-{
-	return inportb(0x388);
+	voice_pos = end;
+	if (voice_pos == buflen) voice_pos = 0;
 }
 
-int osd_ym3812_read(void)
+int osd_update_audio_stream(INT16 *buffer)
 {
-	return inportb(0x389);
+	stream_cache_data = buffer;
+	stream_cache_len = samples_this_frame;
+
+	/* compute how many samples to generate next frame */
+	samples_left_over += samples_per_frame;
+	samples_this_frame = (UINT32)samples_left_over;
+	samples_left_over -= (double)samples_this_frame;
+
+	return samples_this_frame;
 }
 
-void osd_ym3812_control(int reg)
+
+
+int msdos_update_audio(void)
 {
-	outportb(0x388,reg);
+	if (Machine->sample_rate == 0 || stream_cache_data == 0) return 0;
+
+	profiler_mark(PROFILER_MIXER);
+
+#ifdef USE_SEAL
+	AUpdateAudioEx(Machine->sample_rate / Machine->drv->frames_per_second);
+#endif
+
+	updateaudiostream();
+
+	profiler_mark(PROFILER_END);
+
+	return 1;
 }
 
-void osd_ym3812_write(int data)
+
+
+
+
+/* attenuation in dB */
+void osd_set_mastervolume(int _attenuation)
 {
-	outportb(0x389,data);
+	float volume;
+
+
+	if (_attenuation > 0) _attenuation = 0;
+	if (_attenuation < -32) _attenuation = -32;
+
+	attenuation = _attenuation;
+
+ 	volume = 256.0;	/* range is 0-256 */
+	while (_attenuation++ < 0)
+		volume /= 1.122018454;	/* = (10 ^ (1/20)) = 1dB */
+
+	master_volume = volume;
+
+#ifdef USE_SEAL
+	ASetAudioMixerValue(AUDIO_MIXER_MASTER_VOLUME,master_volume);
+#endif
+}
+
+int osd_get_mastervolume(void)
+{
+	return attenuation;
+}
+
+void osd_sound_enable(int enable_it)
+{
+#ifdef USE_SEAL
+	if (enable_it)
+		ASetAudioMixerValue(AUDIO_MIXER_MASTER_VOLUME,master_volume);
+	else
+		ASetAudioMixerValue(AUDIO_MIXER_MASTER_VOLUME,0);
+#endif
+#ifdef USE_ALLEGRO
+	if (enable_it)
+		set_volume(255,0);
+	else
+		set_volume(0,0);
+#endif
+}
+
+
+
+/* linux sound driver opl3.c does a so called tenmicrosec() delay */
+static void tenmicrosec(void)
+{
+    int i;
+    for (i = 0; i < 16; i++)
+        inportb(0x80);
+}
+
+//#define MAX_OPLCHIP 2  /* SOUND BLASTER 16 or compatible ?? */
+#define MAX_OPLCHIP 1  /* SOUND BLASTER pro compatible ??  */
+
+void osd_opl_control(int chip,int reg)
+{
+    if (Machine->sample_rate == 0) return;
+
+    if (chip >= MAX_OPLCHIP ) return;
+    tenmicrosec();
+    outportb(0x388+chip*2,reg);
+}
+
+void osd_opl_write(int chip,int data)
+{
+    if (Machine->sample_rate == 0) return;
+
+    if (chip >=MAX_OPLCHIP ) return;
+    tenmicrosec();
+    outportb(0x389+chip*2,data);
+
+	if(chip >= num_used_opl) num_used_opl = chip+1;
 }

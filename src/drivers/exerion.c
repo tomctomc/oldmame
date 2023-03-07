@@ -15,47 +15,113 @@ out of Bizarro World. I submit for your approval:
 #include "driver.h"
 #include "vidhrdw/generic.h"
 
-void exerion_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
-int exerion_vh_start (void);
-void exerion_vh_stop (void);
-void exerion_vh_screenrefresh (struct osd_bitmap *bitmap);
 
-extern void exerion_videoreg_w (int offset,int data);
+void exerion_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable, const unsigned char *color_prom);
+int exerion_vh_start(void);
+void exerion_vh_stop(void);
+void exerion_vh_screenrefresh(struct osd_bitmap *bitmap, int full_refresh);
+
+WRITE_HANDLER( exerion_videoreg_w );
+WRITE_HANDLER( exerion_video_latch_w );
+READ_HANDLER( exerion_video_timing_r );
+
+extern UINT8 exerion_cocktail_flip;
+
+
+/*********************************************************************
+ * Interrupts & inputs
+ *********************************************************************/
+
+static READ_HANDLER( exerion_port01_r )
+{
+	/* the cocktail flip bit muxes between ports 0 and 1 */
+	return exerion_cocktail_flip ? input_port_1_r(offset) : input_port_0_r(offset);
+}
+
+
+static READ_HANDLER( exerion_port3_r )
+{
+	/* bit 0 is VBLANK, which we simulate manually */
+	int result = input_port_3_r(offset);
+	int ybeam = cpu_getscanline();
+	if (ybeam > Machine->visible_area.max_y)
+		result |= 1;
+	return result;
+}
+
+
+static int exerion_interrupt(void)
+{
+	/* Exerion triggers NMIs on coin insertion */
+	if (readinputport(4) & 1)
+		return nmi_interrupt();
+	else return ignore_interrupt();
+}
+
+
+
+/*********************************************************************
+ * Protection??
+ *********************************************************************/
 
 /* This is the first of many Exerion "features." No clue if it's */
 /* protection or some sort of timer. */
-int exerion_d802_r (int offset) {
+static UINT8 porta;
+static UINT8 portb;
 
-	static unsigned char val = 0xbe;
+static READ_HANDLER( exerion_porta_r )
+{
+	porta ^= 0x40;
+	return porta;
+}
 
-	val ^= 0x40;
-	return val;
-	}
+static WRITE_HANDLER( exerion_portb_w )
+{
+	/* pull the expected value from the ROM */
+	porta = memory_region(REGION_CPU1)[0x5f76];
+	portb = data;
+
+	logerror("Port B = %02X\n", data);
+}
+
+static READ_HANDLER( exerion_protection_r )
+{
+	UINT8 *RAM = memory_region(REGION_CPU1);
+
+	if (cpu_get_pc() == 0x4143)
+		return RAM[0x33c0 + (RAM[0x600d] << 2) + offset];
+	else
+		return RAM[0x6008 + offset];
+}
 
 
+
+/*********************************************************************
+ * CPU memory structures
+ *********************************************************************/
 
 static struct MemoryReadAddress readmem[] =
 {
 	{ 0x0000, 0x5fff, MRA_ROM },
-	{ 0x6000, 0x67ef, MRA_RAM },
-	{ 0x67f0, 0x67ff, MRA_RAM },
+	{ 0x6008, 0x600b, exerion_protection_r },
+	{ 0x6000, 0x67ff, MRA_RAM },
 	{ 0x8000, 0x8bff, MRA_RAM },
-	{ 0xa000, 0xa000, input_port_0_r },
-	{ 0xa800, 0xa800, input_port_1_r },
-	{ 0xb000, 0xb000, input_port_2_r },
-	{ 0xd802, 0xd802, exerion_d802_r },
+	{ 0xa000, 0xa000, exerion_port01_r },
+	{ 0xa800, 0xa800, input_port_2_r },
+	{ 0xb000, 0xb000, exerion_port3_r },
+	{ 0xd802, 0xd802, AY8910_read_port_1_r },
 	{ -1 }  /* end of table */
 };
+
 
 static struct MemoryWriteAddress writemem[] =
 {
 	{ 0x0000, 0x5fff, MWA_ROM },
-	{ 0x6000, 0x67ef, MWA_RAM },
-	{ 0x67f0, 0x67ff, MWA_RAM }, /* I believe this is somehow the parallaxed background */
+	{ 0x6000, 0x67ff, MWA_RAM },
 	{ 0x8000, 0x87ff, videoram_w, &videoram, &videoram_size },
 	{ 0x8800, 0x887f, MWA_RAM, &spriteram, &spriteram_size },
 	{ 0x8800, 0x8bff, MWA_RAM },
-	{ 0xc000, 0xc7ff, exerion_videoreg_w },
+	{ 0xc000, 0xc000, exerion_videoreg_w },
 	{ 0xc800, 0xc800, soundlatch_w },
 	{ 0xd000, 0xd000, AY8910_control_port_0_w },
 	{ 0xd001, 0xd001, AY8910_write_port_0_w },
@@ -65,142 +131,126 @@ static struct MemoryWriteAddress writemem[] =
 };
 
 
-#ifdef TRYCPU2
-static struct MemoryReadAddress sound_readmem[] =
+static struct MemoryReadAddress cpu2_readmem[] =
 {
 	{ 0x0000, 0x1fff, MRA_ROM },
 	{ 0x4000, 0x47ff, MRA_RAM },
 	{ 0x6000, 0x6000, soundlatch_r },
-//	{ 0xa000, 0xa000, MRA_NOP }, /* ??? */
+	{ 0xa000, 0xa000, exerion_video_timing_r },
 	{ -1 }  /* end of table */
 };
 
-static struct MemoryWriteAddress sound_writemem[] =
+
+static struct MemoryWriteAddress cpu2_writemem[] =
 {
 	{ 0x0000, 0x1fff, MWA_ROM },
 	{ 0x4000, 0x47ff, MWA_RAM },
-//	{ 0x8001, 0x8001, MWA_RAM },
-//	{ 0x8003, 0x8003, MWA_RAM },
-//	{ 0x8005, 0x8005, MWA_RAM },
-//	{ 0x8007, 0x8007, MWA_RAM },
+	{ 0x8000, 0x800c, exerion_video_latch_w },
 	{ -1 }  /* end of table */
 };
 
-#endif
 
-/* Exerion triggers NMIs on vblank */
-int exerion_interrupt(void)
-{
-	if (readinputport(3) & 1)
-		return nmi_interrupt();
-	else return ignore_interrupt();
-}
 
-INPUT_PORTS_START( exerion_input_ports )
-	PORT_START      /* IN0 */
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_8WAY )
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_8WAY )
-	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_8WAY )
-	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_8WAY )
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON2 )
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 )
+/*********************************************************************
+ * Input port definitions
+ *********************************************************************/
+
+INPUT_PORTS_START( exerion )
+	PORT_START      /* player 1 inputs (muxed on 0xa000) */
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_8WAY | IPF_PLAYER1 )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_8WAY | IPF_PLAYER1 )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_8WAY | IPF_PLAYER1 )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_8WAY | IPF_PLAYER1 )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER1 )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER1 )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START1 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_START2 )
 
-	PORT_START      /* DSW0 */
-	PORT_DIPNAME( 0x07, 0x02, "Lives", IP_KEY_NONE )
+	PORT_START      /* player 2 inputs (muxed on 0xa000) */
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_8WAY | IPF_PLAYER2 )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_8WAY | IPF_PLAYER2 )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_8WAY | IPF_PLAYER2 )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_8WAY | IPF_PLAYER2 )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER2 )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER2 )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START1 )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_START2 )
+
+	PORT_START      /* dip switches (0xa800) */
+	PORT_DIPNAME( 0x07, 0x02, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x00, "1" )
 	PORT_DIPSETTING(    0x01, "2" )
 	PORT_DIPSETTING(    0x02, "3" )
 	PORT_DIPSETTING(    0x03, "4" )
 	PORT_DIPSETTING(    0x04, "5" )
-	PORT_DIPSETTING(    0x07, "Infinite" )
-	PORT_DIPNAME( 0x18, 0x00, "Bonus Life", IP_KEY_NONE )
+	PORT_BITX(0,        0x07, IPT_DIPSWITCH_SETTING | IPF_CHEAT, "Infinite", IP_KEY_NONE, IP_JOY_NONE )
+	PORT_DIPNAME( 0x18, 0x00, DEF_STR( Bonus_Life ) )
 	PORT_DIPSETTING(    0x00, "10000" )
 	PORT_DIPSETTING(    0x08, "20000" )
 	PORT_DIPSETTING(    0x10, "30000" )
 	PORT_DIPSETTING(    0x18, "40000" )
-	PORT_DIPNAME( 0x20, 0x20, "Coinage", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x20, "1 Coin/1 Credit" )
-	PORT_DIPNAME( 0x40, 0x00, "Difficulty", IP_KEY_NONE )
+	PORT_DIPNAME( 0x20, 0x20, DEF_STR( Unknown ) )      /* used */
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( On ) )
+	PORT_DIPNAME( 0x40, 0x00, DEF_STR( Difficulty ) )
 	PORT_DIPSETTING(    0x00, "Easy" )
 	PORT_DIPSETTING(    0x40, "Hard" )
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_DIPNAME( 0x80, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( Cocktail ) )
 
-	PORT_START      /* VBLANK */
-	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_VBLANK )
+	PORT_START      /* dip switches/VBLANK (0xb000) */
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_UNUSED )		/* VBLANK */
+	PORT_DIPNAME( 0x02, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( On ) )
+	PORT_DIPNAME( 0x0c, 0x00, DEF_STR( Coinage ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_4C ) )
+	PORT_BIT( 0xf0, IP_ACTIVE_LOW, IPT_UNUSED )
 
 	PORT_START      /* FAKE */
 	/* The coin slots are not memory mapped. */
 	/* This fake input port is used by the interrupt */
-	/* handler to be notified of coin insertions. We use IPF_IMPULSE to */
+	/* handler to be notified of coin insertions. We use IMPULSE to */
 	/* trigger exactly one interrupt, without having to check when the */
 	/* user releases the key. */
-	PORT_BITX(0x01, IP_ACTIVE_HIGH, IPT_COIN1 | IPF_IMPULSE,
-			IP_NAME_DEFAULT, IP_KEY_DEFAULT, IP_JOY_DEFAULT, 1 )
+	PORT_BIT_IMPULSE( 0x01, IP_ACTIVE_HIGH, IPT_COIN1, 1 )
 INPUT_PORTS_END
 
-/* JB 971124 */
+
+
+/*********************************************************************
+ * Graphics layouts
+ *********************************************************************/
+
 static struct GfxLayout charlayout =
 {
 	8,8,            /* 8*8 characters */
-	512*5,          /* total number of chars */
+	512,          /* total number of chars */
 	2,              /* 2 bits per pixel (# of planes) */
 	{ 0, 4 },       /* start of every bitplane */
-	{ 16*7, 16*6, 16*5, 16*4, 16*3, 16*2, 16*1, 16*0 },
 	{ 3, 2, 1, 0, 8+3, 8+2, 8+1, 8+0 },
+	{ 16*0, 16*1, 16*2, 16*3, 16*4, 16*5, 16*6, 16*7 },
 	16*8            /* every char takes 16 consecutive bytes */
 };
 
-#if 0
-/* This left in source for informational purposes. */
-/* just leave as 8 x 8 characters */
-static struct GfxLayout spritelayout =
-{
-	8,8,            /* 8*8 sprites */
-	512*2,          /* total number of sprites in the rom */
-	2,              /* 2 bits per pixel (# of planes) */
-	{ 0, 4 },       /* start of every bitplane */
-	{ 16*7, 16*6, 16*5, 16*4, 16*3, 16*2, 16*1, 16*0 },
-	{ 3, 2, 1, 0, 8+3, 8+2, 8+1, 8+0 },
-	16*8            /* every char takes 16 consecutive bytes */
-};
-#endif
-
-#if 0
-/* This left in source for informational purposes. */
-/* try to form 16 x 16 sprites without reorganizing characters in exerion_decode() */
+/* 16 x 16 sprites -- requires reorganizing characters in init_exerion() */
 static struct GfxLayout spritelayout =
 {
 	16,16,          /* 16*16 sprites */
 	128*2,          /* total number of sprites in the rom */
 	2,              /* 2 bits per pixel (# of planes) */
 	{ 0, 4 },       /* start of every bitplane */
-	{ 2048+16*7, 2048+16*6, 2048+16*5, 2048+16*4, 2048+16*3, 2048+16*2, 2048+16*1, 2048+16*0,
-	  16*7, 16*6, 16*5, 16*4, 16*3, 16*2, 16*1, 16*0 },
 	{  3, 2, 1, 0, 8+3, 8+2, 8+1, 8+0,
-	  128+3, 128+2, 128+1, 128+0, 128+8+3, 128+8+2, 128+8+1, 128+8+0 },
-	32*8            /* every sprite takes 32 consecutive bytes */
-};
-#endif
-
-/* 16 x 16 sprites -- requires reorganizing characters in exerion_decode() */
-static struct GfxLayout spritelayout =
-{
-	16,16,          /* 16*16 sprites */
-	128*2,          /* total number of sprites in the rom */
-	2,              /* 2 bits per pixel (# of planes) */
-	{ 0, 4 },       /* start of every bitplane */
-	{ 256+16*7, 256+16*6, 256+16*5, 256+16*4, 256+16*3, 256+16*2, 256+16*1, 256+16*0,
-	  16*7, 16*6, 16*5, 16*4, 16*3, 16*2, 16*1, 16*0 },
-	{  3, 2, 1, 0, 8+3, 8+2, 8+1, 8+0,
-	  128+3, 128+2, 128+1, 128+0, 128+8+3, 128+8+2, 128+8+1, 128+8+0 },
+			16+3, 16+2, 16+1, 16+0, 24+3, 24+2, 24+1, 24+0 },
+	{ 32*0, 32*1, 32*2, 32*3, 32*4, 32*5, 32*6, 32*7,
+			32*8, 32*9, 32*10, 32*11, 32*12, 32*13, 32*14, 32*15 },
 	64*8            /* every sprite takes 64 consecutive bytes */
 };
 
-
-/* JB 980109 */
 /* Quick and dirty way to emulate pixel-doubled sprites. */
 static struct GfxLayout bigspritelayout =
 {
@@ -208,148 +258,76 @@ static struct GfxLayout bigspritelayout =
 	128*2,          /* total number of sprites in the rom */
 	2,              /* 2 bits per pixel (# of planes) */
 	{ 0, 4 },       /* start of every bitplane */
-	{ 256+16*7, 256+16*7, 256+16*6, 256+16*6, 256+16*5, 256+16*5, 256+16*4, 256+16*4,
-	  256+16*3, 256+16*3, 256+16*2, 256+16*2, 256+16*1, 256+16*1, 256+16*0, 256+16*0,
-	  16*7, 16*7, 16*6, 16*6, 16*5, 16*5, 16*4, 16*4,
-	  16*3, 16*3, 16*2, 16*2, 16*1, 16*1, 16*0, 16*0 },
-	{ 3, 3, 2, 2, 1, 1, 0, 0, 8+3, 8+3, 8+2, 8+2, 8+1, 8+1, 8+0, 8+0,
-	  128+3, 128+3, 128+2, 128+2, 128+1, 128+1, 128+0, 128+0,
-	  128+8+3, 128+8+3, 128+8+2, 128+8+2, 128+8+1, 128+8+1, 128+8+0, 128+8+0 },
+	{  3, 3, 2, 2, 1, 1, 0, 0,
+			8+3, 8+3, 8+2, 8+2, 8+1, 8+1, 8+0, 8+0,
+			16+3, 16+3, 16+2, 16+2, 16+1, 16+1, 16+0, 16+0,
+			24+3, 24+3, 24+2, 24+2, 24+1, 24+1, 24+0, 24+0 },
+	{ 32*0, 32*0, 32*1, 32*1, 32*2, 32*2, 32*3, 32*3,
+			32*4, 32*4, 32*5, 32*5, 32*6, 32*6, 32*7, 32*7,
+			32*8, 32*8, 32*9, 32*9, 32*10, 32*10, 32*11, 32*11,
+			32*12, 32*12, 32*13, 32*13, 32*14, 32*14, 32*15, 32*15 },
 	64*8            /* every sprite takes 64 consecutive bytes */
 };
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout,      0, 32 },
-	{ 1, 0xa000, &spritelayout,    0, 32 },
-	{ 1, 0xa000, &bigspritelayout, 0, 32 },/* JB 980109 */
+	{ REGION_GFX1, 0, &charlayout,         0, 64 },
+	{ REGION_GFX2, 0, &spritelayout,     256, 64 },
+	{ REGION_GFX2, 0, &bigspritelayout,  256, 64 },
 	{ -1 } /* end of array */
 };
 
 
 
-static unsigned char exerion_color_prom[] =
-{
-	/* 001 - palette */
-	0x00,0x06,0x1D,0x24,0x2B,0x30,0x68,0xA0,0x98,0xC0,0x83,0x84,0x45,0xAD,0x6B,0x9B,
-	0x00,0x07,0x16,0x3F,0x34,0x38,0xF5,0xF8,0xE0,0xC0,0xC6,0x87,0x46,0xFF,0xBD,0xAF,
-	/* 002 - ? */
-	0x00,0x01,0x02,0x03,0x00,0x01,0x03,0x02,0x00,0x01,0x03,0x02,0x00,0x00,0x02,0x03,
-	0x00,0x08,0x0F,0x0D,0x00,0x08,0x0F,0x0D,0x00,0x08,0x0F,0x0D,0x00,0x00,0x03,0x04,
-	0x00,0x01,0x0A,0x0C,0x00,0x01,0x0A,0x0C,0x00,0x01,0x0A,0x0C,0x00,0x00,0x0C,0x0B,
-	0x00,0x05,0x04,0x03,0x00,0x05,0x04,0x03,0x00,0x05,0x04,0x03,0x00,0x00,0x00,0x04,
-	0x00,0x0E,0x0D,0x0F,0x00,0x0E,0x0D,0x0F,0x00,0x0E,0x0D,0x0F,0x00,0x00,0x0D,0x0F,
-	0x00,0x0F,0x0D,0x01,0x00,0x0F,0x0D,0x01,0x00,0x0F,0x0D,0x01,0x00,0x00,0x04,0x04,
-	0x00,0x01,0x0D,0x0F,0x00,0x01,0x0D,0x0F,0x00,0x01,0x0D,0x0F,0x00,0x00,0x0D,0x0F,
-	0x0C,0x01,0x02,0x03,0x0C,0x01,0x02,0x03,0x0C,0x01,0x02,0x03,0x0C,0x00,0x00,0x02,
-	0x0C,0x00,0x00,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	/* 003 - ? */
-	0x00,0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x03,0x00,0x01,0x00,0x02,0x00,0x01,0x00,
-	0x00,0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x03,0x00,0x01,0x00,0x03,0x00,0x01,0x00,
-	0x00,0x00,0x01,0x01,0x02,0x02,0x01,0x01,0x03,0x00,0x01,0x01,0x02,0x02,0x01,0x01,
-	0x00,0x00,0x01,0x01,0x02,0x02,0x01,0x01,0x03,0x03,0x01,0x01,0x02,0x02,0x01,0x01,
-	0x00,0x00,0x01,0x00,0x02,0x02,0x02,0x02,0x03,0x00,0x01,0x00,0x02,0x02,0x02,0x02,
-	0x00,0x00,0x01,0x00,0x02,0x02,0x02,0x02,0x03,0x00,0x03,0x00,0x02,0x02,0x02,0x02,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	/* 004 - ? */
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x03,0x03,0x0A,0x0A,0x05,0x05,0x0D,0x0D,0x09,0x09,0x09,0x09,0x09,0x09,0x09,0x09,
-	0x0F,0x0F,0x01,0x01,0x0D,0x0D,0x09,0x09,0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01,
-	0x06,0x06,0x07,0x07,0x01,0x01,0x0F,0x0F,0x03,0x03,0x03,0x03,0x03,0x03,0x03,0x03,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x03,0x03,0x0A,0x0A,0x05,0x05,0x03,0x03,0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,
-	0x0F,0x0F,0x01,0x01,0x0D,0x0D,0x00,0x00,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-	0x06,0x06,0x07,0x07,0x01,0x01,0x0E,0x0E,0x0D,0x0D,0x0D,0x0D,0x0D,0x0D,0x0D,0x0D,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x03,0x03,0x0A,0x0A,0x05,0x05,0x00,0x0F,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x0F,0x0F,0x01,0x01,0x0D,0x0D,0x00,0x0F,0x0B,0x0C,0x01,0x00,0x0E,0x0E,0x0E,0x0E,
-	0x06,0x06,0x07,0x07,0x01,0x01,0x03,0x0D,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	/* 005 - ? */
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x09,0x05,0x00,0x00,0x0C,0x09,0x01,0x0D,0x05,0x0F,0x09,0x04,0x04,0x03,0x0B,0x09,
-	0x01,0x0D,0x0F,0x00,0x09,0x01,0x09,0x08,0x03,0x0C,0x07,0x0F,0x0F,0x06,0x0F,0x0E,
-	0x0A,0x02,0x0E,0x00,0x0A,0x07,0x07,0x09,0x09,0x0E,0x01,0x0B,0x09,0x07,0x0C,0x01,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-};
-
-
+/*********************************************************************
+ * Sound interfaces
+ *********************************************************************/
 
 static struct AY8910interface ay8910_interface =
 {
-	2,	/* 2 chips */
-	1750000,	/* 1.75 MHz? (hand tuned) */
-	{ 0x20ff, 0x20ff },
+	2,  /* 2 chips */
+	10000000/6, /* 1.666 MHz */
+	{ 30, 30 },
+	{ 0, exerion_porta_r },
 	{ 0 },
 	{ 0 },
-	{ 0 },
-	{ 0 }
+	{ 0, exerion_portb_w }
 };
 
 
 
-static struct MachineDriver machine_driver =
+/*********************************************************************
+ * Machine driver
+ *********************************************************************/
+
+static struct MachineDriver machine_driver_exerion =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80,
-			3072000,        /* 3.072 Mhz */
-			0,
+			10000000/3, /* 3.333 MHz */
 			readmem,writemem,0,0,
 			exerion_interrupt,1
 		},
-#ifdef TRYCPU2
 		{
 			CPU_Z80,
-			3072000,        /* 2 Mhz?????? */
-			2,      /* memory region #2 */
-			sound_readmem,sound_writemem,0,0,
-			ignore_interrupt,1
+			10000000/3, /* 3.333 MHz */
+			cpu2_readmem,cpu2_writemem,0,0,
+			ignore_interrupt,0
 		}
-#endif
 	},
-	60, DEFAULT_REAL_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
-	1,	/* 1 CPU slice per frame - interleaving is forced when a sound command is written */
+	60, 0,  /* frames per second, vblank duration */
+	1,  /* 1 CPU slice per frame - interleaving is forced when a sound command is written */
 	0,
 
 	/* video hardware */
-	28*8, 40*8, { 0*8, 28*8-1, 0*8, 40*8-1 },
+	64*8, 32*8, { 12*8, 52*8-1, 2*8, 30*8-1 },
 	gfxdecodeinfo,
-	32,32*4,
+	32,256*3,
 	exerion_vh_convert_color_prom,
 
-	VIDEO_TYPE_RASTER|VIDEO_SUPPORTS_DIRTY,
+	VIDEO_TYPE_RASTER,
 	0,
 	exerion_vh_start,
 	exerion_vh_stop,
@@ -366,159 +344,175 @@ static struct MachineDriver machine_driver =
 };
 
 
-static void exerion_decode(void)
-{
-	int i, x, offs;
-	unsigned char *RAM;
-	unsigned char *src;
 
-	/*
-		The gfx ROMs are stored in a half-assed fashion that makes using them with
-		MAME challenging. We shuffle the bytes around to make it easier.
+/*********************************************************************
+ * ROM definitions
+ *********************************************************************/
 
-		They have been loaded at 0xe000, we write them at 0x0000.
-	*/
+ROM_START( exerion )
+	ROM_REGION( 0x10000, REGION_CPU1 )     /* 64k for code */
+	ROM_LOAD( "exerion.07",   0x0000, 0x2000, 0x4c78d57d )
+	ROM_LOAD( "exerion.08",   0x2000, 0x2000, 0xdcadc1df )
+	ROM_LOAD( "exerion.09",   0x4000, 0x2000, 0x34cc4d14 )
 
-	RAM = Machine->memory_region[1];
-	src = RAM + 0xe000;
+	ROM_REGION( 0x10000, REGION_CPU2 )     /* 64k for the second CPU */
+	ROM_LOAD( "exerion.05",   0x0000, 0x2000, 0x32f6bff5 )
 
-	for (i=0; i<(512*7); i++)
-	{
-		offs = (i/16)*2048 + (i%16)*16;
+	ROM_REGION( 0x02000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "exerion.06",   0x00000, 0x2000, 0x435a85a4 ) /* fg chars */
 
-		for (x=0; x<8; x++)
-		{
-			int d, s;
+	ROM_REGION( 0x04000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "exerion.11",   0x00000, 0x2000, 0xf0633a09 ) /* sprites */
+	ROM_LOAD( "exerion.10",   0x02000, 0x2000, 0x80312de0 )
 
-			d = i*16 + x*2;
-			s = (offs + 256*x) / 8;
+	ROM_REGION( 0x08000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "exerion.03",   0x00000, 0x2000, 0x790595b8 ) /* bg data */
+	ROM_LOAD( "exerion.04",   0x02000, 0x2000, 0xd7abd0b9 )
+	ROM_LOAD( "exerion.01",   0x04000, 0x2000, 0x5bb755cb )
+	ROM_LOAD( "exerion.02",   0x06000, 0x2000, 0xa7ecbb70 )
 
-			RAM[d] = src[s];
-			RAM[d+1] = src[s+1];
-		}
-	}
+	ROM_REGION( 0x0420, REGION_PROMS )
+	ROM_LOAD( "exerion.e1",   0x0000, 0x0020, 0x2befcc20 ) /* palette */
+	ROM_LOAD( "exerion.i8",   0x0020, 0x0100, 0x31db0e08 ) /* fg char lookup table */
+	ROM_LOAD( "exerion.h10",  0x0120, 0x0100, 0xcdd23f3e ) /* sprite lookup table */
+	ROM_LOAD( "exerion.i3",   0x0220, 0x0100, 0xfe72ab79 ) /* bg char lookup table */
+	ROM_LOAD( "exerion.k4",   0x0320, 0x0100, 0xffc2ba43 ) /* bg char mixer */
+ROM_END
 
-	/* now reorganize the characters that form the sprites, and the sprites */
+ROM_START( exeriont )
+	ROM_REGION( 0x10000, REGION_CPU1 )     /* 64k for code */
+	ROM_LOAD( "prom5.4p",     0x0000, 0x4000, 0x58b4dc1b )
+	ROM_LOAD( "prom6.4s",     0x4000, 0x2000, 0xfca18c2d )
 
-	/* get a fresh copy to work with */
-	memcpy (&RAM[0x18000], &RAM[0xa000], 0x4000);
+	ROM_REGION( 0x10000, REGION_CPU2 )     /* 64k for the second CPU */
+	ROM_LOAD( "exerion.05",   0x0000, 0x2000, 0x32f6bff5 )
 
-	/* for each of the 256 sprites, make the 4 characters contiguous */
-	for (i=0; i<(128*2); i++)
-	{
-		int d, s;
+	ROM_REGION( 0x02000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "exerion.06",   0x00000, 0x2000, 0x435a85a4 ) /* fg chars */
 
-		/* this assumes that sprite 1 is offset by 32 characters (32*16 bytes) from sprite 0 */
-		offs = 16 * ((i/32)*2 + (i%32)*32);     // byte offset of sprite
+	ROM_REGION( 0x04000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "exerion.11",   0x00000, 0x2000, 0xf0633a09 ) /* sprites */
+	ROM_LOAD( "exerion.10",   0x02000, 0x2000, 0x80312de0 )
 
-		/* this assumes that sprite 1 is right next to sprite 0 (informational only) */
-		//offs = 16 * i * 2; // byte offset of sprite
+	ROM_REGION( 0x08000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "exerion.03",   0x00000, 0x2000, 0x790595b8 ) /* bg data */
+	ROM_LOAD( "exerion.04",   0x02000, 0x2000, 0xd7abd0b9 )
+	ROM_LOAD( "exerion.01",   0x04000, 0x2000, 0x5bb755cb )
+	ROM_LOAD( "exerion.02",   0x06000, 0x2000, 0xa7ecbb70 )
 
-		d = 0xa000 + i*64;
-		s = 0x18000 + offs;
+	ROM_REGION( 0x0420, REGION_PROMS )
+	ROM_LOAD( "exerion.e1",   0x0000, 0x0020, 0x2befcc20 ) /* palette */
+	ROM_LOAD( "exerion.i8",   0x0020, 0x0100, 0x31db0e08 ) /* fg char lookup table */
+	ROM_LOAD( "exerion.h10",  0x0120, 0x0100, 0xcdd23f3e ) /* sprite lookup table */
+	ROM_LOAD( "exerion.i3",   0x0220, 0x0100, 0xfe72ab79 ) /* bg char lookup table */
+	ROM_LOAD( "exerion.k4",   0x0320, 0x0100, 0xffc2ba43 ) /* bg char mixer */
+ROM_END
 
-		memcpy (&RAM[d], &RAM[s], 32);  // first 32 bytes
-		memcpy (&RAM[d+32], &RAM[s+256], 32); // next 32 bytes
-	}
-}
+ROM_START( exerionb )
+	ROM_REGION( 0x10000, REGION_CPU1 )     /* 64k for code */
+	ROM_LOAD( "eb5.bin",      0x0000, 0x4000, 0xda175855 )
+	ROM_LOAD( "eb6.bin",      0x4000, 0x2000, 0x0dbe2eff )
 
+	ROM_REGION( 0x10000, REGION_CPU2 )     /* 64k for the second CPU */
+	ROM_LOAD( "exerion.05",   0x0000, 0x2000, 0x32f6bff5 )
 
-/***************************************************************************
+	ROM_REGION( 0x02000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "exerion.06",   0x00000, 0x2000, 0x435a85a4 ) /* fg chars */
 
-  Game driver(s)
+	ROM_REGION( 0x04000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "exerion.11",   0x00000, 0x2000, 0xf0633a09 ) /* sprites */
+	ROM_LOAD( "exerion.10",   0x02000, 0x2000, 0x80312de0 )
 
-***************************************************************************/
+	ROM_REGION( 0x08000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "exerion.03",   0x00000, 0x2000, 0x790595b8 ) /* bg data */
+	ROM_LOAD( "exerion.04",   0x02000, 0x2000, 0xd7abd0b9 )
+	ROM_LOAD( "exerion.01",   0x04000, 0x2000, 0x5bb755cb )
+	ROM_LOAD( "exerion.02",   0x06000, 0x2000, 0xa7ecbb70 )
 
-ROM_START( exerion_rom )
-	ROM_REGION(0x10000)     /* 64k for code */
-	ROM_LOAD( "exerion.07", 0x0000, 0x2000, 0x9b868f9c )
-	ROM_LOAD( "exerion.08", 0x2000, 0x2000, 0x61dec9ec )
-	ROM_LOAD( "exerion.09", 0x4000, 0x2000, 0x64e47d18 )
-
-	ROM_REGION(0x1c000)     /* temporary space for graphics (disposed after conversion) */
-	/* Set aside 0xe000 for the unscrambled graphics */
-	ROM_LOAD( "exerion.06", 0x0e000, 0x2000, 0xcd93f589 )
-	ROM_LOAD( "exerion.01", 0x10000, 0x2000, 0x47c3cac1 )
-	ROM_LOAD( "exerion.02", 0x12000, 0x2000, 0xc4fe0d02 )
-	ROM_LOAD( "exerion.03", 0x14000, 0x2000, 0xa32c1e5a )
-	ROM_LOAD( "exerion.04", 0x16000, 0x2000, 0xf7c668aa )
-	/* sprites */
-	ROM_LOAD( "exerion.11", 0x18000, 0x2000, 0xece32a3b )
-	ROM_LOAD( "exerion.10", 0x1a000, 0x2000, 0xff808bd0 )
-
-	ROM_REGION(0x10000)     /* 64k for the audio CPU */
-	ROM_LOAD( "exerion.05", 0x0000, 0x2000, 0x16090891 )
+	ROM_REGION( 0x0420, REGION_PROMS )
+	ROM_LOAD( "exerion.e1",   0x0000, 0x0020, 0x2befcc20 ) /* palette */
+	ROM_LOAD( "exerion.i8",   0x0020, 0x0100, 0x31db0e08 ) /* fg char lookup table */
+	ROM_LOAD( "exerion.h10",  0x0120, 0x0100, 0xcdd23f3e ) /* sprite lookup table */
+	ROM_LOAD( "exerion.i3",   0x0220, 0x0100, 0xfe72ab79 ) /* bg char lookup table */
+	ROM_LOAD( "exerion.k4",   0x0320, 0x0100, 0xffc2ba43 ) /* bg char mixer */
 ROM_END
 
 
-static int hiload(void)
+
+/*********************************************************************
+ * Initialization routines
+ *********************************************************************/
+
+static void init_exerion(void)
 {
-	/* get RAM pointer (this game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
+	UINT32 oldaddr, newaddr, length;
+	UINT8 *src, *dst, *temp;
 
-	/* check if the hi score table has already been initialized */
-	if (memcmp(&RAM[0x86cc],"\x5c",1) == 0) /* Look for 1UP on screen */
+	/* allocate some temporary space */
+	temp = malloc(0x8000);
+	if (!temp)
+		return;
+
+	/* make a temporary copy of the character data */
+	src = temp;
+	dst = memory_region(REGION_GFX1);
+	length = memory_region_length(REGION_GFX1);
+	memcpy(src, dst, length);
+
+	/* decode the characters */
+	/* the bits in the ROM are ordered: n8-n7 n6 n5 n4-v2 v1 v0 n3-n2 n1 n0 h2 */
+	/* we want them ordered like this:  n8-n7 n6 n5 n4-n3 n2 n1 n0-v2 v1 v0 h2 */
+	for (oldaddr = 0; oldaddr < length; oldaddr++)
 	{
-		void *f;
-
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			int writing = 0;
-
-
-			osd_fread(f,&RAM[0x6600],10);
-			osd_fread(f,&RAM[0x6700],40);
-			osd_fclose(f);
-
-			/* this is a little gross, but necessary to get the high score on-screen */
-			if (!writing) writing = (RAM[0x6600] >> 4);
-			videoram_w (0x48d, writing ? (RAM[0x6600] >> 4) | 0x30 : ' ');
-			if (!writing) writing = (RAM[0x6600] & 0x0f);
-			videoram_w (0x44d, writing ? (RAM[0x6600] & 0x0f) | 0x30 : ' ');
-			if (!writing) writing = (RAM[0x6601] >> 4);
-			videoram_w (0x40d, writing ? (RAM[0x6601] >> 4) | 0x30 : ' ');
-			if (!writing) writing = (RAM[0x6601] & 0x0f);
-			videoram_w (0x3cd, writing ? (RAM[0x6601] & 0x0f) | 0x30 : ' ');
-		}
-
-		return 1;
+		newaddr = ((oldaddr     ) & 0x1f00) |       /* keep n8-n4 */
+		          ((oldaddr << 3) & 0x00f0) |       /* move n3-n0 */
+		          ((oldaddr >> 4) & 0x000e) |       /* move v2-v0 */
+		          ((oldaddr     ) & 0x0001);        /* keep h2 */
+		dst[newaddr] = src[oldaddr];
 	}
-	else return 0;  /* we can't load the hi scores yet */
+
+	/* make a temporary copy of the sprite data */
+	src = temp;
+	dst = memory_region(REGION_GFX2);
+	length = memory_region_length(REGION_GFX2);
+	memcpy(src, dst, length);
+
+	/* decode the sprites */
+	/* the bits in the ROMs are ordered: n3 n7-n6 n5 n4 v3-v2 v1 v0 n2-n1 n0 h3 h2 */
+	/* we want them ordered like this:   n7 n6-n5 n4 n3 n2-n1 n0 v3 v2-v1 v0 h3 h2 */
+	for (oldaddr = 0; oldaddr < length; oldaddr++)
+	{
+		newaddr = ((oldaddr << 1) & 0x3c00) |       /* move n7-n4 */
+		          ((oldaddr >> 4) & 0x0200) |       /* move n3 */
+		          ((oldaddr << 4) & 0x01c0) |       /* move n2-n0 */
+		          ((oldaddr >> 3) & 0x003c) |       /* move v3-v0 */
+		          ((oldaddr     ) & 0x0003);        /* keep h3-h2 */
+		dst[newaddr] = src[oldaddr];
+	}
+
+	free(temp);
 }
 
 
-static void hisave(void)
+static void init_exerionb(void)
 {
-	void *f;
-	unsigned char *RAM = Machine->memory_region[0];
+	UINT8 *ram = memory_region(REGION_CPU1);
+	int addr;
 
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0x6600],10);
-		osd_fwrite(f,&RAM[0x6700],40);
-		osd_fclose(f);
-	}
+	/* the program ROMs have data lines D1 and D2 swapped. Decode them. */
+	for (addr = 0; addr < 0x6000; addr++)
+		ram[addr] = (ram[addr] & 0xf9) | ((ram[addr] & 2) << 1) | ((ram[addr] & 4) >> 1);
+
+	/* also convert the gfx as in Exerion */
+	init_exerion();
 }
 
 
-struct GameDriver exerion_driver =
-{
-	"Exerion",
-	"exerion",
-	"Brad Oliver\nJohn Butler\nValerio Verrando (high score save)\nGerald Vanderick (color info)",
-	&machine_driver,
 
-	exerion_rom,
-	exerion_decode, 0,
-	0,
-	0,      /* sound_prom */
+/*********************************************************************
+ * Game drivers
+ *********************************************************************/
 
-	exerion_input_ports,
-
-	exerion_color_prom, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	hiload, hisave
-};
+GAMEX( 1983, exerion,  0,       exerion, exerion, exerion,  ROT90, "Jaleco", "Exerion", GAME_IMPERFECT_COLORS )
+GAMEX( 1983, exeriont, exerion, exerion, exerion, exerion,  ROT90, "Jaleco (Taito America license)", "Exerion (Taito)", GAME_IMPERFECT_COLORS )
+GAMEX( 1983, exerionb, exerion, exerion, exerion, exerionb, ROT90, "Jaleco", "Exerion (bootleg)", GAME_IMPERFECT_COLORS )

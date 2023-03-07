@@ -90,7 +90,12 @@ void sega_generate_vector_list (void)
 
 				color = attrib & 0x7e;
 				if ((attrib & 1) && color)
-					intensity = 0xff;
+				{
+					if (translucency)
+						intensity = 0xa0; /* leave room for translucency */
+					else
+						intensity = 0xff;
+				}
 				else
 					intensity = 0;
 				vector_add_point ( currentX, currentY, color, intensity );
@@ -113,7 +118,7 @@ void sega_generate_vector_list (void)
 ***************************************************************************/
 
 
-void sega_init_colors (unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void sega_init_colors (unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i,r,g,b;
 
@@ -174,10 +179,10 @@ int sega_vh_start (void)
 
 	if (vectorram_size == 0)
 		return 1;
-	min_x =Machine->drv->visible_area.min_x;
-	min_y =Machine->drv->visible_area.min_y;
-	max_x =Machine->drv->visible_area.max_x;
-	max_y =Machine->drv->visible_area.max_y;
+	min_x =Machine->visible_area.min_x;
+	min_y =Machine->visible_area.min_y;
+	max_x =Machine->visible_area.max_x;
+	max_y =Machine->visible_area.max_y;
 	width =max_x-min_x;
 	height=max_y-min_y;
 	cent_x=(max_x+min_x)/2;
@@ -199,7 +204,7 @@ int sega_vh_start (void)
 	/* generate the sine/cosine lookup tables */
 	for (i = 0; i < 0x400; i++)
 	{
-		double angle = ((2. * M_PI) / (double)0x400) * (double)i;
+		double angle = ((2. * PI) / (double)0x400) * (double)i;
 		double temp;
 
 		temp = sin (angle);
@@ -243,12 +248,8 @@ void sega_vh_stop (void)
   the main emulation engine.
 
 ***************************************************************************/
-void sega_vh_screenrefresh (struct osd_bitmap *bitmap)
+void sega_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	sega_generate_vector_list();
-	vector_vh_update (bitmap);
+	vector_vh_update(bitmap,full_refresh);
 }
-
-
-
-

@@ -43,7 +43,7 @@ unsigned char *sonson_scrollx;
   bit 0 -- 2.2kohm resistor  -- RED
 
 ***************************************************************************/
-void sonson_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void sonson_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -98,7 +98,7 @@ void sonson_vh_convert_color_prom(unsigned char *palette, unsigned char *colorta
   the main emulation engine.
 
 ***************************************************************************/
-void sonson_vh_screenrefresh(struct osd_bitmap *bitmap)
+void sonson_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -137,7 +137,7 @@ void sonson_vh_screenrefresh(struct osd_bitmap *bitmap)
 		for (i = 5;i < 32;i++)
 			scroll[i] = -(*sonson_scrollx);
 
-		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,32,scroll,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 
@@ -145,10 +145,10 @@ void sonson_vh_screenrefresh(struct osd_bitmap *bitmap)
 	for (offs = spriteram_size - 4;offs >= 0;offs -= 4)
 	{
 		drawgfx(bitmap,Machine->gfx[1],
-			spriteram[offs + 2] + ((spriteram[offs + 1] & 0x20) << 3),
-			spriteram[offs + 1] & 0x1f,
-			~spriteram[offs + 1] & 0x40,~spriteram[offs + 1] & 0x80,
-			spriteram[offs + 3],spriteram[offs + 0],
-			&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				spriteram[offs + 2] + ((spriteram[offs + 1] & 0x20) << 3),
+				spriteram[offs + 1] & 0x1f,
+				~spriteram[offs + 1] & 0x40,~spriteram[offs + 1] & 0x80,
+				spriteram[offs + 3],spriteram[offs + 0],
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
 }

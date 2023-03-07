@@ -32,7 +32,7 @@ unsigned char *seicross_row_scroll;
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void seicross_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void seicross_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -62,16 +62,11 @@ void seicross_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 
 		color_prom++;
 	}
-
-
-	/* character and sprite lookup table */
-	for (i = 0;i < TOTAL_COLORS(0);i++)
-		COLOR(0,i) = i;
 }
 
 
 
-void seicross_colorram_w(int offset,int data)
+WRITE_HANDLER( seicross_colorram_w )
 {
 	if (colorram[offset] != data)
 	{
@@ -98,13 +93,13 @@ void seicross_colorram_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void seicross_vh_screenrefresh(struct osd_bitmap *bitmap)
+void seicross_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
-	int offs;
-
+	int offs,x;
 
 	/* for every character in the Video RAM, check if it has been modified */
 	/* since last time and update it accordingly. */
+
 	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
 		if (dirtybuffer[offs])
@@ -117,8 +112,8 @@ void seicross_vh_screenrefresh(struct osd_bitmap *bitmap)
 			sx = offs % 32;
 			sy = offs / 32;
 
-			drawgfx(tmpbitmap,Machine->gfx[(colorram[offs] & 0x10) ? 1 : 0],
-					videoram[offs] + 8 * (colorram[offs] & 0x20),
+			drawgfx(tmpbitmap,Machine->gfx[0],
+					videoram[offs] + ((colorram[offs] & 0x10) << 4),
 					colorram[offs] & 0x0f,
 					colorram[offs] & 0x40,colorram[offs] & 0x80,
 					8*sx,8*sy,
@@ -135,18 +130,43 @@ void seicross_vh_screenrefresh(struct osd_bitmap *bitmap)
 		for (offs = 0;offs < 32;offs++)
 			scroll[offs] = -seicross_row_scroll[offs];
 
-		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 	/* draw sprites */
 	for (offs = spriteram_size - 4;offs >= 0;offs -= 4)
 	{
-		drawgfx(bitmap,Machine->gfx[spriteram[offs + 1] & 0x10 ? 3 : 2],
-				(spriteram[offs] & 0x3f),
+		x=spriteram[offs + 3];
+		drawgfx(bitmap,Machine->gfx[1],
+				(spriteram[offs] & 0x3f) + ((spriteram[offs + 1] & 0x10) << 2) + 128,
 				spriteram[offs + 1] & 0x0f,
 				spriteram[offs] & 0x40,spriteram[offs] & 0x80,
-				spriteram[offs + 3],240-spriteram[offs + 2],
-				&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+				x,240-spriteram[offs + 2],
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
+		if(x>0xf0)
+			drawgfx(bitmap,Machine->gfx[1],
+					(spriteram[offs] & 0x3f) + ((spriteram[offs + 1] & 0x10) << 2) + 128,
+					spriteram[offs + 1] & 0x0f,
+					spriteram[offs] & 0x40,spriteram[offs] & 0x80,
+					x-256,240-spriteram[offs + 2],
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
 
+	for (offs = spriteram_2_size - 4;offs >= 0;offs -= 4)
+	{
+		x=spriteram_2[offs + 3];
+		drawgfx(bitmap,Machine->gfx[1],
+				(spriteram_2[offs] & 0x3f) + ((spriteram_2[offs + 1] & 0x10) << 2),
+				spriteram_2[offs + 1] & 0x0f,
+				spriteram_2[offs] & 0x40,spriteram_2[offs] & 0x80,
+				x,240-spriteram_2[offs + 2],
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
+		if(x>0xf0)
+			drawgfx(bitmap,Machine->gfx[1],
+					(spriteram_2[offs] & 0x3f) + ((spriteram_2[offs + 1] & 0x10) << 2),
+					spriteram_2[offs + 1] & 0x0f,
+					spriteram_2[offs] & 0x40,spriteram_2[offs] & 0x80,
+					x-256,240-spriteram_2[offs + 2],
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
+	}
 }

@@ -22,51 +22,47 @@ read:
 see the input_ports definition below for details on the input bits
 
 write:
-07a200-07a211 Scrolling - right now I have these both mapped identically
-07a300-07a311 Scrolling - but that wil change when I implement backgrounds
+07a104-07a105 text layer Y scroll
+07a10c-07a10d text layer X scroll
+07a204-07a205 front layer Y scroll
+07a20c-07a20d front layer X scroll
+07a304-07a305 back layer Y scroll
+07a30c-07a30d back layer Xscroll
 
 ***************************************************************************/
 
 #include "driver.h"
 #include "vidhrdw/generic.h"
-#include "M68000/M68000.h"
-#include "Z80/Z80.h"
+#include "cpu/m68000/m68000.h"
+#include "cpu/z80/z80.h"
 
 extern unsigned char *gaiden_videoram;
-extern unsigned char *gaiden_spriteram;
-extern unsigned char *gaiden_paletteram;
+extern unsigned char *gaiden_videoram2;
 extern unsigned char *gaiden_videoram3;
-extern unsigned char *gaiden_scrolla;
-extern unsigned char *gaiden_scrollb;
 
-extern int gaiden_videoram_size;
-extern int gaiden_videoram3_size;
-extern int gaiden_paletteram_size;
-extern int gaiden_spriteram_size;
+void gaiden_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
-void gaiden_vh_screenrefresh(struct osd_bitmap *bitmap);
+WRITE_HANDLER( gaiden_unknownram_w );
+READ_HANDLER( gaiden_unknownram_r );
+WRITE_HANDLER( gaiden_videoram_w );
+READ_HANDLER( gaiden_videoram_r );
+WRITE_HANDLER( gaiden_videoram2_w );
+READ_HANDLER( gaiden_videoram2_r );
+WRITE_HANDLER( gaiden_videoram3_w );
+READ_HANDLER( gaiden_videoram3_r );
 
-void gaiden_unknownram_w(int offset,int data);
-int gaiden_unknownram_r(int offset);
-void gaiden_videoram_w(int offset,int data);
-int gaiden_videoram_r(int offset);
-void gaiden_paletteram_w(int offset,int data);
-int gaiden_paletteram_r(int offset);
-void gaiden_videoram3_w(int offset,int data);
-int gaiden_videoram3_r(int offset);
-void gaiden_spriteram_w(int offset,int data);
-int gaiden_spriteram_r(int offset);
-
-void gaiden_scrolla_w(int offset,int data);
-void gaiden_scrollb_w(int offset,int data);
+WRITE_HANDLER( gaiden_txscrollx_w );
+WRITE_HANDLER( gaiden_txscrolly_w );
+WRITE_HANDLER( gaiden_fgscrollx_w );
+WRITE_HANDLER( gaiden_fgscrolly_w );
+WRITE_HANDLER( gaiden_bgscrollx_w );
+WRITE_HANDLER( gaiden_bgscrolly_w );
 
 
-void gaiden_background_w(int offset,int data);
-void gaiden_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
-void gaiden_vh_screenrefresh(struct osd_bitmap *bitmap);
+WRITE_HANDLER( gaiden_background_w );
+void gaiden_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
 int  gaiden_vh_start(void);
-void gaiden_vh_stop(void);
 
 
 int gaiden_interrupt(void)
@@ -74,33 +70,91 @@ int gaiden_interrupt(void)
 	return 5;  /*Interrupt vector 5*/
 }
 
-int gaiden_input_r (int offset)
+READ_HANDLER( gaiden_input_r )
 {
-	int ans = 0xff;
 	switch (offset)
 	{
 		case 0:
-			ans = input_port_4_r (offset);
+			return input_port_4_r (offset);
 			break;
 		case 2:
-			ans = (input_port_1_r (offset) << 8) + (input_port_0_r (offset));
+			return (input_port_1_r (offset) << 8) + (input_port_0_r (offset));
 			break;
 		case 4:
-			ans = (input_port_3_r (offset) << 8) + (input_port_2_r (offset));
+			return (input_port_3_r (offset) << 8) + (input_port_2_r (offset));
 			break;
 	}
-	return ans;
+
+	return 0;
 }
 
-void gaiden_sound_command_w(int offset,int data)
+
+WRITE_HANDLER( gaiden_sound_command_w )
 {
-	if (offset == 2)
+	if (data & 0xff000000) soundlatch_w(0,data & 0xff);	/* Ninja Gaiden */
+	if (data & 0x00ff0000) soundlatch_w(0,(data >> 8) & 0xff);	/* Tecmo Knight */
+	cpu_cause_interrupt(1,Z80_NMI_INT);
+}
+
+
+
+/* Tecmo Knight has a simple protection. It writes codes to 0x07a804, and reads */
+/* the answer from 0x07a007. The returned values contain the address of a */
+/* function to jump to. */
+
+static int prot;
+
+WRITE_HANDLER( tknight_protection_w )
+{
+	static int jumpcode;
+	static int jumppoints[] =
 	{
-		soundlatch_w(0,data & 0xff);
-		cpu_cause_interrupt(1,Z80_NMI_INT);
+		0x0c0c,0x0cac,0x0d42,0x0da2,0x0eea,0x112e,0x1300,0x13fa,
+		0x159a,0x1630,0x109a,0x1700,0x1750,0x1806,0x18d6,0x1a44,
+		0x1b52
+	};
+
+	data = (data >> 8) & 0xff;
+
+//logerror("PC %06x: prot = %02x\n",cpu_get_pc(),data);
+
+	switch (data & 0xf0)
+	{
+		case 0x00:	/* init */
+			prot = 0x00;
+			break;
+		case 0x10:	/* high 4 bits of jump code */
+			jumpcode = (data & 0x0f) << 4;
+			prot = 0x10;
+			break;
+		case 0x20:	/* low 4 bits of jump code */
+			jumpcode |= data & 0x0f;
+			if (jumpcode > 16)
+			{
+logerror("unknown jumpcode %02x\n",jumpcode);
+				jumpcode = 0;
+			}
+			prot = 0x20;
+			break;
+		case 0x30:	/* ask for bits 12-15 of function address */
+			prot = 0x40 | ((jumppoints[jumpcode] >> 12) & 0x0f);
+			break;
+		case 0x40:	/* ask for bits 8-11 of function address */
+			prot = 0x50 | ((jumppoints[jumpcode] >> 8) & 0x0f);
+			break;
+		case 0x50:	/* ask for bits 4-7 of function address */
+			prot = 0x60 | ((jumppoints[jumpcode] >> 4) & 0x0f);
+			break;
+		case 0x60:	/* ask for bits 0-3 of function address */
+			prot = 0x70 | ((jumppoints[jumpcode] >> 0) & 0x0f);
+			break;
 	}
-//	else
-//if (errorlog) fprintf(errorlog,"PC %06x write %02x to 0x07a800\n",cpu_getpc(),data);
+}
+
+READ_HANDLER( tknight_protection_r )
+{
+//logerror("PC %06x: read prot %02x\n",cpu_get_pc(),prot);
+	return prot;
 }
 
 
@@ -110,11 +164,13 @@ static struct MemoryReadAddress readmem[] =
 	{ 0x000000, 0x03ffff, MRA_ROM },
 	{ 0x060000, 0x063fff, MRA_BANK1 },   /* RAM */
 	{ 0x070000, 0x070fff, gaiden_videoram_r },
-	{ 0x072000, 0x075fff, gaiden_videoram3_r },
-	{ 0x076000, 0x077fff, gaiden_spriteram_r },
-	{ 0x078000, 0x079fff, gaiden_paletteram_r },
-	{ 0x07a000, 0x07a007, gaiden_input_r },
-	{ 0x07a100, 0x07a1ff, MRA_BANK2 },
+	{ 0x072000, 0x073fff, gaiden_videoram2_r },
+	{ 0x074000, 0x075fff, gaiden_videoram3_r },
+	{ 0x076000, 0x077fff, MRA_BANK2 },
+	{ 0x078000, 0x0787ff, paletteram_word_r },
+	{ 0x078800, 0x079fff, MRA_NOP },   /* extra portion of palette RAM, not really used */
+	{ 0x07a000, 0x07a005, gaiden_input_r },
+	{ 0x07a006, 0x07a007, tknight_protection_r },
 	{ -1 }  /* end of table */
 };
 
@@ -122,18 +178,22 @@ static struct MemoryWriteAddress writemem[] =
 {
 	{ 0x000000, 0x03ffff, MWA_ROM },
 	{ 0x060000, 0x063fff, MWA_BANK1 },
-	{ 0x070000, 0x070fff, gaiden_videoram_w, &gaiden_videoram, &gaiden_videoram_size },
-//	{ 0x071000, 0x071fff, MWA_NOP },   /* I'm not sure */
-	{ 0x072000, 0x075fff, gaiden_videoram3_w,  &gaiden_videoram3, &gaiden_videoram3_size },
-	{ 0x076000, 0x077fff, gaiden_spriteram_w, &gaiden_spriteram, &gaiden_spriteram_size },
-	{ 0x078000, 0x079fff, gaiden_paletteram_w, &gaiden_paletteram, &gaiden_paletteram_size },
-//	{ 0x07a000, 0x07a00f, MWA_NOP },   /* I'm not sure */
-//	{ 0x07a100, 0x07a111, MWA_BANK2 },  /* video? */
-	{ 0x07a200, 0x07a20f, gaiden_scrolla_w, &gaiden_scrolla },
-	{ 0x07a300, 0x07a30f, gaiden_scrollb_w, &gaiden_scrollb },
-//	{ 0x07a400, 0x07a809, MWA_NOP },   /* I'm not sure */
-	{ 0x07a800, 0x07a803, gaiden_sound_command_w },
-	{ 0x07a804, 0x07a807, MWA_NOP },	/* ??? */
+	{ 0x070000, 0x070fff, gaiden_videoram_w, &gaiden_videoram },
+	{ 0x072000, 0x073fff, gaiden_videoram2_w,  &gaiden_videoram2 },
+	{ 0x074000, 0x075fff, gaiden_videoram3_w,  &gaiden_videoram3 },
+	{ 0x076000, 0x077fff, MWA_BANK2, &spriteram },
+	{ 0x078000, 0x0787ff, paletteram_xxxxBBBBGGGGRRRR_word_w, &paletteram },
+	{ 0x078800, 0x079fff, MWA_NOP },   /* extra portion of palette RAM, not really used */
+	{ 0x07a104, 0x07a105, gaiden_txscrolly_w },
+	{ 0x07a10c, 0x07a10d, gaiden_txscrollx_w },
+	{ 0x07a204, 0x07a205, gaiden_fgscrolly_w },
+	{ 0x07a20c, 0x07a20d, gaiden_fgscrollx_w },
+	{ 0x07a304, 0x07a305, gaiden_bgscrolly_w },
+	{ 0x07a30c, 0x07a30d, gaiden_bgscrollx_w },
+	{ 0x07a800, 0x07a801, MWA_NOP },
+	{ 0x07a802, 0x07a803, gaiden_sound_command_w },
+	{ 0x07a804, 0x07a805, tknight_protection_w },
+	{ 0x07a806, 0x07a807, MWA_NOP },
 	{ -1 }  /* end of table */
 };
 
@@ -141,7 +201,7 @@ static struct MemoryReadAddress sound_readmem[] =
 {
 	{ 0x0000, 0xdfff, MRA_ROM },
 	{ 0xf000, 0xf7ff, MRA_RAM },
-	{ 0xf800, 0xf800, OKIM6295_status_r },
+	{ 0xf800, 0xf800, OKIM6295_status_0_r },
 	{ 0xfc00, 0xfc00, MRA_NOP },	/* ?? */
 	{ 0xfc20, 0xfc20, soundlatch_r },
 	{ -1 }	/* end of table */
@@ -151,7 +211,7 @@ static struct MemoryWriteAddress sound_writemem[] =
 {
 	{ 0x0000, 0xdfff, MWA_ROM },
 	{ 0xf000, 0xf7ff, MWA_RAM },
-	{ 0xf800, 0xf800, OKIM6295_data_w },
+	{ 0xf800, 0xf800, OKIM6295_data_0_w },
 	{ 0xf810, 0xf810, YM2203_control_port_0_w },
 	{ 0xf811, 0xf811, YM2203_write_port_0_w },
 	{ 0xf820, 0xf820, YM2203_control_port_1_w },
@@ -162,8 +222,8 @@ static struct MemoryWriteAddress sound_writemem[] =
 
 
 
-INPUT_PORTS_START( gaiden_input_ports )
-        PORT_START      /* PLAYER 1 */
+INPUT_PORTS_START( gaiden )
+	PORT_START      /* PLAYER 1 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_PLAYER1 | IPF_8WAY )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_PLAYER1 | IPF_8WAY )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_PLAYER1 | IPF_8WAY )
@@ -173,7 +233,7 @@ INPUT_PORTS_START( gaiden_input_ports )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER1 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
 
-        PORT_START      /* PLAYER 2 */
+	PORT_START      /* PLAYER 2 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_PLAYER2 | IPF_8WAY )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_PLAYER2 | IPF_8WAY )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_PLAYER2 | IPF_8WAY )
@@ -184,50 +244,50 @@ INPUT_PORTS_START( gaiden_input_ports )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
 
 	PORT_START	/* DSWA */
-	PORT_DIPNAME( 0xe0, 0xe0, "Coin A", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "5 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x80, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x40, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x20, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0xe0, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x60, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0xa0, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0xc0, "1 Coin/4 Credits" )
-	PORT_DIPNAME( 0x1c, 0x1c, "Coin B", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "5 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x10, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x08, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x04, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x1c, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x0c, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x14, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x18, "1 Coin/4 Credits" )
-	PORT_DIPNAME( 0x02, 0x02, "Flip Screen", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x01, 0x01, "Demo Sounds", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x01, "On" )
+	PORT_DIPNAME( 0x01, 0x01, DEF_STR( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( On ) )
+	PORT_DIPNAME( 0x02, 0x02, DEF_STR( Flip_Screen ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x1c, 0x1c, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 5C_1C ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x1c, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x14, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x18, DEF_STR( 1C_4C ) )
+	PORT_DIPNAME( 0xe0, 0xe0, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 5C_1C ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0xe0, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x60, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0xa0, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0xc0, DEF_STR( 1C_4C ) )
 
 	PORT_START	/* DSWB */
-	PORT_DIPNAME( 0x01, 0x01, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x01, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x02, 0x02, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x04, 0x04, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x04, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x08, 0x08, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x08, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x30, 0x30, "Energy", IP_KEY_NONE )
+	PORT_DIPNAME( 0x01, 0x01, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x02, 0x02, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x04, 0x04, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x08, 0x08, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x30, 0x30, "Energy" )
 	PORT_DIPSETTING(    0x00, "2" )
 	PORT_DIPSETTING(    0x30, "3" )
 	PORT_DIPSETTING(    0x10, "4" )
 	PORT_DIPSETTING(    0x20, "5" )
-	PORT_DIPNAME( 0xc0, 0xc0, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0xc0, 0xc0, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x00, "1" )
 	PORT_DIPSETTING(    0xc0, "2" )
 	PORT_DIPSETTING(    0x40, "3" )
@@ -239,7 +299,90 @@ INPUT_PORTS_START( gaiden_input_ports )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_UNKNOWN )
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_UNKNOWN)
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )
+INPUT_PORTS_END
+
+INPUT_PORTS_START( tknight )
+	PORT_START      /* PLAYER 1 */
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_PLAYER1 | IPF_8WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_PLAYER1 | IPF_8WAY )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_PLAYER1 | IPF_8WAY )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_PLAYER1 | IPF_8WAY )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER1 )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER1 )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_BUTTON3 | IPF_PLAYER1 )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
+
+	PORT_START      /* PLAYER 2 */
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_PLAYER2 | IPF_8WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_PLAYER2 | IPF_8WAY )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_PLAYER2 | IPF_8WAY )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_PLAYER2 | IPF_8WAY )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_PLAYER2 )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_PLAYER2 )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_BUTTON3 | IPF_PLAYER2 )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
+
+	PORT_START	/* DSWA */
+	PORT_DIPNAME( 0xe0, 0xe0, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 5C_1C ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0xe0, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x60, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0xa0, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0xc0, DEF_STR( 1C_4C ) )
+	PORT_DIPNAME( 0x1c, 0x1c, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 5C_1C ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x1c, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x14, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x18, DEF_STR( 1C_4C ) )
+	PORT_DIPNAME( 0x02, 0x02, DEF_STR( Flip_Screen ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x01, 0x01, DEF_STR( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( On ) )
+
+	PORT_START	/* DSWB */
+	PORT_DIPNAME( 0x01, 0x01, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x02, 0x02, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x04, 0x04, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x08, 0x08, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x10, 0x10, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x20, 0x20, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0xc0, 0xc0, DEF_STR( Lives ) )
+	PORT_DIPSETTING(    0x80, "1" )
+	PORT_DIPSETTING(    0xc0, "2" )
+	PORT_DIPSETTING(    0x40, "3" )
+/*	PORT_DIPSETTING(    0x00, "2" ) */
+
+	PORT_START	/* IN0 */
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_START1 )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_START2 )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN2 )
 INPUT_PORTS_END
@@ -248,21 +391,19 @@ INPUT_PORTS_END
 
 static struct GfxLayout tilelayout =
 {
-	8,8,	/* 8*8 tiles */
-	2048,	/* 2048 tiles */
+	8,8,	/* tile size */
+	RGN_FRAC(1,1),	/* number of tiles */
 	4,	/* 4 bits per pixel */
 	{ 0, 1, 2, 3 },
-        { 0*4, 1*4, 2*4, 3*4, 4*4, 5*4, 6*4, 7*4 },
-        { 0*32, 1*32, 2*32, 3*32, 4*32, 5*32, 6*32, 7*32 },
-	32*8	/* every tile takes 32 consecutive bytes */
-
-
+	{ 0*4, 1*4, 2*4, 3*4, 4*4, 5*4, 6*4, 7*4 },
+	{ 0*32, 1*32, 2*32, 3*32, 4*32, 5*32, 6*32, 7*32 },
+	32*8	/* offset to next tile */
 };
 
 static struct GfxLayout tile2layout =
 {
-	16,16,	/* 16*16 sprites */
-	4096,	/* 2048 tiles */
+	16,16,	/* tile size */
+	RGN_FRAC(1,1),	/* number of tiles */
 	4,	/* 4 bits per pixel */
 	{ 0, 1, 2, 3 },	/* the bitplanes are packed in one nibble */
 	{ 0*4, 1*4, 2*4, 3*4, 4*4, 5*4, 6*4, 7*4,
@@ -270,69 +411,42 @@ static struct GfxLayout tile2layout =
 	  32*8+4*4, 32*8+5*4, 32*8+6*4, 32*8+7*4,},
 	{ 0*32, 1*32, 2*32, 3*32, 4*32, 5*32, 6*32, 7*32,
 	  16*32, 17*32, 18*32, 19*32, 20*32, 21*32, 22*32, 23*32},
-	128*8	/* every sprite takes 512 bytes */
-
+	128*8	/* offset to next tile */
 };
 
 static struct GfxLayout spritelayout =
 {
-	32,32,	/* 32*32 sprites */
-	512,	/* 512 sprites */
+	8,8,	/* sprites size */
+	RGN_FRAC(1,2),	/* number of sprites */
 	4,	/* 4 bits per pixel */
 	{ 0, 1, 2, 3 },	/* the bitplanes are packed in one nibble */
-	{ 0*4, 1*4, 0*4+131072*8, 1*4+131072*8, 2*4, 3*4, 2*4+131072*8, 3*4+131072*8,
-	  32*4+0*4, 32*4+1*4, 32*4+0*4+131072*8, 32*4+1*4+131072*8, 32*4+2*4, 32*4+3*4, 32*4+2*4+131072*8, 32*4+3*4+131072*8,
-	  128*4+0*4, 128*4+1*4, 128*4+0*4+131072*8, 128*4+1*4+131072*8, 128*4+2*4, 128*4+3*4, 128*4+2*4+131072*8, 128*4+3*4+131072*8,
-	  160*4+0*4, 160*4+1*4, 160*4+0*4+131072*8, 160*4+1*4+131072*8, 160*4+2*4, 160*4+3*4, 160*4+2*4+131072*8, 160*4+3*4+131072*8 },
-	{ 0*16, 1*16, 2*16, 3*16, 4*16, 5*16, 6*16, 7*16,
-	  16*16, 17*16, 18*16, 19*16, 20*16, 21*16, 22*16, 23*16,
-	  64*16, 65*16, 66*16, 67*16, 68*16, 69*16, 70*16, 71*16,
-	  80*16, 81*16, 82*16, 83*16, 84*16, 85*16, 86*16, 87*16 },
-	256*8	/* 256 bytes to next sprite */
-};
-
-static struct GfxLayout spritelayout16x16 =
-{
-	16,16,	/* 16*16 sprites */
-	2048,	/* 2048 sprites */
-	4,	/* 4 bits per pixel */
-	{ 0, 1, 2, 3 },	/* the bitplanes are packed in one nibble */
-	{ 0*4, 1*4, 0*4+131072*8, 1*4+131072*8, 2*4, 3*4, 2*4+131072*8, 3*4+131072*8,
-	  32*4+0*4, 32*4+1*4, 32*4+0*4+131072*8, 32*4+1*4+131072*8, 32*4+2*4, 32*4+3*4, 32*4+2*4+131072*8, 32*4+3*4+131072*8 },
-	{ 0*16, 1*16, 2*16, 3*16, 4*16, 5*16, 6*16, 7*16,
-	  16*16, 17*16, 18*16, 19*16, 20*16, 21*16, 22*16, 23*16 },
-	64*8	/* 64 bytes to the next sprite */
+	{ 0,4,RGN_FRAC(1,2),4+RGN_FRAC(1,2),8,12,8+RGN_FRAC(1,2),12+RGN_FRAC(1,2) },
+	{ 0*16, 1*16, 2*16, 3*16, 4*16, 5*16, 6*16, 7*16 },
+	16*8	/* offset to next sprite */
 };
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x00000, &tilelayout,  0, 0x1000*+16 },	/* tiles 8x8*/
-	{ 1, 0x110000, &tile2layout,  0, 0x1000+16 },	/* tiles 16x16*/
-	{ 1, 0x190000, &tile2layout,  0, 0x1000+16 },	/* tiles 16x16*/
-	{ 1, 0x10000, &spritelayout,  0, 0x1000+16 },	/* sprites 32x32*/
-	{ 1, 0x50000, &spritelayout,  0, 0x1000+16 },	/* sprites 32x32*/
-	{ 1, 0x90000, &spritelayout,  0, 0x1000+16 },	/* sprites 32x32*/
-	{ 1, 0xd0000, &spritelayout,  0, 0x1000+16 },	/* sprites 32x32*/
-	{ 1, 0x10000, &spritelayout16x16,  0, 0x1000+16 },	/* sprites 16x16*/
-	{ 1, 0x50000, &spritelayout16x16,  0, 0x1000+16 },	/* sprites 16x16*/
-	{ 1, 0x90000, &spritelayout16x16,  0, 0x1000+16 },	/* sprites 16x16*/
-	{ 1, 0xd0000, &spritelayout16x16,  0, 0x1000+16 },	/* sprites 16x16*/
+	{ REGION_GFX1, 0, &tilelayout,        256, 16 },	/* tiles 8x8 */
+	{ REGION_GFX2, 0, &tile2layout,       768, 16 },	/* tiles 16x16 */
+	{ REGION_GFX3, 0, &tile2layout,       512, 16 },	/* tiles 16x16 */
+	{ REGION_GFX4, 0, &spritelayout,        0, 16 },	/* sprites 8x8 */
 	{ -1 } /* end of array */
 };
 
 
 
 /* handler called by the 2203 emulator when the internal timers cause an IRQ */
-static void irqhandler(void)
+static void irqhandler(int irq)
 {
-	cpu_cause_interrupt(1,0xff);
+	cpu_set_irq_line(1,0,irq ? ASSERT_LINE : CLEAR_LINE);
 }
 
 static struct YM2203interface ym2203_interface =
 {
 	2,			/* 2 chips */
-	2000000,	/* 2 MHz ? (hand tuned) */
-	{ YM2203_VOL(255,0x20ff), YM2203_VOL(255,0x20ff) },
+	4000000,	/* 4 MHz ? (hand tuned) */
+	{ YM2203_VOL(60,15), YM2203_VOL(60,15) },
 	{ 0 },
 	{ 0 },
 	{ 0 },
@@ -340,31 +454,29 @@ static struct YM2203interface ym2203_interface =
 	{ irqhandler }
 };
 
+
 static struct OKIM6295interface okim6295_interface =
 {
-	1,              /* 1 chip */
-	8000,           /* 8000Hz frequency */
-	3,              /* memory region 3 */
-	{ 128 }
+	1,                  /* 1 chip */
+	{ 7576 },			/* 7576Hz frequency */
+	{ REGION_SOUND1 },	/* memory region */
+	{ 20 }
 };
 
 
-
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_gaiden =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M68000,
 			8000000,	/* 8 Mhz */
-			0,
 			readmem,writemem,0,0,
 			gaiden_interrupt,1,0,0
 		},
 		{
 			CPU_Z80 | CPU_AUDIO_CPU,
 			4000000,	/* 4 MHz */
-			2,	/* memory region #2 */
 			sound_readmem,sound_writemem,0,0,
 			ignore_interrupt,0	/* NMIs are triggered by the main CPU */
 								/* IRQs are triggered by the YM2203 */
@@ -377,13 +489,13 @@ static struct MachineDriver machine_driver =
 	/* video hardware */
 	32*8, 30*8, { 0*8, 32*8-1, 2*8, 30*8-1 },
 	gfxdecodeinfo,
-	256,256*16+16,
-        0,
+	1024, 1024,
+	0,
 
-	VIDEO_TYPE_RASTER | VIDEO_SUPPORTS_16BIT,
+	VIDEO_TYPE_RASTER | VIDEO_MODIFIES_PALETTE,
 	0,
 	gaiden_vh_start,
-	gaiden_vh_stop,
+	0,
 	gaiden_vh_screenrefresh,
 
 	/* sound hardware */
@@ -407,106 +519,180 @@ static struct MachineDriver machine_driver =
   Game driver(s)
 
 ***************************************************************************/
-ROM_START( gaiden_rom )
-	ROM_REGION(0x40000)	/* 2*128k for 68000 code */
-	ROM_LOAD_EVEN( "gaiden.1", 0x00000, 0x20000, 0x0b92d014 )
-	ROM_LOAD_ODD ( "gaiden.2", 0x00000, 0x20000, 0xb0a2e242 )
 
-	ROM_REGION(0x210000)     /* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "gaiden.5",  0x000000, 0x10000, 0xf3653a0f )        /* 8x8 tiles */
-	ROM_LOAD( "gaiden.6",  0x010000, 0x20000, 0xde50047a )        /* sprites A1 */
-	ROM_LOAD( "gaiden.7",  0x030000, 0x20000, 0x9f40c78e )        /* sprites A2 */
-	ROM_LOAD( "gaiden.8",  0x050000, 0x20000, 0xc0d813a6 )        /* sprites B1 */
-	ROM_LOAD( "gaiden.9",  0x070000, 0x20000, 0xdeea0a22 )        /* sprites B2 */
-	ROM_LOAD( "gaiden.10", 0x090000, 0x20000, 0xfc2e2818 )        /* sprites C1 */
-	ROM_LOAD( "gaiden.11", 0x0b0000, 0x20000, 0xfb2d2641 )        /* sprites C2 */
-	ROM_LOAD( "gaiden.12", 0x0D0000, 0x20000, 0xe7739fed )        /* sprites D1 */
-	ROM_LOAD( "gaiden.13", 0x0f0000, 0x20000, 0xbd928520 )        /* sprites D2 */
-	ROM_LOAD( "14.bin",    0x110000, 0x20000, 0x00d6531c )
-	ROM_LOAD( "15.bin",    0x130000, 0x20000, 0xae21271b )
-	ROM_LOAD( "16.bin",    0x150000, 0x20000, 0x4dee5eec )
-	ROM_LOAD( "17.bin",    0x170000, 0x20000, 0x9e0c7684 )
-	ROM_LOAD( "18.bin",    0x190000, 0x20000, 0xc76c8d20 )
-	ROM_LOAD( "19.bin",    0x1b0000, 0x20000, 0xc3845b96 )
-	ROM_LOAD( "20.bin",    0x1d0000, 0x20000, 0x40e78ca5 )
-	ROM_LOAD( "21.bin",    0x1f0000, 0x20000, 0xccdcbd02 )
+ROM_START( gaiden )
+	ROM_REGION( 0x40000, REGION_CPU1 )	/* 2*128k for 68000 code */
+	ROM_LOAD_EVEN( "gaiden.1",     0x00000, 0x20000, 0xe037ff7c )
+	ROM_LOAD_ODD ( "gaiden.2",     0x00000, 0x20000, 0x454f7314 )
 
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "gaiden.3", 0x0000, 0x10000, 0x1db13fc3 )   /* Audio CPU is a Z80  */
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "gaiden.3",     0x0000, 0x10000, 0x75fd3e6a )   /* Audio CPU is a Z80  */
 
-	ROM_REGION(0x20000)	/* 128k for ADPCM samples - sound chip is OKIM6295 */
-	ROM_LOAD( "gaiden.4", 0x0000, 0x20000, 0xb8e72ccf ) /* samples */
+	ROM_REGION( 0x010000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gaiden.5",     0x000000, 0x10000, 0x8d4035f7 )	/* 8x8 tiles */
+
+	ROM_REGION( 0x080000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "14.bin",       0x000000, 0x20000, 0x1ecfddaa )
+	ROM_LOAD( "15.bin",       0x020000, 0x20000, 0x1291a696 )
+	ROM_LOAD( "16.bin",       0x040000, 0x20000, 0x140b47ca )
+	ROM_LOAD( "17.bin",       0x060000, 0x20000, 0x7638cccb )
+
+	ROM_REGION( 0x080000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "18.bin",       0x000000, 0x20000, 0x3fadafd6 )
+	ROM_LOAD( "19.bin",       0x020000, 0x20000, 0xddae9d5b )
+	ROM_LOAD( "20.bin",       0x040000, 0x20000, 0x08cf7a93 )
+	ROM_LOAD( "21.bin",       0x060000, 0x20000, 0x1ac892f5 )
+
+	ROM_REGION( 0x100000, REGION_GFX4 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gaiden.6",     0x000000, 0x20000, 0xe7ccdf9f )	/* sprites A1 */
+	ROM_LOAD( "gaiden.8",     0x020000, 0x20000, 0x7ef7f880 )	/* sprites B1 */
+	ROM_LOAD( "gaiden.10",    0x040000, 0x20000, 0xa6451dec )	/* sprites C1 */
+	ROM_LOAD( "gaiden.12",    0x060000, 0x20000, 0x90f1e13a )	/* sprites D1 */
+	ROM_LOAD( "gaiden.7",     0x080000, 0x20000, 0x016bec95 )	/* sprites A2 */
+	ROM_LOAD( "gaiden.9",     0x0a0000, 0x20000, 0x6e9b7fd3 )	/* sprites B2 */
+	ROM_LOAD( "gaiden.11",    0x0c0000, 0x20000, 0x7fbfdf5e )	/* sprites C2 */
+	ROM_LOAD( "gaiden.13",    0x0e0000, 0x20000, 0x7d9f5c5e )	/* sprites D2 */
+
+	ROM_REGION( 0x20000, REGION_SOUND1 )	/* 128k for ADPCM samples - sound chip is OKIM6295 */
+	ROM_LOAD( "gaiden.4",     0x0000, 0x20000, 0xb0e0faf9 ) /* samples */
 ROM_END
 
-ROM_START( shadoww_rom )
-	ROM_REGION(0x40000)	/* 2*128k for 68000 code */
-   ROM_LOAD_EVEN( "shadoww.1", 0x00000, 0x20000, 0x5e4e90c2 )
-   ROM_LOAD_ODD ( "shadoww.2", 0x00000, 0x20000, 0x33f84e7e )
+ROM_START( shadoww )
+	ROM_REGION( 0x40000, REGION_CPU1 )	/* 2*128k for 68000 code */
+	ROM_LOAD_EVEN( "shadoww.1",    0x00000, 0x20000, 0xfefba387 )
+	ROM_LOAD_ODD ( "shadoww.2",    0x00000, 0x20000, 0x9b9d6b18 )
 
-	ROM_REGION(0x210000)     /* temporary space for graphics (disposed after conversion) */
-   ROM_LOAD( "shadoww.5",  0x000000, 0x10000, 0xf3653a0f )        /* 8x8 tiles */
-   ROM_LOAD( "shadoww.6",  0x010000, 0x20000, 0xde50047a )        /* sprites A1 */
-   ROM_LOAD( "shadoww.7",  0x030000, 0x20000, 0x9f40c78e )        /* sprites A2 */
-   ROM_LOAD( "shadoww.8",  0x050000, 0x20000, 0xc0d813a6 )        /* sprites B1 */
-   ROM_LOAD( "shadoww.9",  0x070000, 0x20000, 0xdeea0a22 )        /* sprites B2 */
-   ROM_LOAD( "shadoww.10", 0x090000, 0x20000, 0xfc2e2818 )        /* sprites C1 */
-   ROM_LOAD( "shadoww.11", 0x0b0000, 0x20000, 0xfb2d2641 )        /* sprites C2 */
-   ROM_LOAD( "shadoww.12a", 0x0D0000, 0x10000, 0xb9da7f3c )       /* sprites D1 */
-   ROM_LOAD( "shadoww.12b", 0x0E0000, 0x10000, 0xe2915fb7 )       /* sprites D1 */
-   ROM_LOAD( "shadoww.13a", 0x0f0000, 0x10000, 0x5e66bed4 )        /* sprites D2 */
-   ROM_LOAD( "shadoww.13b", 0x100000, 0x10000, 0x8a0508d7 )        /* sprites D2 */
-   ROM_LOAD( "shadoww.14",    0x110000, 0x20000, 0x00d6531c )
-   ROM_LOAD( "shadoww.15",    0x130000, 0x20000, 0xae21271b )
-   ROM_LOAD( "shadoww.16",    0x150000, 0x20000, 0x4dee5eec )
-   ROM_LOAD( "shadoww.17",    0x170000, 0x20000, 0x9e0c7684 )
-   ROM_LOAD( "shadoww.18",    0x190000, 0x20000, 0xc76c8d20 )
-   ROM_LOAD( "shadoww.19",    0x1b0000, 0x20000, 0xc3845b96 )
-   ROM_LOAD( "shadoww.20",    0x1d0000, 0x20000, 0x40e78ca5 )
-   ROM_LOAD( "shadoww.21",    0x1f0000, 0x20000, 0xccdcbd02 )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "gaiden.3",     0x0000, 0x10000, 0x75fd3e6a )   /* Audio CPU is a Z80  */
 
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-   ROM_LOAD( "shadoww.3", 0x0000, 0x10000, 0x1db13fc3 )   /* Audio CPU is a Z80  */
+	ROM_REGION( 0x010000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gaiden.5",     0x000000, 0x10000, 0x8d4035f7 )	/* 8x8 tiles */
 
-	ROM_REGION(0x20000)	/* 128k for ADPCM samples - sound chip is OKIM6295 */
-   ROM_LOAD( "shadoww.4", 0x0000, 0x20000, 0xb8e72ccf ) /* samples */
+	ROM_REGION( 0x080000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "14.bin",       0x000000, 0x20000, 0x1ecfddaa )
+	ROM_LOAD( "15.bin",       0x020000, 0x20000, 0x1291a696 )
+	ROM_LOAD( "16.bin",       0x040000, 0x20000, 0x140b47ca )
+	ROM_LOAD( "17.bin",       0x060000, 0x20000, 0x7638cccb )
+
+	ROM_REGION( 0x080000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "18.bin",       0x000000, 0x20000, 0x3fadafd6 )
+	ROM_LOAD( "19.bin",       0x020000, 0x20000, 0xddae9d5b )
+	ROM_LOAD( "20.bin",       0x040000, 0x20000, 0x08cf7a93 )
+	ROM_LOAD( "21.bin",       0x060000, 0x20000, 0x1ac892f5 )
+
+	ROM_REGION( 0x100000, REGION_GFX4 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gaiden.6",     0x000000, 0x20000, 0xe7ccdf9f )	/* sprites A1 */
+	ROM_LOAD( "gaiden.8",     0x020000, 0x20000, 0x7ef7f880 )	/* sprites B1 */
+	ROM_LOAD( "gaiden.10",    0x040000, 0x20000, 0xa6451dec )	/* sprites C1 */
+	ROM_LOAD( "shadoww.12a",  0x060000, 0x10000, 0x9bb07731 )	/* sprites D1 */
+	ROM_LOAD( "shadoww.12b",  0x070000, 0x10000, 0xa4a950a2 )	/* sprites D1 */
+	ROM_LOAD( "gaiden.7",     0x080000, 0x20000, 0x016bec95 )	/* sprites A2 */
+	ROM_LOAD( "gaiden.9",     0x0a0000, 0x20000, 0x6e9b7fd3 )	/* sprites B2 */
+	ROM_LOAD( "gaiden.11",    0x0c0000, 0x20000, 0x7fbfdf5e )	/* sprites C2 */
+	ROM_LOAD( "shadoww.13a",  0x0e0000, 0x10000, 0x996d2fa5 )	/* sprites D2 */
+	ROM_LOAD( "shadoww.13b",  0x0f0000, 0x10000, 0xb8df8a34 )	/* sprites D2 */
+
+	ROM_REGION( 0x20000, REGION_SOUND1 )	/* 128k for ADPCM samples - sound chip is OKIM6295 */
+	ROM_LOAD( "gaiden.4",     0x0000, 0x20000, 0xb0e0faf9 ) /* samples */
+ROM_END
+
+ROM_START( ryukendn )
+	ROM_REGION( 0x40000, REGION_CPU1 )	/* 2*128k for 68000 code */
+	ROM_LOAD_EVEN( "ryukendn.1",  0x00000, 0x20000, 0x6203a5e2 )
+	ROM_LOAD_ODD ( "ryukendn.2",  0x00000, 0x20000, 0x9e99f522 )
+
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "ryukendn.3",   0x0000, 0x10000, 0x6b686b69 )   /* Audio CPU is a Z80  */
+
+	ROM_REGION( 0x010000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "ryukendn.5",   0x000000, 0x10000, 0x765e7baa )	/* 8x8 tiles */
+
+	ROM_REGION( 0x080000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "14.bin",       0x000000, 0x20000, 0x1ecfddaa )
+	ROM_LOAD( "15.bin",       0x020000, 0x20000, 0x1291a696 )
+	ROM_LOAD( "16.bin",       0x040000, 0x20000, 0x140b47ca )
+	ROM_LOAD( "17.bin",       0x060000, 0x20000, 0x7638cccb )
+
+	ROM_REGION( 0x080000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "18.bin",       0x000000, 0x20000, 0x3fadafd6 )
+	ROM_LOAD( "19.bin",       0x020000, 0x20000, 0xddae9d5b )
+	ROM_LOAD( "20.bin",       0x040000, 0x20000, 0x08cf7a93 )
+	ROM_LOAD( "21.bin",       0x060000, 0x20000, 0x1ac892f5 )
+
+	ROM_REGION( 0x100000, REGION_GFX4 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gaiden.6",     0x000000, 0x20000, 0xe7ccdf9f )	/* sprites A1 */
+	ROM_LOAD( "gaiden.8",     0x020000, 0x20000, 0x7ef7f880 )	/* sprites B1 */
+	ROM_LOAD( "gaiden.10",    0x040000, 0x20000, 0xa6451dec )	/* sprites C1 */
+	ROM_LOAD( "shadoww.12a",  0x060000, 0x10000, 0x9bb07731 )	/* sprites D1 */
+	ROM_LOAD( "ryukendn.12b", 0x070000, 0x10000, 0x1773628a )	/* sprites D1 */
+	ROM_LOAD( "gaiden.7",     0x080000, 0x20000, 0x016bec95 )	/* sprites A2 */
+	ROM_LOAD( "ryukendn.9a",  0x0a0000, 0x10000, 0xc821e200 )	/* sprites B2 */
+	ROM_LOAD( "ryukendn.9b",  0x0b0000, 0x10000, 0x6a6233b3 )	/* sprites B2 */
+	ROM_LOAD( "gaiden.11",    0x0c0000, 0x20000, 0x7fbfdf5e )	/* sprites C2 */
+	ROM_LOAD( "shadoww.13a",  0x0e0000, 0x10000, 0x996d2fa5 )	/* sprites D2 */
+	ROM_LOAD( "ryukendn.13b", 0x0f0000, 0x10000, 0x1f43c507 )	/* sprites D2 */
+
+	ROM_REGION( 0x20000, REGION_SOUND1 )	/* 128k for ADPCM samples - sound chip is OKIM6295 */
+	ROM_LOAD( "gaiden.4",     0x0000, 0x20000, 0xb0e0faf9 ) /* samples */
+ROM_END
+
+ROM_START( tknight )
+	ROM_REGION( 0x40000, REGION_CPU1 )	/* 2*128k for 68000 code */
+	ROM_LOAD_EVEN( "tkni1.bin",    0x00000, 0x20000, 0x9121daa8 )
+	ROM_LOAD_ODD ( "tkni2.bin",    0x00000, 0x20000, 0x6669cd87 )
+
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "tkni3.bin",    0x0000, 0x10000, 0x15623ec7 )   /* Audio CPU is a Z80  */
+
+	ROM_REGION( 0x010000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "tkni5.bin",    0x000000, 0x10000, 0x5ed15896 )	/* 8x8 tiles */
+
+	ROM_REGION( 0x080000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "tkni7.bin",    0x000000, 0x80000, 0x4b4d4286 )
+
+	ROM_REGION( 0x080000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "tkni6.bin",    0x000000, 0x80000, 0xf68fafb1 )
+
+	ROM_REGION( 0x100000, REGION_GFX4 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "tkni9.bin",    0x000000, 0x80000, 0xd22f4239 )	/* sprites */
+	ROM_LOAD( "tkni8.bin",    0x080000, 0x80000, 0x4931b184 )	/* sprites */
+
+	ROM_REGION( 0x20000, REGION_SOUND1 )	/* 128k for ADPCM samples - sound chip is OKIM6295 */
+	ROM_LOAD( "tkni4.bin",    0x0000, 0x20000, 0xa7a1dbcf ) /* samples */
+ROM_END
+
+ROM_START( wildfang )
+	ROM_REGION( 0x40000, REGION_CPU1 )	/* 2*128k for 68000 code */
+	ROM_LOAD_EVEN( "1.3st",    0x00000, 0x20000, 0xab876c9b )
+	ROM_LOAD_ODD ( "2.5st",    0x00000, 0x20000, 0x1dc74b3b )
+
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "tkni3.bin",    0x0000, 0x10000, 0x15623ec7 )   /* Audio CPU is a Z80  */
+
+	ROM_REGION( 0x010000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "tkni5.bin",    0x000000, 0x10000, 0x5ed15896 )	/* 8x8 tiles */
+
+	ROM_REGION( 0x080000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "14.3a",        0x000000, 0x20000, 0x0d20c10c )
+	ROM_LOAD( "15.3b",        0x020000, 0x20000, 0x3f40a6b4 )
+	ROM_LOAD( "16.1a",        0x040000, 0x20000, 0x0f31639e )
+	ROM_LOAD( "17.1b",        0x060000, 0x20000, 0xf32c158e )
+
+	ROM_REGION( 0x080000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "tkni6.bin",    0x000000, 0x80000, 0xf68fafb1 )
+
+	ROM_REGION( 0x100000, REGION_GFX4 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "tkni9.bin",    0x000000, 0x80000, 0xd22f4239 )	/* sprites */
+	ROM_LOAD( "tkni8.bin",    0x080000, 0x80000, 0x4931b184 )	/* sprites */
+
+	ROM_REGION( 0x20000, REGION_SOUND1 )	/* 128k for ADPCM samples - sound chip is OKIM6295 */
+	ROM_LOAD( "tkni4.bin",    0x0000, 0x20000, 0xa7a1dbcf ) /* samples */
 ROM_END
 
 
-struct GameDriver gaiden_driver =
-{
-	"Ninja Gaiden",
-	"gaiden",
-	"Alex Pasadyn",
-	&machine_driver,
 
-	gaiden_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	gaiden_input_ports,
-
-	0, 0, 0,   /* colors, palette, colortable */
-	ORIENTATION_DEFAULT,
-	0, 0
-};
-
-struct GameDriver shadoww_driver =
-{
-	"Shadow Warriors",
-	"shadoww",
-	"Alex Pasadyn",
-	&machine_driver,
-
-	shadoww_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	gaiden_input_ports,
-
-	0, 0, 0,   /* colors, palette, colortable */
-	ORIENTATION_DEFAULT,
-	0, 0
-};
-
+GAME( 1988, gaiden,   0,       gaiden, gaiden,  0, ROT0, "Tecmo", "Ninja Gaiden (World)" )
+GAME( 1988, shadoww,  gaiden,  gaiden, gaiden,  0, ROT0, "Tecmo", "Shadow Warriors (US)" )
+GAME( 1989, ryukendn, gaiden,  gaiden, gaiden,  0, ROT0, "Tecmo", "Ninja Ryukenden (Japan)" )
+GAME( 1989, tknight,  0,       gaiden, tknight, 0, ROT0, "Tecmo", "Tecmo Knight" )
+GAME( 1989, wildfang, tknight, gaiden, tknight, 0, ROT0, "Tecmo", "Wild Fang" )

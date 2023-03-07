@@ -1,276 +1,365 @@
 #ifndef OSDEPEND_H
 #define OSDEPEND_H
 
-
-struct osd_bitmap
-{
-	int width,height;       /* width and height of the bitmap */
-	int depth;		/* bits per pixel - ASG 980209 */
-	void *_private; /* don't touch! - reserved for osdepend use */
-	unsigned char **line; /* pointers to the start of each line */
-};
+#include "osd_cpu.h"
+#include "inptport.h"
 
 
-#define OSD_KEY_ESC         1        /* keyboard scan codes */
-#define OSD_KEY_1           2        /* (courtesy of allegro.h) */
-#define OSD_KEY_2           3
-#define OSD_KEY_3           4
-#define OSD_KEY_4           5
-#define OSD_KEY_5           6
-#define OSD_KEY_6           7
-#define OSD_KEY_7           8
-#define OSD_KEY_8           9
-#define OSD_KEY_9           10
-#define OSD_KEY_0           11
-#define OSD_KEY_MINUS       12
-#define OSD_KEY_EQUALS      13
-#define OSD_KEY_BACKSPACE   14
-#define OSD_KEY_TAB         15
-#define OSD_KEY_Q           16
-#define OSD_KEY_W           17
-#define OSD_KEY_E           18
-#define OSD_KEY_R           19
-#define OSD_KEY_T           20
-#define OSD_KEY_Y           21
-#define OSD_KEY_U           22
-#define OSD_KEY_I           23
-#define OSD_KEY_O           24
-#define OSD_KEY_P           25
-#define OSD_KEY_OPENBRACE   26
-#define OSD_KEY_CLOSEBRACE  27
-#define OSD_KEY_ENTER       28
-#define OSD_KEY_LCONTROL    29
-#define OSD_KEY_A           30
-#define OSD_KEY_S           31
-#define OSD_KEY_D           32
-#define OSD_KEY_F           33
-#define OSD_KEY_G           34
-#define OSD_KEY_H           35
-#define OSD_KEY_J           36
-#define OSD_KEY_K           37
-#define OSD_KEY_L           38
-#define OSD_KEY_COLON       39
-#define OSD_KEY_QUOTE       40
-#define OSD_KEY_TILDE       41
-#define OSD_KEY_LSHIFT      42
-/* 43 */
-#define OSD_KEY_Z           44
-#define OSD_KEY_X           45
-#define OSD_KEY_C           46
-#define OSD_KEY_V           47
-#define OSD_KEY_B           48
-#define OSD_KEY_N           49
-#define OSD_KEY_M           50
-#define OSD_KEY_COMMA       51
-#define OSD_KEY_STOP        52
-#define OSD_KEY_SLASH       53
-#define OSD_KEY_RSHIFT      54
-#define OSD_KEY_ASTERISK    55
-#define OSD_KEY_ALT         56
-#define OSD_KEY_SPACE       57
-#define OSD_KEY_CAPSLOCK    58
-#define OSD_KEY_F1          59
-#define OSD_KEY_F2          60
-#define OSD_KEY_F3          61
-#define OSD_KEY_F4          62
-#define OSD_KEY_F5          63
-#define OSD_KEY_F6          64
-#define OSD_KEY_F7          65
-#define OSD_KEY_F8          66
-#define OSD_KEY_F9          67
-#define OSD_KEY_F10         68
-#define OSD_KEY_NUMLOCK     69
-#define OSD_KEY_SCRLOCK     70
-#define OSD_KEY_HOME        71
-#define OSD_KEY_UP          72
-#define OSD_KEY_PGUP        73
-#define OSD_KEY_MINUS_PAD   74
-#define OSD_KEY_LEFT        75
-#define OSD_KEY_5_PAD       76
-#define OSD_KEY_RIGHT       77
-#define OSD_KEY_PLUS_PAD    78
-#define OSD_KEY_END         79
-#define OSD_KEY_DOWN        80
-#define OSD_KEY_PGDN        81
-#define OSD_KEY_INSERT      82
-#define OSD_KEY_DEL         83
-#define OSD_KEY_RCONTROL    84  /* different from Allegro */
-#define OSD_KEY_ALTGR       85  /* different from Allegro */
-/* 86 */
-#define OSD_KEY_F11         87
-#define OSD_KEY_F12         88
-#define OSD_KEY_COMMAND     89
-#define OSD_KEY_OPTION      90
-/* 91 - 100 */
-/* The following are all undefined in Allegro */
-#define OSD_KEY_1_PAD		101
-#define OSD_KEY_2_PAD		102
-#define OSD_KEY_3_PAD		103
-#define OSD_KEY_4_PAD		104
-/* 105 */
-#define OSD_KEY_6_PAD		106
-#define OSD_KEY_7_PAD		107
-#define OSD_KEY_8_PAD		108
-#define OSD_KEY_9_PAD		109
-#define OSD_KEY_0_PAD		110
-#define OSD_KEY_STOP_PAD	111
-#define OSD_KEY_EQUALS_PAD	112
-#define OSD_KEY_SLASH_PAD	113
-#define OSD_KEY_ASTER_PAD	114
-#define OSD_KEY_ENTER_PAD	115
+/* The Win32 port requires this constant for variable arg routines. */
+#ifndef CLIB_DECL
+#define CLIB_DECL
+#endif
 
-#define OSD_MAX_KEY         115
-
-
-#define OSD_JOY_LEFT    1
-#define OSD_JOY_RIGHT   2
-#define OSD_JOY_UP      3
-#define OSD_JOY_DOWN    4
-#define OSD_JOY_FIRE1   5
-#define OSD_JOY_FIRE2   6
-#define OSD_JOY_FIRE3   7
-#define OSD_JOY_FIRE4   8
-#define OSD_JOY_FIRE5   9
-#define OSD_JOY_FIRE6   10
-#define OSD_JOY_FIRE7   11
-#define OSD_JOY_FIRE8   12
-#define OSD_JOY_FIRE9   13
-#define OSD_JOY_FIRE10  14
-#define OSD_JOY_FIRE    15      /* any of the first joystick fire buttons */
-#define OSD_JOY2_LEFT   16
-#define OSD_JOY2_RIGHT  17
-#define OSD_JOY2_UP     18
-#define OSD_JOY2_DOWN   19
-#define OSD_JOY2_FIRE1  20
-#define OSD_JOY2_FIRE2  21
-#define OSD_JOY2_FIRE3  22
-#define OSD_JOY2_FIRE4  23
-#define OSD_JOY2_FIRE5  24
-#define OSD_JOY2_FIRE6  25
-#define OSD_JOY2_FIRE7  26
-#define OSD_JOY2_FIRE8  27
-#define OSD_JOY2_FIRE9  28
-#define OSD_JOY2_FIRE10 29
-#define OSD_JOY2_FIRE   30      /* any of the second joystick fire buttons */
-#define OSD_JOY3_LEFT   31
-#define OSD_JOY3_RIGHT  32
-#define OSD_JOY3_UP     33
-#define OSD_JOY3_DOWN   34
-#define OSD_JOY3_FIRE1  35
-#define OSD_JOY3_FIRE2  36
-#define OSD_JOY3_FIRE3  37
-#define OSD_JOY3_FIRE4  38
-#define OSD_JOY3_FIRE5  39
-#define OSD_JOY3_FIRE6  40
-#define OSD_JOY3_FIRE7  41
-#define OSD_JOY3_FIRE8  42
-#define OSD_JOY3_FIRE9  43
-#define OSD_JOY3_FIRE10 44
-#define OSD_JOY3_FIRE   45      /* any of the third joystick fire buttons */
-#define OSD_JOY4_LEFT   46
-#define OSD_JOY4_RIGHT  47
-#define OSD_JOY4_UP     48
-#define OSD_JOY4_DOWN   49
-#define OSD_JOY4_FIRE1  50
-#define OSD_JOY4_FIRE2  51
-#define OSD_JOY4_FIRE3  52
-#define OSD_JOY4_FIRE4  53
-#define OSD_JOY4_FIRE5  54
-#define OSD_JOY4_FIRE6  55
-#define OSD_JOY4_FIRE7  56
-#define OSD_JOY4_FIRE8  57
-#define OSD_JOY4_FIRE9  58
-#define OSD_JOY4_FIRE10 59
-#define OSD_JOY4_FIRE   60      /* any of the fourth joystick fire buttons */
-#define OSD_MAX_JOY     60
-
-#define X_AXIS          1
-#define Y_AXIS          2
-#define NO_TRAK         1000000
-#define NO_ANALOGJOY    1000000
-
-
-extern int video_sync;
+#ifdef __LP64__
+#define FPTR long   /* 64bit: sizeof(void *) is sizeof(long)  */
+#else
+#define FPTR int
+#endif
 
 
 int osd_init(void);
 void osd_exit(void);
-/* VERY IMPORTANT: the function must allocate also a "safety area" 8 pixels wide all */
+
+
+/******************************************************************************
+
+  Display
+
+******************************************************************************/
+
+struct osd_bitmap
+{
+	int width,height;       /* width and height of the bitmap */
+	int depth;		/* bits per pixel */
+	void *_private; /* don't touch! - reserved for osdepend use */
+	unsigned char **line; /* pointers to the start of each line */
+};
+
+/* VERY IMPORTANT: the function must allocate also a "safety area" 16 pixels wide all */
 /* around the bitmap. This is required because, for performance reasons, some graphic */
 /* routines don't clip at boundaries of the bitmap. */
-struct osd_bitmap *osd_new_bitmap(int width,int height,int depth);	/* ASG 980209 */
-#define osd_create_bitmap(w,h) osd_new_bitmap((w),(h),8)		/* ASG 980209 */
-/* ASG 980209 struct osd_bitmap *osd_create_bitmap(int width,int height);*/
+struct osd_bitmap *osd_alloc_bitmap(int width,int height,int depth);
 void osd_clearbitmap(struct osd_bitmap *bitmap);
 void osd_free_bitmap(struct osd_bitmap *bitmap);
-/* Create a display screen, or window, large enough to accomodate a bitmap */
-/* of the given dimensions. Attributes are the ones defined in driver.h. */
-/* palette is an array of 'totalcolors' R,G,B triplets. The function returns */
-/* in *pens the pen values corresponding to the requested colors. */
-/* Return a osd_bitmap pointer or 0 in case of error. */
-struct osd_bitmap *osd_create_display(int width,int height,unsigned int totalcolors,
-		const unsigned char *palette,unsigned short *pens,int attributes);
-int osd_set_display(int width,int height,int attributes);
+
+/*
+  Create a display screen, or window, of the given dimensions (or larger). It is
+  acceptable to create a smaller display if necessary, in that case the user must
+  have a way to move the visibility window around.
+  Attributes are the ones defined in driver.h, they can be used to perform
+  optimizations, e.g. dirty rectangle handling if the game supports it, or faster
+  blitting routines with fixed palette if the game doesn't change the palette at
+  run time. The VIDEO_PIXEL_ASPECT_RATIO flags should be honored to produce a
+  display of correct proportions.
+  Orientation is the screen orientation (as defined in driver.h) which will be done
+  by the core. This can be used to select thinner screen modes for vertical games
+  (ORIENTATION_SWAP_XY set), or even to ask the user to rotate the monitor if it's
+  a pivot model. Note that the OS dependant code must NOT perform any rotation,
+  this is done entirely in the core.
+  Returns 0 on success.
+*/
+int osd_create_display(int width,int height,int depth,int fps,int attributes,int orientation);
+int osd_set_display(int width,int height,int depth,int attributes,int orientation);
 void osd_close_display(void);
+
+void osd_set_visible_area(int min_x,int max_x,int min_y,int max_y);
+
+/*
+  osd_allocate_colors() is called after osd_create_display(), to create and initialize
+  the palette.
+  palette is an array of 'totalcolors' R,G,B triplets. The function returns
+  in *pens the pen values corresponding to the requested colors.
+  When modifiable is not 0, the palette will be modified later via calls to
+  osd_modify_pen(). Otherwise, the code can assume that the palette will not change,
+  and activate special optimizations (e.g. direct copy for a 16-bit display).
+  The function must also initialize Machine->uifont->colortable[] to get proper
+  white-on-black and black-on-white text.
+  Return 0 for success.
+*/
+int osd_allocate_colors(unsigned int totalcolors,const unsigned char *palette,unsigned short *pens,int modifiable);
 void osd_modify_pen(int pen,unsigned char red, unsigned char green, unsigned char blue);
 void osd_get_pen(int pen,unsigned char *red, unsigned char *green, unsigned char *blue);
 void osd_mark_dirty(int xmin, int ymin, int xmax, int ymax, int ui);    /* ASG 971011 */
-void osd_update_display(void);
-void osd_update_audio(void);
-void osd_play_sample(int channel,signed char *data,int len,int freq,int volume,int loop);
-void osd_play_sample_16(int channel,signed short *data,int len,int freq,int volume,int loop);
-void osd_play_streamed_sample(int channel,signed char *data,int len,int freq,int volume);
-void osd_play_streamed_sample_16(int channel,signed short *data,int len,int freq,int volume);
-void osd_adjust_sample(int channel,int freq,int volume);
-void osd_stop_sample(int channel);
-void osd_restart_sample(int channel);
-int osd_get_sample_status(int channel);
-void osd_ym2203_write(int n, int r, int v);
-void osd_ym2203_update(void);
-int osd_ym3812_status(void);
-int osd_ym3812_read(void);
-void osd_ym3812_control(int reg);
-void osd_ym3812_write(int data);
-void osd_set_mastervolume(int volume);
-int osd_key_pressed(int keycode);
-int osd_read_key(void);
-int osd_read_keyrepeat(void);
-const char *osd_joy_name(int joycode);
-const char *osd_key_name(int keycode);
-void osd_poll_joystick(void);
-int osd_joy_pressed(int joycode);
 
-void osd_trak_read(int *deltax,int *deltay);
+/*
+  osd_skip_this_frame() must return 0 if the current frame will be displayed. This
+  can be used by drivers to skip cpu intensive processing for skipped frames, so the
+  function must return a consistent result throughout the current frame. The function
+  MUST NOT check timers and dynamically determine whether to display the frame: such
+  calculations must be done in osd_update_video_and_audio(), and they must affect the
+  FOLLOWING frames, not the current one. At the end of osd_update_video_and_audio(),
+  the code must already know exactly whether the next frame will be skipped or not.
+*/
+int osd_skip_this_frame(void);
+void osd_update_video_and_audio(struct osd_bitmap *bitmap);
+void osd_set_gamma(float _gamma);
+float osd_get_gamma(void);
+void osd_set_brightness(int brightness);
+int osd_get_brightness(void);
+void osd_save_snapshot(struct osd_bitmap *bitmap);
 
-/* return a value in the range -128 .. 128 (yes, 128, not 127) */
-int osd_analogjoy_read(int axis);
+
+/******************************************************************************
+
+  Sound
+
+******************************************************************************/
+
+/*
+  osd_start_audio_stream() is called at the start of the emulation to initialize
+  the output stream, the osd_update_audio_stream() is called every frame to
+  feed new data. osd_stop_audio_stream() is called when the emulation is stopped.
+
+  The sample rate is fixed at Machine->sample_rate. Samples are 16-bit, signed.
+
+  When the stream is stereo, left and right samples are alternated in the
+  stream.
+
+  osd_start_audio_stream() and osd_update_audio_stream() must return the number
+  of samples (or couples of samples, when using stereo) required for next frame.
+  This will be around Machine->sample_rate / Machine->drv->frames_per_second,
+  the code may adjust it by SMALL AMOUNTS to keep timing accurate and to maintain
+  audio and video in sync when using vsync. Note that sound generation,
+  especially when DACs are involved, greatly depends on the samples per frame to
+  be roughly constant, so the returned value must always stay close to the
+  reference value of Machine->sample_rate / Machine->drv->frames_per_second.
+  Of course that value is not necessarily an integer so at least a +/- 1
+  adjustment is necessary to avoid drifting over time.
+ */
+int osd_start_audio_stream(int stereo);
+int osd_update_audio_stream(INT16 *buffer);
+void osd_stop_audio_stream(void);
+
+/*
+  control master volume, attenuation is the attenuation in dB (a negative
+  number).
+ */
+void osd_set_mastervolume(int attenuation);
+int osd_get_mastervolume(void);
+void osd_sound_enable(int enable);
+
+/* direct access to the Sound Blaster OPL chip */
+void osd_opl_control(int chip,int reg);
+void osd_opl_write(int chip,int data);
+
+
+/******************************************************************************
+
+  Keyboard
+
+******************************************************************************/
+
+/*
+  return a list of all available keys (see input.h)
+*/
+const struct KeyboardInfo *osd_get_key_list(void);
+
+/*
+  tell whether the specified key is pressed or not. keycode is the OS dependant
+  code specified in the list returned by osd_get_key_list().
+*/
+int osd_is_key_pressed(int keycode);
+
+/*
+  wait for the user to press a key and return its code. This function is not
+  required to do anything, it is here so we can avoid bogging down multitasking
+  systems while using the debugger. If you don't want to or can't support this
+  function you can just return OSD_KEY_NONE.
+*/
+int osd_wait_keypress(void);
+
+/*
+  Return the Unicode value of the most recently pressed key. This
+  function is used only by text-entry routines in the user interface and should
+  not be used by drivers. The value returned is in the range of the first 256
+  bytes of Unicode, e.g. ISO-8859-1. A return value of 0 indicates no key down.
+
+  Set flush to 1 to clear the buffer before entering text. This will avoid
+  having prior UI and game keys leak into the text entry.
+*/
+int osd_readkey_unicode(int flush);
+
+/* Code returned by the function osd_wait_keypress() if no key available */
+#define OSD_KEY_NONE 0xffffffff
+
+
+/******************************************************************************
+
+  Joystick & Mouse/Trackball
+
+******************************************************************************/
+
+/*
+  return a list of all available joystick inputs (see input.h)
+*/
+const struct JoystickInfo *osd_get_joy_list(void);
+
+/*
+  tell whether the specified joystick direction/button is pressed or not.
+  joycode is the OS dependant code specified in the list returned by
+  osd_get_joy_list().
+*/
+int osd_is_joy_pressed(int joycode);
+
+
+/* We support 4 players for each analog control */
+#define OSD_MAX_JOY_ANALOG	4
+#define X_AXIS          1
+#define Y_AXIS          2
+
+void osd_poll_joysticks(void);
+
+/* Joystick calibration routines BW 19981216 */
+/* Do we need to calibrate the joystick at all? */
+int osd_joystick_needs_calibration (void);
+/* Preprocessing for joystick calibration. Returns 0 on success */
+void osd_joystick_start_calibration (void);
+/* Prepare the next calibration step. Return a description of this step. */
+/* (e.g. "move to upper left") */
+char *osd_joystick_calibrate_next (void);
+/* Get the actual joystick calibration data for the current position */
+void osd_joystick_calibrate (void);
+/* Postprocessing (e.g. saving joystick data to config) */
+void osd_joystick_end_calibration (void);
+
+void osd_trak_read(int player,int *deltax,int *deltay);
+
+/* return values in the range -128 .. 128 (yes, 128, not 127) */
+void osd_analogjoy_read(int player,int *analog_x, int *analog_y);
+
+
+/*
+  inptport.c defines some general purpose defaults for key and joystick bindings.
+  They may be further adjusted by the OS dependant code to better match the
+  available keyboard, e.g. one could map pause to the Pause key instead of P, or
+  snapshot to PrtScr instead of F12. Of course the user can further change the
+  settings to anything he/she likes.
+  This function is called on startup, before reading the configuration from disk.
+  Scan the list, and change the keys/joysticks you want.
+*/
+void osd_customize_inputport_defaults(struct ipd *defaults);
+
+
+/******************************************************************************
+
+  File I/O
+
+******************************************************************************/
+
+/* inp header */
+typedef struct
+{
+	char name[9];      /* 8 bytes for game->name + NULL */
+	char version[3];   /* byte[0] = 0, byte[1] = version byte[2] = beta_version */
+	char reserved[20]; /* for future use, possible store game options? */
+} INP_HEADER;
+
 
 /* file handling routines */
-#define OSD_FILETYPE_ROM 1
-#define OSD_FILETYPE_SAMPLE 2
-#define OSD_FILETYPE_HIGHSCORE 3
-#define OSD_FILETYPE_CONFIG 4
-#define OSD_FILETYPE_INPUTLOG 5
+enum
+{
+	OSD_FILETYPE_ROM = 1,
+	OSD_FILETYPE_SAMPLE,
+	OSD_FILETYPE_NVRAM,
+	OSD_FILETYPE_HIGHSCORE,
+	OSD_FILETYPE_HIGHSCORE_DB, /* LBO 040400 */
+	OSD_FILETYPE_CONFIG,
+	OSD_FILETYPE_INPUTLOG,
+	OSD_FILETYPE_STATE,
+	OSD_FILETYPE_ARTWORK,
+	OSD_FILETYPE_MEMCARD,
+	OSD_FILETYPE_SCREENSHOT,
+	OSD_FILETYPE_HISTORY,  /* LBO 040400 */
+	OSD_FILETYPE_CHEAT,  /* LBO 040400 */
+	OSD_FILETYPE_LANGUAGE, /* LBO 042400 */
+#ifdef MESS
+	OSD_FILETYPE_IMAGE_R,
+	OSD_FILETYPE_IMAGE_RW,
+#endif
+	OSD_FILETYPE_end /* dummy last entry */
+};
 
 /* gamename holds the driver name, filename is only used for ROMs and    */
 /* samples. If 'write' is not 0, the file is opened for write. Otherwise */
 /* it is opened for read. */
 
-int osd_faccess (const char *filename, int filetype);
-void *osd_fopen (const char *gamename,const char *filename,int filetype,int write);
-int osd_fread (void *file,void *buffer,int length);
-int osd_fwrite (void *file,const void *buffer,int length);
-int osd_fseek (void *file,int offset,int whence);
-void osd_fclose (void *file);
+int osd_faccess(const char *filename, int filetype);
+void *osd_fopen(const char *gamename,const char *filename,int filetype,int read_or_write);
+int osd_fread(void *file,void *buffer,int length);
+int osd_fwrite(void *file,const void *buffer,int length);
+int osd_fread_swap(void *file,void *buffer,int length);
+int osd_fwrite_swap(void *file,const void *buffer,int length);
+#if LSB_FIRST
+#define osd_fread_msbfirst osd_fread_swap
+#define osd_fwrite_msbfirst osd_fwrite_swap
+#define osd_fread_lsbfirst osd_fread
+#define osd_fwrite_lsbfirst osd_fwrite
+#else
+#define osd_fread_msbfirst osd_fread
+#define osd_fwrite_msbfirst osd_fwrite
+#define osd_fread_lsbfirst osd_fread_swap
+#define osd_fwrite_lsbfirst osd_fwrite_swap
+#endif
+int osd_fread_scatter(void *file,void *buffer,int length,int increment);
+int osd_fseek(void *file,int offset,int whence);
+void osd_fclose(void *file);
+int osd_fchecksum(const char *gamename, const char *filename, unsigned int *length, unsigned int *sum);
+int osd_fsize(void *file);
+unsigned int osd_fcrc(void *file);
+/* LBO 040400 - start */
+int osd_fgetc(void *file);
+int osd_ungetc(int c, void *file);
+char *osd_fgets(char *s, int n, void *file);
+int osd_feof(void *file);
+int osd_ftell(void *file);
+/* LBO 040400 - end */
+
+/******************************************************************************
+
+  Miscellaneous
+
+******************************************************************************/
+
+/* called while loading ROMs. It is called a last time with name == 0 to signal */
+/* that the ROM loading process is finished. */
+/* return non-zero to abort loading */
+int osd_display_loading_rom_message(const char *name,int current,int total);
+
+/* called when the game is paused/unpaused, so the OS dependant code can do special */
+/* things like changing the title bar or darkening the display. */
+/* Note that the OS dependant code must NOT stop processing input, since the user */
+/* interface is still active while the game is paused. */
+void osd_pause(int paused);
 
 /* control keyboard leds or other indicators */
 void osd_led_w(int led,int on);
 
-/* config */
-void osd_set_config(int def_samplerate, int def_samplebits);
-void osd_save_config(int frameskip, int samplerate, int samplebits);
-int osd_get_config_samplerate(int def_samplerate);
-int osd_get_config_samplebits(int def_samplebits);
-int osd_get_config_frameskip(int def_frameskip);
+
+
+#ifdef MAME_NET
+/* network */
+int osd_net_init(void);
+int osd_net_send(int player, unsigned char buf[], int *size);
+int osd_net_recv(int player, unsigned char buf[], int *size);
+int osd_net_sync(void);
+int osd_net_input_sync(void);
+int osd_net_exit(void);
+int osd_net_add_player(void);
+int osd_net_remove_player(int player);
+int osd_net_game_init(void);
+int osd_net_game_exit(void);
+#endif /* MAME_NET */
+
+#ifdef MESS
+int osd_num_devices(void);
+const char *osd_get_device_name(int i);
+void osd_change_device(const char *vol);
+void *osd_dir_open(const char *mdirname, const char *filemask);
+int osd_dir_get_entry(void *dir, char *name, int namelength, int *is_dir);
+void osd_dir_close(void *dir);
+#endif
+
+
+void CLIB_DECL logerror(const char *text,...);
 
 #endif

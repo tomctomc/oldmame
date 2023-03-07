@@ -35,7 +35,7 @@ static int flipscreen;
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void circusc_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void circusc_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -78,7 +78,7 @@ void circusc_vh_convert_color_prom(unsigned char *palette, unsigned char *colort
 
 
 
-void circusc_flipscreen_w(int offset,int data)
+WRITE_HANDLER( circusc_flipscreen_w )
 {
 	if (flipscreen != (data & 1))
 	{
@@ -96,7 +96,7 @@ void circusc_flipscreen_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void circusc_vh_screenrefresh(struct osd_bitmap *bitmap)
+void circusc_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -153,7 +153,7 @@ void circusc_vh_screenrefresh(struct osd_bitmap *bitmap)
 			for (offs = 10;offs < 32;offs++)
 				scroll[offs] = -*circusc_scroll;
 		}
-		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+		copyscrollbitmap(bitmap,tmpbitmap,0,0,32,scroll,&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 
 
@@ -188,7 +188,7 @@ void circusc_vh_screenrefresh(struct osd_bitmap *bitmap)
 					sr[offs + 1] & 0x0f,
 					flipx,flipy,
 					sx,sy,
-					&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+					&Machine->visible_area,TRANSPARENCY_COLOR,0);
 		}
 	}
 }

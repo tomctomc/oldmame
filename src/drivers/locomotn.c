@@ -2,6 +2,14 @@
 
 Loco-Motion memory map (preliminary)
 
+driver by Nicola Salmoria
+
+TODO:
+- PROM 7a controls the video shape. This is used to show the top 4 lines in
+  Jungler but not in Locomotion and Commando. The visible area for the latter
+  two should be adjusted, handling flip screen accordingly.
+
+
 CPU #1
 0000-4fff ROM (empty space at 5000-5fff for diagnostic ROM)
 8040-83ff video RAM (top 8 rows of screen)
@@ -46,78 +54,40 @@ write:
 
 
 extern unsigned char *rallyx_videoram2,*rallyx_colorram2;
-extern unsigned char *rallyx_radarcarx,*rallyx_radarcary,*rallyx_radarcarcolor;
-extern int rallyx_radarram_size;
+extern unsigned char *rallyx_radarx,*rallyx_radary,*rallyx_radarattr;
+extern size_t rallyx_radarram_size;
 extern unsigned char *rallyx_scrollx,*rallyx_scrolly;
-void rallyx_videoram2_w(int offset,int data);
-void rallyx_colorram2_w(int offset,int data);
-void rallyx_flipscreen_w(int offset,int data);
-void rallyx_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
+WRITE_HANDLER( rallyx_videoram2_w );
+WRITE_HANDLER( rallyx_colorram2_w );
+WRITE_HANDLER( rallyx_flipscreen_w );
+void locomotn_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
 int rallyx_vh_start(void);
 void rallyx_vh_stop(void);
-void locomotn_vh_screenrefresh(struct osd_bitmap *bitmap);
-void jungler_vh_screenrefresh(struct osd_bitmap *bitmap);
+void locomotn_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
+void jungler_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
+void commsega_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
+
+/* defined in sndhrdw/timeplt.c */
+extern struct MemoryReadAddress timeplt_sound_readmem[];
+extern struct MemoryWriteAddress timeplt_sound_writemem[];
+extern struct AY8910interface timeplt_ay8910_interface;
+WRITE_HANDLER( timeplt_sh_irqtrigger_w );
 
 
-
-/* I am not 100% sure that this timer is correct, but */
-/* I'm using the Gyruss wired to the higher 4 bits    */
-/* instead of the lower ones, so there is a good      */
-/* chance it's the right one. */
-
-/* The timer clock which feeds the lower 4 bits of    */
-/* AY-3-8910 port A is based on the same clock        */
-/* feeding the sound CPU Z80.  It is a divide by      */
-/* 10240, formed by a standard divide by 1024,        */
-/* followed by a divide by 10 using a 4 bit           */
-/* bi-quinary count sequence. (See LS90 data sheet    */
-/* for an example).                                   */
-/* Bits 1-3 come directly from the upper three bits   */
-/* of the bi-quinary counter. Bit 0 comes from the    */
-/* output of the divide by 1024.                      */
-
-static int locomotn_timer[20] = {
-0x00, 0x01, 0x00, 0x01, 0x02, 0x03, 0x02, 0x03, 0x04, 0x05,
-0x08, 0x09, 0x08, 0x09, 0x0a, 0x0b, 0x0a, 0x0b, 0x0c, 0x0d
-};
-
-static int locomotn_portB_r(int offset)
+static WRITE_HANDLER( coin_1_w )
 {
-	/* need to protect from totalcycles overflow */
-	static int last_totalcycles = 0;
-
-	/* number of Z80 clock cycles to count */
-	static int clock;
-
-	int current_totalcycles;
-
-	current_totalcycles = cpu_gettotalcycles();
-	clock = (clock + (current_totalcycles-last_totalcycles)) % 10240;
-
-	last_totalcycles = current_totalcycles;
-
-	return locomotn_timer[clock/512] << 4;
+	coin_counter_w(0,data & 1);
 }
-
-void locomotn_sh_irqtrigger_w(int offset,int data)
+static WRITE_HANDLER( coin_2_w )
 {
-	static int last;
-
-
-	if (last == 0 && data == 1)
-	{
-		/* setting bit 0 low then high triggers IRQ on the sound CPU */
-		cpu_cause_interrupt(1,0xff);
-	}
-
-	last = data;
+	coin_counter_w(1,data & 1);
 }
 
 
 
 static struct MemoryReadAddress readmem[] =
 {
-	{ 0x0000, 0x5fff, MRA_ROM },
+	{ 0x0000, 0x7fff, MRA_ROM },
 	{ 0x8000, 0x8fff, MRA_RAM },
 	{ 0x9800, 0x9fff, MRA_RAM },
 	{ 0xa000, 0xa000, input_port_0_r },	/* IN0 */
@@ -127,259 +97,266 @@ static struct MemoryReadAddress readmem[] =
 	{ -1 }	/* end of table */
 };
 
-static struct MemoryWriteAddress writemem[] =
+static struct MemoryWriteAddress jungler_writemem[] =
 {
-	{ 0x0000, 0x5fff, MWA_ROM },
+	{ 0x0000, 0x7fff, MWA_ROM },
 	{ 0x8000, 0x83ff, videoram_w, &videoram, &videoram_size },
 	{ 0x8400, 0x87ff, rallyx_videoram2_w, &rallyx_videoram2 },
 	{ 0x8800, 0x8bff, colorram_w, &colorram },
 	{ 0x8c00, 0x8fff, rallyx_colorram2_w, &rallyx_colorram2 },
 	{ 0x9800, 0x9fff, MWA_RAM },
-	{ 0xa000, 0xa00f, MWA_RAM, &rallyx_radarcarcolor },
+	{ 0xa034, 0xa03f, MWA_RAM, &rallyx_radarattr },
 	{ 0xa080, 0xa080, watchdog_reset_w },
 	{ 0xa100, 0xa100, soundlatch_w },
 	{ 0xa130, 0xa130, MWA_RAM, &rallyx_scrollx },
 	{ 0xa140, 0xa140, MWA_RAM, &rallyx_scrolly },
 	{ 0xa170, 0xa170, MWA_NOP },	/* ????? */
-	{ 0xa180, 0xa180, locomotn_sh_irqtrigger_w },
+	{ 0xa180, 0xa180, timeplt_sh_irqtrigger_w },
 	{ 0xa181, 0xa181, interrupt_enable_w },
+//	{ 0xa182, 0xa182, MWA_NOP },	sound mute
 	{ 0xa183, 0xa183, rallyx_flipscreen_w },
-	{ 0xa184, 0xa185, osd_led_w },
-	{ 0xa186, 0xa186, MWA_NOP },
+	{ 0xa184, 0xa184, coin_1_w },
+	{ 0xa186, 0xa186, coin_2_w },
+//	{ 0xa187, 0xa187, MWA_NOP },	stars enable
+	{ 0x8014, 0x801f, MWA_RAM, &spriteram, &spriteram_size },	/* these are here just to initialize */
+	{ 0x8814, 0x881f, MWA_RAM, &spriteram_2 },	/* the pointers. */
+	{ 0x8034, 0x803f, MWA_RAM, &rallyx_radarx, &rallyx_radarram_size },	/* ditto */
+	{ 0x8834, 0x883f, MWA_RAM, &rallyx_radary },
+	{ -1 }	/* end of table */
+};
+
+static struct MemoryWriteAddress writemem[] =
+{
+	{ 0x0000, 0x7fff, MWA_ROM },
+	{ 0x8000, 0x83ff, videoram_w, &videoram, &videoram_size },
+	{ 0x8400, 0x87ff, rallyx_videoram2_w, &rallyx_videoram2 },
+	{ 0x8800, 0x8bff, colorram_w, &colorram },
+	{ 0x8c00, 0x8fff, rallyx_colorram2_w, &rallyx_colorram2 },
+	{ 0x9800, 0x9fff, MWA_RAM },
+	{ 0xa000, 0xa00f, MWA_RAM, &rallyx_radarattr },
+	{ 0xa080, 0xa080, watchdog_reset_w },
+	{ 0xa100, 0xa100, soundlatch_w },
+	{ 0xa130, 0xa130, MWA_RAM, &rallyx_scrollx },
+	{ 0xa140, 0xa140, MWA_RAM, &rallyx_scrolly },
+	{ 0xa170, 0xa170, MWA_NOP },	/* ????? */
+	{ 0xa180, 0xa180, timeplt_sh_irqtrigger_w },
+	{ 0xa181, 0xa181, interrupt_enable_w },
+//	{ 0xa182, 0xa182, MWA_NOP },	sound mute
+	{ 0xa183, 0xa183, rallyx_flipscreen_w },
+	{ 0xa184, 0xa184, coin_1_w },
+	{ 0xa186, 0xa186, coin_2_w },
+//	{ 0xa187, 0xa187, MWA_NOP },	stars enable
 	{ 0x8000, 0x801f, MWA_RAM, &spriteram, &spriteram_size },	/* these are here just to initialize */
 	{ 0x8800, 0x881f, MWA_RAM, &spriteram_2 },	/* the pointers. */
-	{ 0x8020, 0x803f, MWA_RAM, &rallyx_radarcarx, &rallyx_radarram_size },	/* ditto */
-	{ 0x8820, 0x883f, MWA_RAM, &rallyx_radarcary },
+	{ 0x8020, 0x803f, MWA_RAM, &rallyx_radarx, &rallyx_radarram_size },	/* ditto */
+	{ 0x8820, 0x883f, MWA_RAM, &rallyx_radary },
 	{ -1 }	/* end of table */
 };
 
 
 
-static struct MemoryReadAddress sound_readmem[] =
-{
-	{ 0x0000, 0x0fff, MRA_ROM },
-	{ 0x2000, 0x23ff, MRA_RAM },
-	{ 0x4000, 0x4000, AY8910_read_port_0_r },
-	{ 0x6000, 0x6000, AY8910_read_port_1_r },
-	{ -1 }	/* end of table */
-};
-
-static struct MemoryWriteAddress sound_writemem[] =
-{
-	{ 0x0000, 0x0fff, MWA_ROM },
-	{ 0x2000, 0x23ff, MWA_RAM },
-	{ 0x4000, 0x4000, AY8910_write_port_0_w },
-	{ 0x5000, 0x5000, AY8910_control_port_0_w },
-	{ 0x6000, 0x6000, AY8910_write_port_1_w },
-	{ 0x7000, 0x7000, AY8910_control_port_1_w },
-	{ -1 }	/* end of table */
-};
-
-
-
-INPUT_PORTS_START( locomotn_input_ports )
+INPUT_PORTS_START( locomotn )
 	PORT_START      /* IN0 */
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_4WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_4WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_COIN3 )
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON1 )
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_4WAY )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_4WAY )
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_4WAY )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_COIN2 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN1 )
 
 	PORT_START      /* IN1 */
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_4WAY )
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_4WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_4WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_4WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
 	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_4WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_4WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_4WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START2 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_START1 )
 
 	PORT_START      /* DSW0 */
-	PORT_DIPNAME( 0x01, 0x00, "Demo Sounds", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x01, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x02, 0x02, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x04, 0x04, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x04, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x08, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Upright" )
-	PORT_DIPSETTING(    0x08, "Cocktail" )
-	PORT_DIPNAME( 0x30, 0x30, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0x01, 0x00, DEF_STR( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x02, 0x02, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x04, 0x04, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x08, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( Cocktail ) )
+	PORT_DIPNAME( 0x30, 0x30, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x30, "3" )
 	PORT_DIPSETTING(    0x20, "4" )
 	PORT_DIPSETTING(    0x10, "5" )
-	PORT_DIPSETTING(    0x00, "255?" )
-	PORT_DIPNAME( 0x40, 0x40, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x40, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_4WAY )
+	PORT_BITX(0,  0x00, IPT_DIPSWITCH_SETTING | IPF_CHEAT, "255", IP_KEY_NONE, IP_JOY_NONE )
+	PORT_DIPNAME( 0x40, 0x40, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_4WAY )
 
 	PORT_START      /* DSW1 */
-	PORT_DIPNAME( 0x0f, 0x0f, "Coin A", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x04, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x0a, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x01, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x02, "3 Coins/2 Credits" )
-	PORT_DIPSETTING(    0x08, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x0f, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x0c, "3 Coins/4 Credits" )
-	PORT_DIPSETTING(    0x0e, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x07, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x06, "2 Coins/5 Credits" )
-	PORT_DIPSETTING(    0x0b, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x03, "1 Coin/4 Credits" )
-	PORT_DIPSETTING(    0x0d, "1 Coin/5 Credits" )
-	PORT_DIPSETTING(    0x05, "1 Coin/6 Credits" )
-	PORT_DIPSETTING(    0x09, "1 Coin/7 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
-	PORT_DIPNAME( 0xf0, 0xf0, "Coin B", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x40, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0xa0, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x10, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x20, "3 Coins/2 Credits" )
-	PORT_DIPSETTING(    0x80, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0xf0, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0xc0, "3 Coins/4 Credits" )
-	PORT_DIPSETTING(    0xe0, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x70, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x60, "2 Coins/5 Credits" )
-	PORT_DIPSETTING(    0xb0, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x30, "1 Coin/4 Credits" )
-	PORT_DIPSETTING(    0xd0, "1 Coin/5 Credits" )
-	PORT_DIPSETTING(    0x50, "1 Coin/6 Credits" )
-	PORT_DIPSETTING(    0x90, "1 Coin/7 Credits" )
-	PORT_DIPSETTING(    0x00, "Disable" )
+	PORT_DIPNAME( 0x0f, 0x0f, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x0a, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 3C_2C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0x0f, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 3C_4C ) )
+	PORT_DIPSETTING(    0x0e, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0x07, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x06, DEF_STR( 2C_5C ) )
+	PORT_DIPSETTING(    0x0b, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0x0d, DEF_STR( 1C_5C ) )
+	PORT_DIPSETTING(    0x05, DEF_STR( 1C_6C ) )
+	PORT_DIPSETTING(    0x09, DEF_STR( 1C_7C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0xf0, 0xf0, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0xa0, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( 3C_2C ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0xf0, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0xc0, DEF_STR( 3C_4C ) )
+	PORT_DIPSETTING(    0xe0, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0x70, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x60, DEF_STR( 2C_5C ) )
+	PORT_DIPSETTING(    0xb0, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x30, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0xd0, DEF_STR( 1C_5C ) )
+	PORT_DIPSETTING(    0x50, DEF_STR( 1C_6C ) )
+	PORT_DIPSETTING(    0x90, DEF_STR( 1C_7C ) )
+	PORT_DIPSETTING(    0x00, "Disabled" )
 INPUT_PORTS_END
 
-INPUT_PORTS_START( jungler_input_ports )
+
+INPUT_PORTS_START( jungler )
 	PORT_START      /* IN0 */
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_4WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_4WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_COIN3 )
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON1 )
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_4WAY )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_4WAY )
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_4WAY )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_COIN2 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN1 )
 
 	PORT_START      /* IN1 */
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_4WAY )
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_4WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_4WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_4WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
 	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_4WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_4WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_4WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START2 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_START1 )
 
 	PORT_START      /* DSW0 */
 	PORT_BIT( 0x7f, IP_ACTIVE_LOW, IPT_UNKNOWN )
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_4WAY )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_4WAY )
 
 	PORT_START      /* DSW1 */
-	PORT_DIPNAME( 0x07, 0x07, "Coin A", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x01, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x02, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x03, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x00, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x07, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x06, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x05, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x04, "1 Coin/4 Credits" )
-	PORT_DIPNAME( 0x38, 0x38, "Coin B", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x08, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x10, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x18, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x00, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x38, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x30, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x28, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x20, "1 Coin/4 Credits" )
-	PORT_DIPNAME( 0x40, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Upright" )
-	PORT_DIPSETTING(    0x40, "Cocktail" )
-	PORT_BITX(    0x80, 0x80, IPT_DIPSWITCH_NAME | IPF_CHEAT, "Infinite Lives", IP_KEY_NONE, IP_JOY_NONE, 0 )
-	PORT_DIPSETTING(    0x80, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_DIPNAME( 0x07, 0x07, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0x07, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x06, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x05, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 1C_4C ) )
+	PORT_DIPNAME( 0x38, 0x38, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x18, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0x38, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x30, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x28, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( 1C_4C ) )
+	PORT_DIPNAME( 0x40, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( Cocktail ) )
+	PORT_BITX(    0x80, 0x80, IPT_DIPSWITCH_NAME | IPF_CHEAT, "Infinite Lives", IP_KEY_NONE, IP_JOY_NONE )
+	PORT_DIPSETTING(    0x80, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 INPUT_PORTS_END
 
-INPUT_PORTS_START( commsega_input_ports )
-/* the direction controls are probably wrong */
+
+INPUT_PORTS_START( commsega )
 	PORT_START      /* IN0 */
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_4WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_UNKNOWN )
-	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON1 )
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_8WAY )
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_8WAY )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON2 )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_4WAY )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_4WAY )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_COIN2 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN1 )
 
 	PORT_START      /* IN1 */
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_8WAY )
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_8WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_UNKNOWN )
-	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_8WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP    | IPF_4WAY )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_4WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON2 | IPF_COCKTAIL )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_4WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT  | IPF_4WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START2 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_START1 )
 
 	PORT_START      /* DSW0 */
-	PORT_DIPNAME( 0x07, 0x07, "Coin B", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x04, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x05, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x06, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x07, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x01, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x03, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x02, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
-	PORT_DIPNAME( 0x08, 0x08, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPSETTING(    0x08, "Off" )
-	PORT_DIPNAME( 0x10, 0x10, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPSETTING(    0x10, "Off" )
-	PORT_DIPNAME( 0x20, 0x20, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPSETTING(    0x20, "Off" )
-	PORT_DIPNAME( 0x40, 0x40, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPSETTING(    0x40, "Off" )
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_8WAY )
+	PORT_DIPNAME( 0x07, 0x07, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x05, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x06, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x07, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x08, 0x08, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x10, 0x10, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x20, 0x20, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_BUTTON1 )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN  | IPF_4WAY )
 
 	PORT_START      /* DSW1 */
-	PORT_DIPNAME( 0x03, 0x03, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x03, "3" )
 	PORT_DIPSETTING(    0x02, "4" )
 	PORT_DIPSETTING(    0x01, "5" )
 	PORT_DIPSETTING(    0x00, "6" )
-	PORT_DIPNAME( 0x1c, 0x1c, "Coin A", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x10, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x14, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x18, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x1c, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x04, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x0c, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x08, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
-	PORT_DIPNAME( 0x20, 0x20, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPSETTING(    0x20, "Off" )
-	PORT_DIPNAME( 0x40, 0x40, "Unknown", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPSETTING(    0x40, "Off" )
-	PORT_DIPNAME( 0x80, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Upright" )
-	PORT_DIPSETTING(    0x80, "Cocktail" )
+	PORT_DIPNAME( 0x1c, 0x1c, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x14, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x18, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x1c, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x20, 0x20, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x40, 0x40, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x80, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( Cocktail ) )
 INPUT_PORTS_END
 
 
@@ -387,7 +364,7 @@ INPUT_PORTS_END
 static struct GfxLayout charlayout =
 {
 	8,8,	/* 8*8 characters */
-	512,	/* 512 characters */
+	512,	/* 512 characters (256 in Jungler) */
 	2,	/* 2 bits per pixel */
 	{ 4, 0 },
 	{ 8*8+0,8*8+1,8*8+2,8*8+3, 0, 1, 2, 3 },
@@ -398,7 +375,7 @@ static struct GfxLayout charlayout =
 static struct GfxLayout spritelayout =
 {
 	16,16,	/* 16*16 sprites */
-	128,	/* 128 sprites */
+	128,	/* 128 sprites (64 in Jungler) */
 	2,	/* 2 bits per pixel */
 	{ 4, 0 },
 	{ 8*8, 8*8+1, 8*8+2, 8*8+3, 0, 1, 2, 3,
@@ -408,159 +385,77 @@ static struct GfxLayout spritelayout =
 	64*8	/* every sprite takes 64 consecutive bytes */
 };
 
-static struct GfxLayout radardotlayout =
+static struct GfxLayout dotlayout =
 {
-	/* there is no gfx ROM for this one, it is generated by the hardware */
-	2,2,	/* 2*2 square */
-	1,	/* just one */
-	1,	/* 1 bit per pixel */
-	{ 0 },
-	{ 0x15f*8, 0x15f*8 },	/* I "know" that this bit of the */
-	{ 4, 4 },	/* graphics ROMs is 1 */
-	0	/* no use */
+	4,4,	/* 4*4 characters */
+	8,	/* 8 characters */
+	2,	/* 2 bits per pixel */
+	{ 6, 7 },
+	{ 3*8, 2*8, 1*8, 0*8 },
+	{ 3*32, 2*32, 1*32, 0*32 },
+	16*8	/* every char takes 16 consecutive bytes */
 };
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout,        0, 64 },
-	{ 1, 0x0000, &spritelayout,      0, 64 },
-	{ 1, 0x0000, &radardotlayout, 64*4, 4 },
+	{ REGION_GFX1, 0, &charlayout,      0, 64 },
+	{ REGION_GFX1, 0, &spritelayout,    0, 64 },
+	{ REGION_GFX2, 0, &dotlayout,    64*4,  1 },
 	{ -1 } /* end of array */
 };
 
 
 
-static unsigned char color_prom[] =
-{
-	/* 8b.cpu - palette */
-	0x00,0x07,0xA0,0x97,0x67,0x3F,0x7D,0x38,0xF0,0xA8,0xC0,0x18,0x5E,0xA8,0x1B,0xFF,
-	0x00,0xFF,0xB7,0x00,0x00,0xFF,0xB7,0x00,0x00,0xFF,0xB7,0x00,0x00,0xFF,0xB7,0x00,
-	/* 9d.cpu - lookup table */
-	0x00,0x09,0x05,0x0C,0x00,0x01,0x08,0x06,0x00,0x06,0x0F,0x01,0x00,0x01,0x02,0x03,
-	0x00,0x04,0x05,0x07,0x00,0x07,0x08,0x09,0x00,0x0A,0x0B,0x0C,0x00,0x08,0x05,0x0F,
-	0x00,0x08,0x0F,0x01,0x00,0x05,0x04,0x0E,0x00,0x01,0x07,0x08,0x00,0x0B,0x0C,0x0D,
-	0x00,0x01,0x01,0x01,0x00,0x02,0x02,0x02,0x00,0x03,0x03,0x03,0x00,0x04,0x04,0x04,
-	0x00,0x05,0x05,0x05,0x00,0x06,0x06,0x06,0x00,0x07,0x07,0x07,0x00,0x08,0x08,0x08,
-	0x00,0x09,0x09,0x09,0x00,0x0A,0x0A,0x0A,0x00,0x0B,0x0B,0x0B,0x00,0x0C,0x0C,0x0C,
-	0x00,0x0D,0x0D,0x0D,0x00,0x0E,0x0E,0x0E,0x00,0x0F,0x0F,0x0F,0x00,0x00,0x00,0x00,
-	0x00,0x02,0x05,0x0C,0x00,0x09,0x05,0x0C,0x00,0x0B,0x05,0x0C,0x00,0x0E,0x05,0x0C,
-	0x00,0x09,0x05,0x0C,0x00,0x01,0x08,0x06,0x00,0x06,0x0F,0x01,0x00,0x01,0x02,0x03,
-	0x00,0x04,0x05,0x07,0x00,0x07,0x08,0x09,0x00,0x0A,0x0B,0x0C,0x00,0x08,0x05,0x0F,
-	0x00,0x08,0x00,0x01,0x00,0x05,0x04,0x0E,0x00,0x01,0x07,0x08,0x00,0x0B,0x0C,0x0D,
-	0x00,0x01,0x01,0x01,0x00,0x02,0x02,0x02,0x00,0x03,0x03,0x03,0x00,0x04,0x04,0x04,
-	0x00,0x05,0x05,0x05,0x00,0x06,0x06,0x06,0x00,0x07,0x07,0x07,0x00,0x08,0x08,0x08,
-	0x00,0x09,0x09,0x09,0x00,0x0A,0x0A,0x0A,0x00,0x0B,0x0B,0x0B,0x00,0x0C,0x0C,0x0C,
-	0x00,0x0D,0x0D,0x0D,0x00,0x0E,0x0E,0x0E,0x00,0x0F,0x0F,0x0F,0x00,0x03,0x06,0x0D,
-	0x00,0x04,0x05,0x0C,0x00,0x03,0x05,0x0C,0x00,0x0B,0x08,0x09,0x00,0x09,0x04,0x0D,
+#define MACHINE_DRIVER(GAMENAME)   \
+																	\
+static struct MachineDriver machine_driver_##GAMENAME =             \
+{                                                                   \
+	/* basic machine hardware */                                    \
+	{                                                               \
+		{                                                           \
+			CPU_Z80,                                                \
+			18432000/6,	/* 3.072 MHz */                             \
+			readmem,GAMENAME##_writemem,0,0,                        \
+			nmi_interrupt,1                                         \
+		},                                                          \
+		{                                                           \
+			CPU_Z80 | CPU_AUDIO_CPU,                                \
+			14318180/8,	/* 1.789772727 MHz */						\
+			timeplt_sound_readmem,timeplt_sound_writemem,0,0,       \
+			ignore_interrupt,1	/* interrupts are triggered by the main CPU */ \
+		}                                                           \
+	},                                                              \
+	60, DEFAULT_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */ \
+	1,	/* 1 CPU slice per frame - interleaving is forced when a sound command is written */ \
+	0,                                                              \
+                                                                    \
+	/* video hardware */                                            \
+	36*8, 28*8, { 0*8, 36*8-1, 0*8, 28*8-1 },                       \
+	gfxdecodeinfo,                                                  \
+	32,64*4+4,                                                      \
+	locomotn_vh_convert_color_prom,                                 \
+                                                                    \
+	VIDEO_TYPE_RASTER,                                              \
+	0,                                                              \
+	rallyx_vh_start,                                                \
+	rallyx_vh_stop,                                                 \
+	GAMENAME##_vh_screenrefresh,                                    \
+                                                                    \
+	/* sound hardware */                                            \
+	0,0,0,0,                                                        \
+	{                                                               \
+		{                                                           \
+			SOUND_AY8910,                                           \
+			&timeplt_ay8910_interface                               \
+		}                                                           \
+	}                                                               \
 };
 
-
-
-static struct AY8910interface ay8910_interface =
-{
-	2,	/* 2 chips */
-	1789750,	/* 1.78975 MHz ? (same as other Konami games) */
-	{ 0x38ff, 0x38ff },
-	{ soundlatch_r },
-	{ locomotn_portB_r },
-	{ 0 },
-	{ 0 }
-};
-
-
-
-static struct MachineDriver machine_driver =
-{
-	/* basic machine hardware */
-	{
-		{
-			CPU_Z80,
-			3072000,	/* 3.072 Mhz ? */
-			0,
-			readmem,writemem,0,0,
-			nmi_interrupt,1
-		},
-		{
-			CPU_Z80 | CPU_AUDIO_CPU,
-			14318180/4,	/* ???? same as other Konami games */
-			2,	/* memory region #2 */
-			sound_readmem,sound_writemem,0,0,
-			ignore_interrupt,1	/* interrupts are triggered by the main CPU */
-		}
-	},
-	60, DEFAULT_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
-	1,	/* 1 CPU slice per frame - interleaving is forced when a sound command is written */
-	0,
-
-	/* video hardware */
-	36*8, 28*8, { 0*8, 36*8-1, 0*8, 28*8-1 },
-	gfxdecodeinfo,
-	32,64*4+4*2,
-	rallyx_vh_convert_color_prom,
-
-	VIDEO_TYPE_RASTER,
-	0,
-	rallyx_vh_start,
-	rallyx_vh_stop,
-	locomotn_vh_screenrefresh,
-
-	/* sound hardware */
-	0,0,0,0,
-	{
-		{
-			SOUND_AY8910,
-			&ay8910_interface
-		}
-	}
-};
-
-/* same as the above, but we use a different vh_screenrefresh() */
-/* to properly place sprites and bullets */
-static struct MachineDriver jungler_machine_driver =
-{
-	/* basic machine hardware */
-	{
-		{
-			CPU_Z80,
-			3072000,	/* 3.072 Mhz ? */
-			0,
-			readmem,writemem,0,0,
-			nmi_interrupt,1
-		},
-		{
-			CPU_Z80 | CPU_AUDIO_CPU,
-			14318180/4,	/* ???? same as other Konami games */
-			2,	/* memory region #2 */
-			sound_readmem,sound_writemem,0,0,
-			ignore_interrupt,1	/* interrupts are triggered by the main CPU */
-		}
-	},
-	60, DEFAULT_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
-	1,	/* 1 CPU slice per frame - interleaving is forced when a sound command is written */
-	0,
-
-	/* video hardware */
-	36*8, 28*8, { 0*8, 36*8-1, 0*8, 28*8-1 },
-	gfxdecodeinfo,
-	32,64*4+4*2,
-	rallyx_vh_convert_color_prom,
-
-	VIDEO_TYPE_RASTER,
-	0,
-	rallyx_vh_start,
-	rallyx_vh_stop,
-	jungler_vh_screenrefresh,
-
-	/* sound hardware */
-	0,0,0,0,
-	{
-		{
-			SOUND_AY8910,
-			&ay8910_interface
-		}
-	}
-};
-
+#define locomotn_writemem writemem
+#define commsega_writemem writemem
+MACHINE_DRIVER(locomotn)
+MACHINE_DRIVER(jungler)
+MACHINE_DRIVER(commsega)
 
 
 /***************************************************************************
@@ -569,156 +464,161 @@ static struct MachineDriver jungler_machine_driver =
 
 ***************************************************************************/
 
-ROM_START( locomotn_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "1a.cpu", 0x0000, 0x1000, 0x35669192 )
-	ROM_LOAD( "2a.cpu", 0x1000, 0x1000, 0x868e21f8 )
-	ROM_LOAD( "3.cpu",  0x2000, 0x1000, 0xff78e538 )
-	ROM_LOAD( "4.cpu",  0x3000, 0x1000, 0x549b7a73 )
-	ROM_LOAD( "5.cpu",  0x4000, 0x1000, 0x75b145dd )
+ROM_START( locomotn )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "1a.cpu",       0x0000, 0x1000, 0xb43e689a )
+	ROM_LOAD( "2a.cpu",       0x1000, 0x1000, 0x529c823d )
+	ROM_LOAD( "3.cpu",        0x2000, 0x1000, 0xc9dbfbd1 )
+	ROM_LOAD( "4.cpu",        0x3000, 0x1000, 0xcaf6431c )
+	ROM_LOAD( "5.cpu",        0x4000, 0x1000, 0x64cf8dd6 )
 
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "c1.cpu", 0x0000, 0x1000, 0x3a668900 )
-	ROM_LOAD( "c2.cpu", 0x1000, 0x1000, 0xfd68fc8c )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "1b_s1.bin",    0x0000, 0x1000, 0xa1105714 )
 
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "s1.snd", 0x0000, 0x1000, 0xf8aff0dd )
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "5l_c1.bin",    0x0000, 0x1000, 0x5732eda9 )
+	ROM_LOAD( "c2.cpu",       0x1000, 0x1000, 0xc3035300 )
+
+	ROM_REGION( 0x0100, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "10g.bpr",      0x0000, 0x0100, 0x2ef89356 ) /* dots */
+
+	ROM_REGION( 0x0160, REGION_PROMS )
+	ROM_LOAD( "8b.bpr",       0x0000, 0x0020, 0x75b05da0 ) /* palette */
+	ROM_LOAD( "9d.bpr",       0x0020, 0x0100, 0xaa6cf063 ) /* loookup table */
+	ROM_LOAD( "7a.bpr",       0x0120, 0x0020, 0x48c8f094 ) /* video layout (not used) */
+	ROM_LOAD( "10a.bpr",      0x0140, 0x0020, 0xb8861096 ) /* video timing (not used) */
 ROM_END
 
-ROM_START( jungler_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "jungr1", 0x0000, 0x1000, 0x3812cf30 )
-	ROM_LOAD( "jungr2", 0x1000, 0x1000, 0x08085594 )
-	ROM_LOAD( "jungr3", 0x2000, 0x1000, 0x1c2e03d0 )
-	ROM_LOAD( "jungr4", 0x3000, 0x1000, 0x20f051b8 )
+ROM_START( gutangtn )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "3d_1.bin",     0x0000, 0x1000, 0xe9757395 )
+	ROM_LOAD( "3e_2.bin",     0x1000, 0x1000, 0x11d21d2e )
+	ROM_LOAD( "3f_3.bin",     0x2000, 0x1000, 0x4d80f895 )
+	ROM_LOAD( "3h_4.bin",     0x3000, 0x1000, 0xaa258ddf )
+	ROM_LOAD( "3j_5.bin",     0x4000, 0x1000, 0x52aec87e )
 
-	ROM_REGION(0x2000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "jungr9",  0x0000, 0x1000, 0x7c800000 )
-	ROM_LOAD( "jungr10", 0x1000, 0x1000, 0xb07a0000 )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "1b_s1.bin",    0x0000, 0x1000, 0xa1105714 )
 
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "jungb1t", 0x0000, 0x1000, 0x42b75fa9 )
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "5l_c1.bin",    0x0000, 0x1000, 0x5732eda9 )
+	ROM_LOAD( "5m_c2.bin",    0x1000, 0x1000, 0x51c542fd )
+
+	ROM_REGION( 0x0100, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "10g.bpr",      0x0000, 0x0100, 0x2ef89356 ) /* dots */
+
+	ROM_REGION( 0x0160, REGION_PROMS )
+	ROM_LOAD( "8b.bpr",       0x0000, 0x0020, 0x75b05da0 ) /* palette */
+	ROM_LOAD( "9d.bpr",       0x0020, 0x0100, 0xaa6cf063 ) /* loookup table */
+	ROM_LOAD( "7a.bpr",       0x0120, 0x0020, 0x48c8f094 ) /* video layout (not used) */
+	ROM_LOAD( "10a.bpr",      0x0140, 0x0020, 0xb8861096 ) /* video timing (not used) */
 ROM_END
 
-ROM_START( commsega_rom )
-	ROM_REGION(0x10000) /* 64k for code */
-	ROM_LOAD( "csega1", 0x0000, 0x1000, 0xe97e5790 )
-	ROM_LOAD( "csega2", 0x1000, 0x1000, 0xb3a8652a )
-	ROM_LOAD( "csega3", 0x2000, 0x1000, 0x57a057dc )
-	ROM_LOAD( "csega4", 0x3000, 0x1000, 0xc0955a85 )
-	ROM_LOAD( "csega5", 0x4000, 0x1000, 0x8131612b )
+ROM_START( cottong )
+	ROM_REGION( 0x10000, REGION_CPU1 ) /* 64k for code */
+	ROM_LOAD( "c1",           0x0000, 0x1000, 0x2c256fe6 )
+	ROM_LOAD( "c2",           0x1000, 0x1000, 0x1de5e6a0 )
+	ROM_LOAD( "c3",           0x2000, 0x1000, 0x01f909fe )
+	ROM_LOAD( "c4",           0x3000, 0x1000, 0xa89eb3e3 )
 
-	ROM_REGION(0x2000) /* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "csega7", 0x0000, 0x1000, 0xdae5dd0b )
-	ROM_LOAD( "csega6", 0x1000, 0x1000, 0xfda0a576 )
+	ROM_REGION( 0x10000, REGION_CPU2 ) /* 64k for the audio CPU */
+	ROM_LOAD( "c7",           0x0000, 0x1000, 0x3d83f6d3 )
+	ROM_LOAD( "c8",           0x1000, 0x1000, 0x323e1937 )
 
-	ROM_REGION(0x10000) /* 64k for the audio CPU */
-	ROM_LOAD( "csega8", 0x0000, 0x1000, 0x5ec17f47 )
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "c5",           0x0000, 0x1000, 0x992d079c )
+	ROM_LOAD( "c6",           0x1000, 0x1000, 0x0149ef46 )
+
+	ROM_REGION( 0x0100, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "5.bpr",        0x0000, 0x0100, 0x21fb583f ) /* dots */
+
+	ROM_REGION( 0x0160, REGION_PROMS )
+	ROM_LOAD( "2.bpr",        0x0000, 0x0020, 0x26f42e6f ) /* palette */
+	ROM_LOAD( "3.bpr",        0x0020, 0x0100, 0x4aecc0c8 ) /* loookup table */
+	ROM_LOAD( "7a.bpr",       0x0120, 0x0020, 0x48c8f094 ) /* video layout (not used) */
+	ROM_LOAD( "10a.bpr",      0x0140, 0x0020, 0xb8861096 ) /* video timing (not used) */
+ROM_END
+
+ROM_START( jungler )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "jungr1",       0x0000, 0x1000, 0x5bd6ad15 )
+	ROM_LOAD( "jungr2",       0x1000, 0x1000, 0xdc99f1e3 )
+	ROM_LOAD( "jungr3",       0x2000, 0x1000, 0x3dcc03da )
+	ROM_LOAD( "jungr4",       0x3000, 0x1000, 0xf92e9940 )
+
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "1b",           0x0000, 0x1000, 0xf86999c3 )
+
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "5k",           0x0000, 0x0800, 0x924262bf )
+	ROM_LOAD( "5m",           0x0800, 0x0800, 0x131a08ac )
+	/* 1000-1fff empty for my convenience */
+
+	ROM_REGION( 0x0100, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "82s129.10g",   0x0000, 0x0100, 0xc59c51b7 ) /* dots */
+
+	ROM_REGION( 0x0160, REGION_PROMS )
+	ROM_LOAD( "18s030.8b",    0x0000, 0x0020, 0x55a7e6d1 ) /* palette */
+	ROM_LOAD( "tbp24s10.9d",  0x0020, 0x0100, 0xd223f7b8 ) /* loookup table */
+	ROM_LOAD( "18s030.7a",    0x0120, 0x0020, 0x8f574815 ) /* video layout (not used) */
+	ROM_LOAD( "6331-1.10a",   0x0140, 0x0020, 0xb8861096 ) /* video timing (not used) */
+ROM_END
+
+ROM_START( junglers )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "5c",           0x0000, 0x1000, 0xedd71b28 )
+	ROM_LOAD( "5a",           0x1000, 0x1000, 0x61ea4d46 )
+	ROM_LOAD( "4d",           0x2000, 0x1000, 0x557c7925 )
+	ROM_LOAD( "4c",           0x3000, 0x1000, 0x51aac9a5 )
+
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "1b",           0x0000, 0x1000, 0xf86999c3 )
+
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "5k",           0x0000, 0x0800, 0x924262bf )
+	ROM_LOAD( "5m",           0x0800, 0x0800, 0x131a08ac )
+	/* 1000-1fff empty for my convenience */
+
+	ROM_REGION( 0x0100, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "82s129.10g",   0x0000, 0x0100, 0xc59c51b7 ) /* dots */
+
+	ROM_REGION( 0x0160, REGION_PROMS )
+	ROM_LOAD( "18s030.8b",    0x0000, 0x0020, 0x55a7e6d1 ) /* palette */
+	ROM_LOAD( "tbp24s10.9d",  0x0020, 0x0100, 0xd223f7b8 ) /* loookup table */
+	ROM_LOAD( "18s030.7a",    0x0120, 0x0020, 0x8f574815 ) /* video layout (not used) */
+	ROM_LOAD( "6331-1.10a",   0x0140, 0x0020, 0xb8861096 ) /* video timing (not used) */
+ROM_END
+
+ROM_START( commsega )
+	ROM_REGION( 0x10000, REGION_CPU1 ) /* 64k for code */
+	ROM_LOAD( "csega1",       0x0000, 0x1000, 0x92de3405 )
+	ROM_LOAD( "csega2",       0x1000, 0x1000, 0xf14e2f9a )
+	ROM_LOAD( "csega3",       0x2000, 0x1000, 0x941dbf48 )
+	ROM_LOAD( "csega4",       0x3000, 0x1000, 0xe0ac69b4 )
+	ROM_LOAD( "csega5",       0x4000, 0x1000, 0xbc56ebd0 )
+
+	ROM_REGION( 0x10000, REGION_CPU2 ) /* 64k for the audio CPU */
+	ROM_LOAD( "csega8",       0x0000, 0x1000, 0x588b4210 )
+
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "csega7",       0x0000, 0x1000, 0xe8e374f9 )
+	ROM_LOAD( "csega6",       0x1000, 0x1000, 0xcf07fd5e )
+
+	ROM_REGION( 0x0100, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gg3.bpr",      0x0000, 0x0100, 0xae7fd962 ) /* dots */
+
+	ROM_REGION( 0x0160, REGION_PROMS )
+	ROM_LOAD( "gg1.bpr",      0x0000, 0x0020, 0xf69e585a ) /* palette */
+	ROM_LOAD( "gg2.bpr",      0x0020, 0x0100, 0x0b756e30 ) /* loookup table */
+	ROM_LOAD( "gg0.bpr",      0x0120, 0x0020, 0x48c8f094 ) /* video layout (not used) */
+	ROM_LOAD( "tt3.bpr",      0x0140, 0x0020, 0xb8861096 ) /* video timing (not used) */
 ROM_END
 
 
 
-#if 0
-static int hiload(void)
-{
-	/* get RAM pointer (this game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
-
-
-	/* check if the hi score table has already been initialized */
-	if (memcmp(&RAM[0x9f00],"\x00\x00\x01",3) == 0 &&
-			memcmp(&RAM[0x9f6c],"\x10\x24\x00",3) == 0)
-	{
-		void *f;
-
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0x9f00],12*10);
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;	/* we can't load the hi scores yet */
-}
-
-
-
-static void hisave(void)
-{
-	void *f;
-	/* get RAM pointer (this game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
-
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0x9f00],12*10);
-		osd_fclose(f);
-	}
-
-}
-#endif
-
-
-struct GameDriver locomotn_driver =
-{
-	"Loco-Motion",
-	"locomotn",
-	"Nicola Salmoria\nMike Balfour (high score save)\nKevin Klopp (color info)",
-	&machine_driver,
-
-	locomotn_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	locomotn_input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_ROTATE_90,
-
-	0,0,//hiload, hisave
-};
-
-struct GameDriver jungler_driver =
-{
-	"Jungler",
-	"jungler",
-	"Nicola Salmoria",
-	&jungler_machine_driver,
-
-	jungler_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	jungler_input_ports,
-
-	color_prom, 0, 0,	/* wrong */
-	ORIENTATION_ROTATE_90,
-
-	0, 0,
-};
-
-struct GameDriver commsega_driver =
-{
-	"Commando (Sega)",
-	"commsega",
-	"Nicola Salmoria\nBrad Oliver",
-	&machine_driver,
-
-	commsega_rom,
-	0, 0,
-	0,
-	0, /* sound_prom */
-
-	commsega_input_ports,
-	color_prom, 0, 0,	/* wrong */
-	ORIENTATION_ROTATE_90,
-
-	0, 0
-};
+GAME( 1982, locomotn, 0,        locomotn, locomotn, 0, ROT90, "Konami (Centuri license)", "Loco-Motion" )
+GAME( 1982, gutangtn, locomotn, locomotn, locomotn, 0, ROT90, "Konami (Sega license)", "Guttang Gottong" )
+GAME( 1982, cottong,  locomotn, locomotn, locomotn, 0, ROT90, "bootleg", "Cotocoto Cottong" )
+GAME( 1981, jungler,  0,        jungler,  jungler,  0, ROT90, "Konami", "Jungler" )
+GAME( 1981, junglers, jungler,  jungler,  jungler,  0, ROT90, "[Konami] (Stern license)", "Jungler (Stern)" )
+GAME( 1983, commsega, 0,        commsega, commsega, 0, ROT90, "Sega", "Commando (Sega)" )

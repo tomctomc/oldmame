@@ -11,8 +11,12 @@
 
 
 
+unsigned char *c1942_foreground_videoram;
+unsigned char *c1942_foreground_colorram;
+size_t c1942_foreground_videoram_size;
 unsigned char *c1942_scroll;
-unsigned char *c1942_palette_bank;
+static data_t c1942_palette_bank;
+static struct osd_bitmap *tmpbitmap2;
 
 
 
@@ -30,7 +34,7 @@ unsigned char *c1942_palette_bank;
   bit 0 -- 2.2kohm resistor  -- RED/GREEN/BLUE
 
 ***************************************************************************/
-void c1942_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void c1942_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -42,16 +46,19 @@ void c1942_vh_convert_color_prom(unsigned char *palette, unsigned char *colortab
 		int bit0,bit1,bit2,bit3;
 
 
+		/* red component */
 		bit0 = (color_prom[0] >> 0) & 0x01;
 		bit1 = (color_prom[0] >> 1) & 0x01;
 		bit2 = (color_prom[0] >> 2) & 0x01;
 		bit3 = (color_prom[0] >> 3) & 0x01;
 		*(palette++) = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+		/* green component */
 		bit0 = (color_prom[Machine->drv->total_colors] >> 0) & 0x01;
 		bit1 = (color_prom[Machine->drv->total_colors] >> 1) & 0x01;
 		bit2 = (color_prom[Machine->drv->total_colors] >> 2) & 0x01;
 		bit3 = (color_prom[Machine->drv->total_colors] >> 3) & 0x01;
 		*(palette++) = 0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3;
+		/* blue component */
 		bit0 = (color_prom[2*Machine->drv->total_colors] >> 0) & 0x01;
 		bit1 = (color_prom[2*Machine->drv->total_colors] >> 1) & 0x01;
 		bit2 = (color_prom[2*Machine->drv->total_colors] >> 2) & 0x01;
@@ -86,29 +93,60 @@ void c1942_vh_convert_color_prom(unsigned char *palette, unsigned char *colortab
 
 
 
-void c1942_updatehook0(int offset)
+/***************************************************************************
+
+  Start the video hardware emulation.
+
+***************************************************************************/
+int c1942_vh_start(void)
 {
-	set_tile_attributes(0,											/* layer number */
-		offset,														/* x/y position */
-		0,videoram00[offset] + ((videoram01[offset] & 0x80) << 1),	/* tile bank, code */
-		videoram01[offset] & 0x3f,									/* color */
-		0,0,														/* flip x/y */
-		TILE_TRANSPARENCY_PEN);										/* transparency */
+	if (generic_vh_start() != 0)
+		return 1;
+
+	/* the background area is twice as wide as the screen (actually twice as tall, */
+	/* because this is a vertical game) */
+	if ((tmpbitmap2 = bitmap_alloc(2*Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
+	{
+		generic_vh_stop();
+		return 1;
+	}
+
+	return 0;
 }
 
-void c1942_updatehook1(int offset)
-{
-	offset &= ~0x10;
 
-	set_tile_attributes(1,													/* layer number */
-		offset / 32 + (offset % 16) * 32,									/* x/y position */
-		0,(videoram10[offset] + ((videoram10[offset + 0x10] & 0x80) << 1)),	/* tile bank, code */
-		videoram10[offset + 0x10] & 0x1f,	/* color (there's also a palette bank, handled later) */
-		videoram10[offset + 0x10] & 0x20,videoram10[offset + 0x10] & 0x40,	/* flip x/y */
-		TILE_TRANSPARENCY_OPAQUE);											/* transparency */
+
+/***************************************************************************
+
+  Stop the video hardware emulation.
+
+***************************************************************************/
+void c1942_vh_stop(void)
+{
+	bitmap_free(tmpbitmap2);
+	generic_vh_stop();
 }
 
 
+
+WRITE_HANDLER( c1942_palette_bank_w )
+{
+	set_vh_global_attribute( &c1942_palette_bank, data );
+}
+
+
+WRITE_HANDLER( c1942_c804_w )
+{
+	/* bit 7: flip screen
+       bit 4: cpu B reset
+	   bit 0: coin counter */
+
+	coin_counter_w(offset, data & 0x01);
+
+	cpu_set_reset_line(1,(data & 0x10) ? ASSERT_LINE : CLEAR_LINE);
+
+	flip_screen_w(offset, data & 0x80);
+}
 
 /***************************************************************************
 
@@ -117,22 +155,57 @@ void c1942_updatehook1(int offset)
   the main emulation engine.
 
 ***************************************************************************/
-void c1942_vh_screenrefresh(struct osd_bitmap *bitmap)
+void c1942_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
 
-//osd_clearbitmap(bitmap);
-	set_tile_layer_attributes(1,bitmap,					/* layer number, bitmap */
-			-(c1942_scroll[0] + 256 * c1942_scroll[1]),0,	/* scroll x/y */
-			*flip_screen & 0x80,*flip_screen & 0x80,	/* flip x/y */
-			MAKE_TILE_COLOR(0x60),MAKE_TILE_COLOR((*c1942_palette_bank & 0x03) << 5));	/* global attributes */
-	set_tile_layer_attributes(0,bitmap,					/* layer number, bitmap */
-			0,0,										/* scroll x/y */
-			*flip_screen & 0x80,*flip_screen & 0x80,	/* flip x/y */
-			0,0);										/* global attributes */
+	if (full_refresh)
+	{
+		memset(dirtybuffer, 1, videoram_size);
+	}
 
-	update_tile_layer(1,bitmap);
+	for (offs = videoram_size - 1;offs >= 0;offs--)
+	{
+		if ((offs & 0x10) == 0 && (dirtybuffer[offs] != 0 || dirtybuffer[offs + 16] != 0))
+		{
+			int sx,sy,flipx,flipy;
+
+
+			dirtybuffer[offs] = dirtybuffer[offs + 16] = 0;
+
+			sx = offs / 32;
+			sy = offs % 32;
+			flipx = videoram[offs + 16] & 0x20;
+			flipy = videoram[offs + 16] & 0x40;
+			if (flip_screen)
+			{
+				sx = 31 - sx;
+				sy = 15 - sy;
+				flipx = !flipx;
+				flipy = !flipy;
+			}
+
+			drawgfx(tmpbitmap2,Machine->gfx[1],
+					videoram[offs] + 2*(videoram[offs + 16] & 0x80),
+					(videoram[offs + 16] & 0x1f) + 32 * c1942_palette_bank,
+					flipx,flipy,
+					16 * sx,16 * sy,
+					0,TRANSPARENCY_NONE,0);
+		}
+	}
+
+
+	/* copy the background graphics */
+	{
+		int scroll;
+
+
+		scroll = -(c1942_scroll[0] + 256 * c1942_scroll[1]);
+		if (flip_screen) scroll = 256-scroll;
+
+		copyscrollbitmap(bitmap,tmpbitmap2,1,&scroll,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
+	}
 
 
 	/* Draw the sprites. */
@@ -147,7 +220,7 @@ void c1942_vh_screenrefresh(struct osd_bitmap *bitmap)
 		sx = spriteram[offs + 3] - 0x10 * (spriteram[offs + 1] & 0x10);
 		sy = spriteram[offs + 2];
 		dir = 1;
-		if (*flip_screen & 0x80)
+		if (flip_screen)
 		{
 			sx = 240 - sx;
 			sy = 240 - sy;
@@ -158,62 +231,38 @@ void c1942_vh_screenrefresh(struct osd_bitmap *bitmap)
 		i = (spriteram[offs + 1] & 0xc0) >> 6;
 		if (i == 2) i = 3;
 
-if (dir == 1)
-{
-	layer_mark_rectangle_dirty(Machine->layer[0],sx,sx+15,sy,sy+16*i+15);
-}
-else
-{
-	layer_mark_rectangle_dirty(Machine->layer[0],sx,sx+15,sy-16*i,sy+15);
-}
 		do
 		{
 			drawgfx(bitmap,Machine->gfx[2],
 					code + i,col,
-					*flip_screen & 0x80,*flip_screen & 0x80,
+					flip_screen,flip_screen,
 					sx,sy + 16 * i * dir,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,15);
+					&Machine->visible_area,TRANSPARENCY_PEN,15);
 
 			i--;
 		} while (i >= 0);
 	}
 
-	update_tile_layer(0,bitmap);
 
-
-	for (offs = spriteram_size - 4;offs >= 0;offs -= 4)
+	/* draw the frontmost playfield. They are characters, but draw them as sprites */
+	for (offs = c1942_foreground_videoram_size - 1;offs >= 0;offs--)
 	{
-		int i,sx,sy,dir;
+		int sx,sy;
 
 
-		dir = 1;
-		sx = spriteram[offs + 3] - 0x10 * (spriteram[offs + 1] & 0x10);
-		sy = spriteram[offs + 2];
-		dir = 1;
-		if (*flip_screen & 0x80)
+		sx = offs % 32;
+		sy = offs / 32;
+		if (flip_screen)
 		{
-			sx = 240 - sx;
-			sy = 240 - sy;
-			dir = -1;
+			sx = 31 - sx;
+			sy = 31 - sy;
 		}
 
-		/* handle double / quadruple height (actually width because this is a rotated game) */
-		i = (spriteram[offs + 1] & 0xc0) >> 6;
-		if (i == 2) i = 3;
-
-if (dir == 1)
-{
-	layer_mark_rectangle_dirty(Machine->layer[1],sx,sx+15,sy,sy+16*i+15);
-}
-else
-{
-	layer_mark_rectangle_dirty(Machine->layer[1],sx,sx+15,sy-16*i,sy+15);
-}
+		drawgfx(bitmap,Machine->gfx[0],
+				c1942_foreground_videoram[offs] + 2 * (c1942_foreground_colorram[offs] & 0x80),
+				c1942_foreground_colorram[offs] & 0x3f,
+				flip_screen,flip_screen,
+				8*sx,8*sy,
+				&Machine->visible_area,TRANSPARENCY_PEN,0);
 	}
-
-//if (!osd_key_pressed(OSD_KEY_N))
-//{
-//while (!osd_key_pressed(OSD_KEY_SPACE));
-//while (osd_key_pressed(OSD_KEY_SPACE));
-//}
 }

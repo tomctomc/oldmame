@@ -43,7 +43,7 @@ static int priority;
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void bankp_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void bankp_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -108,7 +108,7 @@ int bankp_vh_start(void)
 	}
 	memset(dirtybuffer2,1,videoram_size);
 
-	if ((tmpbitmap2 = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
+	if ((tmpbitmap2 = bitmap_alloc(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 	{
 		free(dirtybuffer2);
 		generic_vh_stop();
@@ -120,7 +120,7 @@ int bankp_vh_start(void)
 
 
 
-void bankp_scroll_w(int offset,int data)
+WRITE_HANDLER( bankp_scroll_w )
 {
 	scroll_x = data;
 }
@@ -135,13 +135,13 @@ void bankp_scroll_w(int offset,int data)
 void bankp_vh_stop(void)
 {
 	free(dirtybuffer2);
-	osd_free_bitmap(tmpbitmap2);
+	bitmap_free(tmpbitmap2);
 	generic_vh_stop();
 }
 
 
 
-void bankp_videoram2_w(int offset,int data)
+WRITE_HANDLER( bankp_videoram2_w )
 {
 	if (bankp_videoram2[offset] != data)
 	{
@@ -153,7 +153,7 @@ void bankp_videoram2_w(int offset,int data)
 
 
 
-void bankp_colorram2_w(int offset,int data)
+WRITE_HANDLER( bankp_colorram2_w )
 {
 	if (bankp_colorram2[offset] != data)
 	{
@@ -165,10 +165,14 @@ void bankp_colorram2_w(int offset,int data)
 
 
 
-void bankp_out_w(int offset,int data)
+WRITE_HANDLER( bankp_out_w )
 {
-	/* I'm not sure how, but bits 0/1 control playfield priority */
+	/* bits 0-1 are playfield priority */
+	/* TODO: understand how this works, currently the only thing I do is */
+	/* invert the layer order when priority == 2 */
 	priority = data & 0x03;
+
+	/* bits 2-3 unknown (2 is used) */
 
 	/* bit 4 controls NMI */
 	if (data & 0x10) interrupt_enable_w(0,1);
@@ -181,6 +185,8 @@ void bankp_out_w(int offset,int data)
 		memset(dirtybuffer,1,videoram_size);
 		memset(dirtybuffer2,1,videoram_size);
 	}
+
+	/* bits 6-7 unknown */
 }
 
 
@@ -192,7 +198,7 @@ void bankp_out_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void bankp_vh_screenrefresh(struct osd_bitmap *bitmap)
+void bankp_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -248,7 +254,7 @@ void bankp_vh_screenrefresh(struct osd_bitmap *bitmap)
 					bankp_colorram2[offs] >> 4,
 					flipx,flipscreen,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
@@ -264,13 +270,13 @@ void bankp_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 		if (priority == 2)
 		{
-			copyscrollbitmap(bitmap,tmpbitmap,1,&scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
-			copybitmap(bitmap,tmpbitmap2,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+			copyscrollbitmap(bitmap,tmpbitmap,1,&scroll,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
+			copybitmap(bitmap,tmpbitmap2,0,0,0,0,&Machine->visible_area,TRANSPARENCY_COLOR,0);
 		}
 		else
 		{
-			copybitmap(bitmap,tmpbitmap2,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
-			copyscrollbitmap(bitmap,tmpbitmap,1,&scroll,0,0,&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
+			copybitmap(bitmap,tmpbitmap2,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
+			copyscrollbitmap(bitmap,tmpbitmap,1,&scroll,0,0,&Machine->visible_area,TRANSPARENCY_COLOR,0);
 		}
 	}
 }

@@ -14,26 +14,33 @@
 #define USE_AVG_QUANTUM     8
 #define AVGDVG_MAX          8
 
-/* vector palette types (non-sega) */
-#define VEC_PAL_BW          0
-#define VEC_PAL_MONO_AQUA   1
-#define VEC_PAL_BZONE       2
-#define VEC_PAL_COLOR       3
-#define VEC_PAL_SWARS       4
-
 int avgdvg_done (void);
-void avgdvg_go (int offset, int data);
-void avgdvg_reset (int offset, int data);
+WRITE_HANDLER( avgdvg_go_w );
+WRITE_HANDLER( avgdvg_reset_w );
 int avgdvg_init(int vgType);
 
-void avg_init_colors (unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
+/* Apart from the color mentioned below, the vector games will make additional
+ * entries for translucency/antialiasing and for backdrop/overlay artwork */
 
-void tempest_colorram_w (int offset, int data);
-void mhavoc_colorram_w (int offset, int data);
-void quantum_colorram_w (int offset, int data);
+/* Black and White vector colors for Asteroids, Lunar Lander, Omega Race */
+void avg_init_palette_white (unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
+/* Monochrome Aqua vector colors for Red Baron */
+void avg_init_palette_aqua  (unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
+/* Red and Green vector colors for Battlezone */
+void avg_init_palette_bzone (unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
+/* Basic 8 rgb vector colors for Tempest, Gravitar, Major Havoc etc. */
+void avg_init_palette_multi (unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
+/* Special case for Star Wars and Empire strikes back */
+void avg_init_palette_swars (unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
+/* Monochrome Aqua vector colors for Asteroids Deluxe */
+void avg_init_palette_astdelux  (unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
 
-void dvg_screenrefresh (struct osd_bitmap *bitmap);
-void avg_screenrefresh (struct osd_bitmap *bitmap);
+/* Some games use a colorram. This is not handled via the Mame core functions
+ * right now, but in src/vidhrdw/avgdvg.c itself. */
+WRITE_HANDLER( tempest_colorram_w );
+WRITE_HANDLER( mhavoc_colorram_w );
+WRITE_HANDLER( quantum_colorram_w );
+
 int dvg_start(void);
 int avg_start(void);
 int avg_start_tempest(void);
@@ -44,7 +51,5 @@ int avg_start_bzone(void);
 int avg_start_redbaron(void);
 void dvg_stop(void);
 void avg_stop(void);
-
-/* the next one can be r obsolete */
 
 #endif

@@ -57,25 +57,40 @@ and 1 SFX channel controlled by an 8039:
 
 #include "driver.h"
 #include "vidhrdw/generic.h"
-#include "I8039/I8039.h"
+#include "cpu/i8039/i8039.h"
 
 
-/*#define USE_SAMPLES*/
+/*#define EMULATE_6809*/
 
+void konami1_decode_cpu4(void);
 
 extern unsigned char *gyruss_spritebank,*gyruss_6809_drawplanet,*gyruss_6809_drawship;
-void gyruss_queuereg_w(int offset, int data);
-void gyruss_flipscreen_w(int offset, int data);
-void gyruss_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
-void gyruss_vh_screenrefresh(struct osd_bitmap *bitmap);
+WRITE_HANDLER( gyruss_queuereg_w );
+WRITE_HANDLER( gyruss_flipscreen_w );
+READ_HANDLER( gyruss_scanline_r );
+void gyruss_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
+void gyruss_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
+void gyruss_6809_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
-int gyruss_portA_r(int offset);
-void gyruss_sh_irqtrigger_w(int offset,int data);
-void gyruss_init_machine(void);
-void gyruss_i8039_irq_w(int offset,int data);
-void gyruss_i8039_command_w(int offset,int data);
-int gyruss_i8039_command_r(int offset);
-void gyruss_digital_out(int offset, int data);
+
+READ_HANDLER( gyruss_portA_r );
+WRITE_HANDLER( gyruss_filter0_w );
+WRITE_HANDLER( gyruss_filter1_w );
+WRITE_HANDLER( gyruss_sh_irqtrigger_w );
+WRITE_HANDLER( gyruss_i8039_irq_w );
+
+
+unsigned char *gyruss_sharedram;
+
+READ_HANDLER( gyruss_sharedram_r )
+{
+	return gyruss_sharedram[offset];
+}
+
+WRITE_HANDLER( gyruss_sharedram_w )
+{
+	gyruss_sharedram[offset] = data;
+}
 
 
 
@@ -84,8 +99,11 @@ static struct MemoryReadAddress readmem[] =
 	{ 0x0000, 0x7fff, MRA_ROM },
 	{ 0x8000, 0x87ff, MRA_RAM },
 	{ 0x9000, 0x9fff, MRA_RAM },
-	{ 0xa700, 0xa700, MRA_RAM },
-	{ 0xa7fc, 0xa7fd, MRA_RAM },
+#ifdef EMULATE_6809
+	{ 0xa000, 0xa7ff, gyruss_sharedram_r },
+#else
+	{ 0xa000, 0xa7ff, MRA_RAM },
+#endif
 	{ 0xc000, 0xc000, input_port_4_r },	/* DSW1 */
 	{ 0xc080, 0xc080, input_port_0_r },	/* IN0 */
 	{ 0xc0a0, 0xc0a0, input_port_1_r },	/* IN1 */
@@ -101,6 +119,9 @@ static struct MemoryWriteAddress writemem[] =
 	{ 0x8000, 0x83ff, colorram_w, &colorram },
 	{ 0x8400, 0x87ff, videoram_w, &videoram, &videoram_size },
 	{ 0x9000, 0x9fff, MWA_RAM },
+#ifdef EMULATE_6809
+	{ 0xa000, 0xa7ff, gyruss_sharedram_w, &gyruss_sharedram },
+#else
 	{ 0xa000, 0xa17f, MWA_RAM, &spriteram, &spriteram_size },     /* odd frame spriteram */
 	{ 0xa200, 0xa37f, MWA_RAM, &spriteram_2 },   /* even frame spriteram */
 	{ 0xa700, 0xa700, MWA_RAM, &gyruss_spritebank },
@@ -108,6 +129,7 @@ static struct MemoryWriteAddress writemem[] =
 	{ 0xa702, 0xa702, gyruss_queuereg_w },       /* semaphore system   */
 	{ 0xa7fc, 0xa7fc, MWA_RAM, &gyruss_6809_drawplanet },
 	{ 0xa7fd, 0xa7fd, MWA_RAM, &gyruss_6809_drawship },
+#endif
 	{ 0xc000, 0xc000, MWA_NOP },	/* watchdog reset */
 	{ 0xc080, 0xc080, gyruss_sh_irqtrigger_w },
 	{ 0xc100, 0xc100, soundlatch_w },         /* command to soundb  */
@@ -156,52 +178,60 @@ static struct IOWritePort sound_writeport[] =
 	{ 0x10, 0x10, AY8910_control_port_4_w },
 	{ 0x12, 0x12, AY8910_write_port_4_w },
 	{ 0x14, 0x14, gyruss_i8039_irq_w },
-	{ 0x18, 0x18, gyruss_i8039_command_w },
+	{ 0x18, 0x18, soundlatch2_w },
 	{ -1 }	/* end of table */
 };
 
 
+#ifdef EMULATE_6809
+static struct MemoryReadAddress m6809_readmem[] =
+{
+	{ 0x0000, 0x0000, gyruss_scanline_r },
+	{ 0x4000, 0x47ff, MRA_RAM },
+	{ 0x6000, 0x67ff, gyruss_sharedram_r },
+	{ 0xe000, 0xffff, MRA_ROM },
+	{ -1 }	/* end of table */
+};
 
-#ifndef USE_SAMPLES
+static struct MemoryWriteAddress m6809_writemem[] =
+{
+	{ 0x2000, 0x2000, interrupt_enable_w },
+	{ 0x4000, 0x47ff, MWA_RAM },
+	{ 0x4040, 0x40ff, MWA_RAM, &spriteram, &spriteram_size },
+	{ 0x6000, 0x67ff, gyruss_sharedram_w },
+	{ 0xe000, 0xffff, MWA_ROM },
+	{ -1 }	/* end of table */
+};
+#endif
+
 static struct MemoryReadAddress i8039_readmem[] =
 {
-	/* kludge: the code actually does
-	00000013: ba 00       	mov r2,#0
-	00000015: 05          	en  i
-	00000016: fa          	mov a,r2
-	and expects r2 to retrieve the command from an external latch. Since the
-	8039 emulator doesn't allow that, we kick in later, when the code does
-	00000062: 53 0f       	anl a,#$0f
-	00000064: 03 32       	add a,#$32
-	00000066: b3          	jmpp @a
-	since r2 is always 0, it always fetches the first byte of the jump table,
-	so we wedge in there and return the correct jump address */
-	{ 0x0032, 0x0032, gyruss_i8039_command_r },
 	{ 0x0000, 0x0fff, MRA_ROM },
 	{ -1 }	/* end of table */
 };
 
 static struct MemoryWriteAddress i8039_writemem[] =
 {
+	{ 0x0000, 0x0fff, MWA_ROM },
 	{ -1 }	/* end of table */
 };
 
 static struct IOReadPort i8039_readport[] =
 {
+	{ 0x00, 0xff, soundlatch2_r },
 	{ -1 }
 };
 
 static struct IOWritePort i8039_writeport[] =
 {
-	{ I8039_p1, I8039_p1, gyruss_digital_out },
+	{ I8039_p1, I8039_p1, DAC_0_data_w },
 	{ I8039_p2, I8039_p2, IOWP_NOP },
 	{ -1 }	/* end of table */
 };
-#endif
 
 
 
-INPUT_PORTS_START( gyruss_input_ports )
+INPUT_PORTS_START( gyruss )
 	PORT_START	/* IN0 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_COIN1 )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_COIN2 )
@@ -230,54 +260,54 @@ INPUT_PORTS_START( gyruss_input_ports )
 	PORT_BIT( 0xc0, IP_ACTIVE_LOW, IPT_UNUSED )
 
 	PORT_START	/* DSW0 */
-	PORT_DIPNAME( 0xf0, 0xf0, "Coin B", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x20, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x50, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x80, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x40, "3 Coins/2 Credits" )
-	PORT_DIPSETTING(    0x10, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0xf0, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x30, "3 Coins/4 Credits" )
-	PORT_DIPSETTING(    0x70, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0xe0, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x60, "2 Coins/5 Credits" )
-	PORT_DIPSETTING(    0xd0, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0xc0, "1 Coin/4 Credits" )
-	PORT_DIPSETTING(    0xb0, "1 Coin/5 Credits" )
-	PORT_DIPSETTING(    0xa0, "1 Coin/6 Credits" )
-	PORT_DIPSETTING(    0x90, "1 Coin/7 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
-	PORT_DIPNAME( 0x0f, 0x0f, "Coin A", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x05, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x08, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x04, "3 Coins/2 Credits" )
-	PORT_DIPSETTING(    0x01, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x0f, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x03, "3 Coins/4 Credits" )
-	PORT_DIPSETTING(    0x07, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x0e, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x06, "2 Coins/5 Credits" )
-	PORT_DIPSETTING(    0x0d, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x0c, "1 Coin/4 Credits" )
-	PORT_DIPSETTING(    0x0b, "1 Coin/5 Credits" )
-	PORT_DIPSETTING(    0x0a, "1 Coin/6 Credits" )
-	PORT_DIPSETTING(    0x09, "1 Coin/7 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
+	PORT_DIPNAME( 0xf0, 0xf0, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x50, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( 3C_2C ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0xf0, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x30, DEF_STR( 3C_4C ) )
+	PORT_DIPSETTING(    0x70, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0xe0, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x60, DEF_STR( 2C_5C ) )
+	PORT_DIPSETTING(    0xd0, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0xc0, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0xb0, DEF_STR( 1C_5C ) )
+	PORT_DIPSETTING(    0xa0, DEF_STR( 1C_6C ) )
+	PORT_DIPSETTING(    0x90, DEF_STR( 1C_7C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x0f, 0x0f, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x05, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 3C_2C ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0x0f, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 3C_4C ) )
+	PORT_DIPSETTING(    0x07, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0x0e, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x06, DEF_STR( 2C_5C ) )
+	PORT_DIPSETTING(    0x0d, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0x0b, DEF_STR( 1C_5C ) )
+	PORT_DIPSETTING(    0x0a, DEF_STR( 1C_6C ) )
+	PORT_DIPSETTING(    0x09, DEF_STR( 1C_7C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
 
 	PORT_START	/* DSW1 */
-	PORT_DIPNAME( 0x03, 0x03, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x03, "3" )
 	PORT_DIPSETTING(    0x02, "4" )
 	PORT_DIPSETTING(    0x01, "5" )
-	PORT_BITX( 0,       0x00, IPT_DIPSWITCH_SETTING | IPF_CHEAT, "255", IP_KEY_NONE, IP_JOY_NONE, 0 )
-	PORT_DIPNAME( 0x04, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Upright" )
-	PORT_DIPSETTING(    0x04, "Cocktail" )
-	PORT_DIPNAME( 0x08, 0x08, "Bonus Life", IP_KEY_NONE )
+	PORT_BITX( 0,       0x00, IPT_DIPSWITCH_SETTING | IPF_CHEAT, "255", IP_KEY_NONE, IP_JOY_NONE )
+	PORT_DIPNAME( 0x04, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( Cocktail ) )
+	PORT_DIPNAME( 0x08, 0x08, DEF_STR( Bonus_Life ) )
 	PORT_DIPSETTING(    0x08, "30000 60000" )
 	PORT_DIPSETTING(    0x00, "40000 70000" )
-	PORT_DIPNAME( 0x70, 0x70, "Difficulty", IP_KEY_NONE )
+	PORT_DIPNAME( 0x70, 0x70, DEF_STR( Difficulty ) )
 	PORT_DIPSETTING(    0x70, "1 (Easiest)" )
 	PORT_DIPSETTING(    0x60, "2" )
 	PORT_DIPSETTING(    0x50, "3" )
@@ -286,20 +316,20 @@ INPUT_PORTS_START( gyruss_input_ports )
 	PORT_DIPSETTING(    0x20, "6" )
 	PORT_DIPSETTING(    0x10, "7" )
 	PORT_DIPSETTING(    0x00, "8 (Hardest)" )
-	PORT_DIPNAME( 0x80, 0x00, "Demo Sounds", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x80, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_DIPNAME( 0x80, 0x00, DEF_STR( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 
 	PORT_START	/* DSW2 */
-	PORT_DIPNAME( 0x01, 0x00, "Demo Music", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x01, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_DIPNAME( 0x01, 0x00, "Demo Music" )
+	PORT_DIPSETTING(    0x01, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 	/* other bits probably unused */
 INPUT_PORTS_END
 
 /* This is identical to gyruss except for the bonus that has different
    values */
-INPUT_PORTS_START( gyrussce_input_ports )
+INPUT_PORTS_START( gyrussce )
 	PORT_START	/* IN0 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_COIN1 )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_COIN2 )
@@ -328,54 +358,54 @@ INPUT_PORTS_START( gyrussce_input_ports )
 	PORT_BIT( 0xc0, IP_ACTIVE_LOW, IPT_UNUSED )
 
 	PORT_START	/* DSW0 */
-	PORT_DIPNAME( 0xf0, 0xf0, "Coin B", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x20, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x50, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x80, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x40, "3 Coins/2 Credits" )
-	PORT_DIPSETTING(    0x10, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0xf0, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x30, "3 Coins/4 Credits" )
-	PORT_DIPSETTING(    0x70, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0xe0, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x60, "2 Coins/5 Credits" )
-	PORT_DIPSETTING(    0xd0, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0xc0, "1 Coin/4 Credits" )
-	PORT_DIPSETTING(    0xb0, "1 Coin/5 Credits" )
-	PORT_DIPSETTING(    0xa0, "1 Coin/6 Credits" )
-	PORT_DIPSETTING(    0x90, "1 Coin/7 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
-	PORT_DIPNAME( 0x0f, 0x0f, "Coin A", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "4 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x05, "3 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x08, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x04, "3 Coins/2 Credits" )
-	PORT_DIPSETTING(    0x01, "4 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x0f, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x03, "3 Coins/4 Credits" )
-	PORT_DIPSETTING(    0x07, "2 Coins/3 Credits" )
-	PORT_DIPSETTING(    0x0e, "1 Coin/2 Credits" )
-	PORT_DIPSETTING(    0x06, "2 Coins/5 Credits" )
-	PORT_DIPSETTING(    0x0d, "1 Coin/3 Credits" )
-	PORT_DIPSETTING(    0x0c, "1 Coin/4 Credits" )
-	PORT_DIPSETTING(    0x0b, "1 Coin/5 Credits" )
-	PORT_DIPSETTING(    0x0a, "1 Coin/6 Credits" )
-	PORT_DIPSETTING(    0x09, "1 Coin/7 Credits" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
+	PORT_DIPNAME( 0xf0, 0xf0, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x50, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( 3C_2C ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0xf0, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x30, DEF_STR( 3C_4C ) )
+	PORT_DIPSETTING(    0x70, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0xe0, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x60, DEF_STR( 2C_5C ) )
+	PORT_DIPSETTING(    0xd0, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0xc0, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0xb0, DEF_STR( 1C_5C ) )
+	PORT_DIPSETTING(    0xa0, DEF_STR( 1C_6C ) )
+	PORT_DIPSETTING(    0x90, DEF_STR( 1C_7C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x0f, 0x0f, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 4C_1C ) )
+	PORT_DIPSETTING(    0x05, DEF_STR( 3C_1C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 3C_2C ) )
+	PORT_DIPSETTING(    0x01, DEF_STR( 4C_3C ) )
+	PORT_DIPSETTING(    0x0f, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 3C_4C ) )
+	PORT_DIPSETTING(    0x07, DEF_STR( 2C_3C ) )
+	PORT_DIPSETTING(    0x0e, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x06, DEF_STR( 2C_5C ) )
+	PORT_DIPSETTING(    0x0d, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0x0b, DEF_STR( 1C_5C ) )
+	PORT_DIPSETTING(    0x0a, DEF_STR( 1C_6C ) )
+	PORT_DIPSETTING(    0x09, DEF_STR( 1C_7C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
 
 	PORT_START	/* DSW1 */
-	PORT_DIPNAME( 0x03, 0x03, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x03, "3" )
 	PORT_DIPSETTING(    0x02, "4" )
 	PORT_DIPSETTING(    0x01, "5" )
-	PORT_BITX( 0,       0x00, IPT_DIPSWITCH_SETTING | IPF_CHEAT, "255", IP_KEY_NONE, IP_JOY_NONE, 0 )
-	PORT_DIPNAME( 0x04, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Upright" )
-	PORT_DIPSETTING(    0x04, "Cocktail" )
-	PORT_DIPNAME( 0x08, 0x08, "Bonus Life", IP_KEY_NONE )
+	PORT_BITX( 0,       0x00, IPT_DIPSWITCH_SETTING | IPF_CHEAT, "255", IP_KEY_NONE, IP_JOY_NONE )
+	PORT_DIPNAME( 0x04, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( Cocktail ) )
+	PORT_DIPNAME( 0x08, 0x08, DEF_STR( Bonus_Life ) )
 	PORT_DIPSETTING(    0x08, "50000 70000" )
 	PORT_DIPSETTING(    0x00, "60000 80000" )
-	PORT_DIPNAME( 0x70, 0x70, "Difficulty", IP_KEY_NONE )
+	PORT_DIPNAME( 0x70, 0x70, DEF_STR( Difficulty ) )
 	PORT_DIPSETTING(    0x70, "1 (Easiest)" )
 	PORT_DIPSETTING(    0x60, "2" )
 	PORT_DIPSETTING(    0x50, "3" )
@@ -384,14 +414,14 @@ INPUT_PORTS_START( gyrussce_input_ports )
 	PORT_DIPSETTING(    0x20, "6" )
 	PORT_DIPSETTING(    0x10, "7" )
 	PORT_DIPSETTING(    0x00, "8 (Hardest)" )
-	PORT_DIPNAME( 0x80, 0x00, "Demo Sounds", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x80, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_DIPNAME( 0x80, 0x00, DEF_STR( Demo_Sounds ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 
 	PORT_START	/* DSW2 */
-	PORT_DIPNAME( 0x01, 0x00, "Demo Music", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x01, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_DIPNAME( 0x01, 0x00, "Demo Music" )
+	PORT_DIPSETTING(    0x01, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 	/* other bits probably unused */
 INPUT_PORTS_END
 
@@ -434,55 +464,11 @@ static struct GfxLayout spritelayout2 =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout,       0, 16 },
-	{ 1, 0x2000, &spritelayout1, 16*4, 16 },	/* upper half */
-	{ 1, 0x2010, &spritelayout1, 16*4, 16 },	/* lower half */
-	{ 1, 0x2000, &spritelayout2, 16*4, 16 },
+	{ REGION_GFX1, 0x0000, &charlayout,       0, 16 },
+	{ REGION_GFX2, 0x0000, &spritelayout1, 16*4, 16 },	/* upper half */
+	{ REGION_GFX2, 0x0010, &spritelayout1, 16*4, 16 },	/* lower half */
+	{ REGION_GFX2, 0x0000, &spritelayout2, 16*4, 16 },
 	{ -1 } /* end of array */
-};
-
-
-
-/* these are NOT the original color PROMs */
-static unsigned char color_prom[] =
-{
-	/* 2A - palette */
-	0x00,0x07,0x3F,0x38,0xF8,0xE8,0xD8,0x90,0x27,0x1E,0x15,0x0C,0xAD,0xA4,0x5B,0xFF,
-	0x00,0x37,0x2E,0x25,0x1C,0x13,0x15,0x0C,0x03,0x02,0x60,0xB0,0x58,0xF6,0xA4,0x52,
-	/* 6F - sprite lookup table */
-	0x00,0x0F,0x05,0x06,0x07,0x0F,0x05,0x05,0x06,0x05,0x00,0x06,0x07,0x0F,0x0D,0x01,
-	0x00,0x0F,0x05,0x00,0x00,0x05,0x06,0x07,0x07,0x00,0x00,0x06,0x07,0x0F,0x0D,0x01,
-	0x00,0x0F,0x05,0x06,0x07,0x0F,0x05,0x05,0x06,0x05,0x03,0x06,0x07,0x0F,0x0D,0x01,
-	0x00,0x0F,0x05,0x00,0x00,0x05,0x06,0x07,0x07,0x00,0x03,0x06,0x07,0x0F,0x0D,0x01,
-	0x00,0x0C,0x0D,0x05,0x07,0x0E,0x00,0x00,0x00,0x00,0x0F,0x00,0x00,0x08,0x00,0x07,
-	0x00,0x0F,0x0C,0x0D,0x0E,0x06,0x00,0x00,0x00,0x00,0x00,0x0F,0x00,0x09,0x00,0x06,
-	0x00,0x04,0x05,0x06,0x07,0x0C,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x0A,0x00,0x05,
-	0x00,0x08,0x09,0x0A,0x0B,0x0C,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x0B,0x00,0x04,
-	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-	0x00,0x0F,0x0F,0x0F,0x0D,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x03,
-	0x00,0x0F,0x04,0x06,0x0E,0x0E,0x0E,0x0E,0x0A,0x0A,0x0A,0x0A,0x07,0x07,0x07,0x07,
-	0x00,0x01,0x0A,0x0F,0x0B,0x0B,0x0B,0x0B,0x07,0x07,0x07,0x07,0x0E,0x0E,0x0E,0x0E,
-	0x00,0x04,0x0B,0x07,0x0D,0x0D,0x0D,0x0D,0x09,0x09,0x09,0x09,0x06,0x06,0x06,0x06,
-	0x00,0x03,0x0C,0x09,0x0A,0x0A,0x0A,0x0A,0x06,0x06,0x06,0x06,0x0D,0x0D,0x0D,0x0D,
-	0x00,0x09,0x0C,0x02,0x0F,0x0C,0x0D,0x0E,0x08,0x09,0x0A,0x0B,0x04,0x05,0x06,0x07,
-	0x00,0x01,0x02,0x03,0x08,0x09,0x0A,0x0B,0x04,0x05,0x06,0x07,0x0F,0x0C,0x0D,0x0E,
-	/* 3E - character lookup table */
-	0x00,0x04,0x03,0x02,0x00,0x03,0x02,0x01,0x00,0x06,0x0E,0x0D,0x00,0x09,0x04,0x05,
-	0x00,0x04,0x05,0x0D,0x00,0x0F,0x0E,0x0D,0x00,0x0C,0x0A,0x0B,0x05,0x02,0x04,0x03,
-	0x03,0x07,0x05,0x04,0x00,0x09,0x08,0x04,0x00,0x0D,0x0E,0x0B,0x00,0x0A,0x0D,0x0B,
-	0x00,0x0D,0x0A,0x0E,0x00,0x08,0x07,0x06,0x00,0x09,0x08,0x07,0x00,0x05,0x04,0x03,
-	0x00,0x06,0x0E,0x0D,0x00,0x03,0x04,0x05,0x00,0x0D,0x0E,0x0F,0x00,0x05,0x01,0x03,
-	0x00,0x08,0x0A,0x0D,0x00,0x04,0x0D,0x0E,0x00,0x07,0x0B,0x0F,0x00,0x0B,0x0C,0x07,
-	0x00,0x03,0x05,0x08,0x00,0x06,0x03,0x09,0x00,0x02,0x0F,0x0A,0x00,0x01,0x0E,0x0B,
-	0x00,0x06,0x0A,0x0C,0x00,0x02,0x08,0x0D,0x00,0x06,0x03,0x0E,0x00,0x09,0x0A,0x0F,
-	0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-	0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-	0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-	0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-	0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-	0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-	0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-	0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F
 };
 
 
@@ -490,63 +476,64 @@ static unsigned char color_prom[] =
 static struct AY8910interface ay8910_interface =
 {
 	5,	/* 5 chips */
-	1789772,	/* 1.789772727 MHz */
-	{ 0x20ff, 0x20ff, 0x38ff, 0x38ff, 0x38ff },
+	14318180/8,	/* 1.789772727 MHz */
+	{ MIXERG(10,MIXER_GAIN_4x,MIXER_PAN_RIGHT), MIXERG(10,MIXER_GAIN_4x,MIXER_PAN_LEFT),
+			MIXERG(20,MIXER_GAIN_4x,MIXER_PAN_RIGHT), MIXERG(20,MIXER_GAIN_4x,MIXER_PAN_RIGHT), MIXERG(20,MIXER_GAIN_4x,MIXER_PAN_LEFT) },
 	/*  R       L   |   R       R       L */
 	/*   effects    |         music       */
 	{ 0, 0, gyruss_portA_r },
 	{ 0 },
 	{ 0 },
-	{ 0 }
+	{ gyruss_filter0_w, gyruss_filter1_w }
 };
 
-#ifndef USE_SAMPLES
 static struct DACinterface dac_interface =
 {
 	1,
-	441000,
-	{ 128, 128 },
-	{  1,  1 }
+	{ MIXER(50,MIXER_PAN_LEFT) }
 };
-#else
-static struct Samplesinterface samples_interface =
-{
-	1	/* 1 channel */
-};
-#endif
 
 
-static struct MachineDriver machine_driver =
+
+static struct MachineDriver machine_driver_gyruss =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80,
 			3072000,	/* 3.072 Mhz (?) */
-			0,
 			readmem,writemem,0,0,
 			nmi_interrupt,1
 		},
 		{
 			CPU_Z80 | CPU_AUDIO_CPU,
-			3579545,	/* 3.5795454 Mhz */
-			2,	/* memory region #2 */
+			14318180/4,	/* 3.579545 Mhz */
 			sound_readmem,sound_writemem,sound_readport,sound_writeport,
 			ignore_interrupt,1	/* interrupts are triggered by the main CPU */
 		},
-#ifndef USE_SAMPLES
 		{
 			CPU_I8039 | CPU_AUDIO_CPU,
 			8000000/15,	/* 8Mhz crystal */
-			4,
 			i8039_readmem,i8039_writemem,i8039_readport,i8039_writeport,
 			ignore_interrupt,1
-		}
+		},
+#ifdef EMULATE_6809
+		{
+			CPU_M6809,
+			2000000,        /* 2 Mhz ??? */
+			m6809_readmem,m6809_writemem,0,0,
+			interrupt,1
+		},
 #endif
 	},
 	60, DEFAULT_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
+#ifdef EMULATE_6809
+	20,	/* 20 CPU slices per frame - an high value to ensure proper */
+			/* synchronization of the CPUs */
+#else
 	1,	/* 1 CPU slice per frame - interleaving is forced when a sound command is written */
-	gyruss_init_machine,
+#endif
+	0,
 
 	/* video hardware */
 	32*8, 32*8, { 0*8, 32*8-1, 2*8, 30*8-1 },
@@ -558,26 +545,23 @@ static struct MachineDriver machine_driver =
 	0,
 	generic_vh_start,
 	generic_vh_stop,
+#ifndef EMULATE_6809
 	gyruss_vh_screenrefresh,
+#else
+	gyruss_6809_vh_screenrefresh,
+#endif
 
 	/* sound hardware */
-	0,0,0,0,
+	SOUND_SUPPORTS_STEREO,0,0,0,
 	{
 		{
 			SOUND_AY8910,
 			&ay8910_interface
 		},
-#ifndef USE_SAMPLES
 		{
 			SOUND_DAC,
 			&dac_interface
 		}
-#else
-		{
-			SOUND_SAMPLES,
-			&samples_interface
-		}
-#endif
 	}
 };
 
@@ -589,166 +573,112 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( gyruss_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "gyrussk.1", 0x0000, 0x2000, 0x859dab03 )
-	ROM_LOAD( "gyrussk.2", 0x2000, 0x2000, 0x99244034 )
-	ROM_LOAD( "gyrussk.3", 0x4000, 0x2000, 0xe77f026b )
+ROM_START( gyruss )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "gyrussk.1",    0x0000, 0x2000, 0xc673b43d )
+	ROM_LOAD( "gyrussk.2",    0x2000, 0x2000, 0xa4ec03e4 )
+	ROM_LOAD( "gyrussk.3",    0x4000, 0x2000, 0x27454a98 )
 	/* the diagnostics ROM would go here */
 
-	ROM_REGION(0xa000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "gyrussk.4",  0x0000, 0x2000, 0x98f88b6e )
-	ROM_LOAD( "gyrussk.6",  0x2000, 0x2000, 0x90c095a2 )
-	ROM_LOAD( "gyrussk.5",  0x4000, 0x2000, 0x2fb43a10 )
-	ROM_LOAD( "gyrussk.8",  0x6000, 0x2000, 0xe7297079 )
-	ROM_LOAD( "gyrussk.7",  0x8000, 0x2000, 0xff46ed2e )
-
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "gyrussk.1a", 0x0000, 0x2000, 0x4fa107c1 )
-	ROM_LOAD( "gyrussk.2a", 0x2000, 0x2000, 0xd20aa58c )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "gyrussk.1a",   0x0000, 0x2000, 0xf4ae1c17 )
+	ROM_LOAD( "gyrussk.2a",   0x2000, 0x2000, 0xba498115 )
 	/* the diagnostics ROM would go here */
 
-	ROM_REGION(0x2000)	/* Gyruss also contains a 6809, we don't need to emulate it */
-						/* but need the data tables contained in its ROM */
-	ROM_LOAD( "gyrussk.9",  0x0000, 0x2000, 0xef92fcd8 )
+	ROM_REGION( 0x1000, REGION_CPU3 )	/* 8039 */
+	ROM_LOAD( "gyrussk.3a",   0x0000, 0x1000, 0x3f9b5dea )
 
-	ROM_REGION(0x1000)	/* 8039 */
-	ROM_LOAD( "gyrussk.3a", 0x0000, 0x1000, 0x18d6bc42 )
+	ROM_REGION( 2*0x10000, REGION_CPU4 )	/* 64k for code + 64k for the decrypted opcodes */
+	ROM_LOAD( "gyrussk.9",    0xe000, 0x2000, 0x822bf27e )
+
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gyrussk.4",    0x0000, 0x2000, 0x27d8329b )
+
+	ROM_REGION( 0x8000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gyrussk.6",    0x0000, 0x2000, 0xc949db10 )
+	ROM_LOAD( "gyrussk.5",    0x2000, 0x2000, 0x4f22411a )
+	ROM_LOAD( "gyrussk.8",    0x4000, 0x2000, 0x47cd1fbc )
+	ROM_LOAD( "gyrussk.7",    0x6000, 0x2000, 0x8e8d388c )
+
+	ROM_REGION( 0x0220, REGION_PROMS )
+	ROM_LOAD( "gyrussk.pr3",  0x0000, 0x0020, 0x98782db3 )	/* palette */
+	ROM_LOAD( "gyrussk.pr1",  0x0020, 0x0100, 0x7ed057de )	/* sprite lookup table */
+	ROM_LOAD( "gyrussk.pr2",  0x0120, 0x0100, 0xde823a81 )	/* character lookup table */
 ROM_END
 
-ROM_START( gyrussce_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "gya-1.bin", 0x0000, 0x2000, 0x9fef8629 )
-	ROM_LOAD( "gya-2.bin", 0x2000, 0x2000, 0xe7243234 )
-	ROM_LOAD( "gya-3.bin", 0x4000, 0x2000, 0x8c1eeeec )
+ROM_START( gyrussce )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "gya-1.bin",    0x0000, 0x2000, 0x85f8b7c2 )
+	ROM_LOAD( "gya-2.bin",    0x2000, 0x2000, 0x1e1a970f )
+	ROM_LOAD( "gya-3.bin",    0x4000, 0x2000, 0xf6dbb33b )
 	/* the diagnostics ROM would go here */
 
-	ROM_REGION(0xa000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "gy-6.bin",  0x0000, 0x2000, 0x98f88b6e )
-	ROM_LOAD( "gy-10.bin", 0x2000, 0x2000, 0x90c095a2 )
-	ROM_LOAD( "gy-9.bin",  0x4000, 0x2000, 0x2fb43a10 )
-	ROM_LOAD( "gy-8.bin",  0x6000, 0x2000, 0xe7297079 )
-	ROM_LOAD( "gy-7.bin",  0x8000, 0x2000, 0xff46ed2e )
-
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "gy-11.bin", 0x0000, 0x2000, 0x4fa107c1 )
-	ROM_LOAD( "gy-12.bin", 0x2000, 0x2000, 0xd20aa58c )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "gyrussk.1a",   0x0000, 0x2000, 0xf4ae1c17 )
+	ROM_LOAD( "gyrussk.2a",   0x2000, 0x2000, 0xba498115 )
 	/* the diagnostics ROM would go here */
 
-	ROM_REGION(0x2000)	/* Gyruss also contains a 6809, we don't need to emulate it */
-						/* but need the data tables contained in its ROM */
-	ROM_LOAD( "gy-5.bin",  0x0000, 0x2000, 0xef92fcd8 )
+	ROM_REGION( 0x1000, REGION_CPU3 )	/* 8039 */
+	ROM_LOAD( "gyrussk.3a",   0x0000, 0x1000, 0x3f9b5dea )
 
-	ROM_REGION(0x1000)	/* 8039 */
-	ROM_LOAD( "gy-13.bin", 0x0000, 0x1000, 0x18d6bc42 )
+	ROM_REGION( 2*0x10000, REGION_CPU4 )	/* 64k for code + 64k for the decrypted opcodes */
+	ROM_LOAD( "gyrussk.9",    0xe000, 0x2000, 0x822bf27e )
+
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gyrussk.4",    0x0000, 0x2000, 0x27d8329b )
+
+	ROM_REGION( 0x8000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gyrussk.6",    0x0000, 0x2000, 0xc949db10 )
+	ROM_LOAD( "gyrussk.5",    0x2000, 0x2000, 0x4f22411a )
+	ROM_LOAD( "gyrussk.8",    0x4000, 0x2000, 0x47cd1fbc )
+	ROM_LOAD( "gyrussk.7",    0x6000, 0x2000, 0x8e8d388c )
+
+	ROM_REGION( 0x0220, REGION_PROMS )
+	ROM_LOAD( "gyrussk.pr3",  0x0000, 0x0020, 0x98782db3 )	/* palette */
+	ROM_LOAD( "gyrussk.pr1",  0x0020, 0x0100, 0x7ed057de )	/* sprite lookup table */
+	ROM_LOAD( "gyrussk.pr2",  0x0120, 0x0100, 0xde823a81 )	/* character lookup table */
+ROM_END
+
+ROM_START( venus )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "r1",           0x0000, 0x2000, 0xd030abb1 )
+	ROM_LOAD( "r2",           0x2000, 0x2000, 0xdbf65d4d )
+	ROM_LOAD( "r3",           0x4000, 0x2000, 0xdb246fcd )
+	/* the diagnostics ROM would go here */
+
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "gyrussk.1a",   0x0000, 0x2000, 0xf4ae1c17 )
+	ROM_LOAD( "gyrussk.2a",   0x2000, 0x2000, 0xba498115 )
+	/* the diagnostics ROM would go here */
+
+	ROM_REGION( 0x1000, REGION_CPU3 )	/* 8039 */
+	ROM_LOAD( "gyrussk.3a",   0x0000, 0x1000, 0x3f9b5dea )
+
+	ROM_REGION( 2*0x10000, REGION_CPU4 )	/* 64k for code + 64k for the decrypted opcodes */
+	ROM_LOAD( "gyrussk.9",    0xe000, 0x2000, 0x822bf27e )
+
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gyrussk.4",    0x0000, 0x2000, 0x27d8329b )
+
+	ROM_REGION( 0x8000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "gyrussk.6",    0x0000, 0x2000, 0xc949db10 )
+	ROM_LOAD( "gyrussk.5",    0x2000, 0x2000, 0x4f22411a )
+	ROM_LOAD( "gyrussk.8",    0x4000, 0x2000, 0x47cd1fbc )
+	ROM_LOAD( "gyrussk.7",    0x6000, 0x2000, 0x8e8d388c )
+
+	ROM_REGION( 0x0220, REGION_PROMS )
+	ROM_LOAD( "gyrussk.pr3",  0x0000, 0x0020, 0x98782db3 )	/* palette */
+	ROM_LOAD( "gyrussk.pr1",  0x0020, 0x0100, 0x7ed057de )	/* sprite lookup table */
+	ROM_LOAD( "gyrussk.pr2",  0x0120, 0x0100, 0xde823a81 )	/* character lookup table */
 ROM_END
 
 
-#ifdef USE_SAMPLES
-static const char *gyruss_sample_names[] =
+static void init_gyruss(void)
 {
-	"*gyruss",
-	"AUDIO01.SAM",
-	"AUDIO02.SAM",
-	"AUDIO03.SAM",
-	"AUDIO04.SAM",
-	"AUDIO05.SAM",
-	"AUDIO06.SAM",
-	"AUDIO07.SAM",
-	0	/* end of array */
-};
-#endif
-
-
-
-static int hiload(void)
-{
-	/* get RAM pointer (this game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
-
-	/* check if the hi score table has already been initialized */
-	if (memcmp(&RAM[0x9489],"\x00\x00\x01",3) == 0 &&
-			memcmp(&RAM[0x94a9],"\x00\x43\x00",3) == 0)
-	{
-		void *f;
-
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0x9488],8*5);
-			RAM[0x940b] = RAM[0x9489];
-			RAM[0x940c] = RAM[0x948a];
-			RAM[0x940d] = RAM[0x948b];
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;	/* we can't load the hi scores yet */
-}
-
-static void hisave(void)
-{
-	void *f;
-	/* get RAM pointer (this game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
-
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0x9488],8*5);
-		osd_fclose(f);
-	}
+	konami1_decode_cpu4();
 }
 
 
-
-struct GameDriver gyruss_driver =
-{
-	"Gyruss (Konami)",
-	"gyruss",
-	"Mike Cuddy (hardware info)\nPete Ground (hardware info)\nMirko Buffoni (MAME driver)\nNicola Salmoria (MAME driver)\nTim Lindquist (color info)\nMarco Cassili",
-	&machine_driver,
-
-	gyruss_rom,
-	0, 0,
-#ifdef USE_SAMPLES
-	gyruss_sample_names,
-#else
-	0,
-#endif
-	0,	/* sound_prom */
-
-	gyruss_input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_ROTATE_90,
-
-	hiload, hisave
-};
-
-struct GameDriver gyrussce_driver =
-{
-	"Gyruss (Centuri)",
-	"gyrussce",
-	"Mike Cuddy (hardware info)\nPete Ground (hardware info)\nMirko Buffoni (MAME driver)\nNicola Salmoria (MAME driver)\nTim Lindquist (color info)\nMarco Cassili",
-	&machine_driver,
-
-	gyrussce_rom,
-	0, 0,
-#ifdef USE_SAMPLES
-	gyruss_sample_names,
-#else
-	0,
-#endif
-	0,	/* sound_prom */
-
-	gyrussce_input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_ROTATE_90,
-
-	hiload, hisave
-};
+GAME( 1983, gyruss,   0,      gyruss, gyruss,   gyruss, ROT90, "Konami", "Gyruss (Konami)" )
+GAME( 1983, gyrussce, gyruss, gyruss, gyrussce, gyruss, ROT90, "Konami (Centuri license)", "Gyruss (Centuri)" )
+GAME( 1983, venus,    gyruss, gyruss, gyrussce, gyruss, ROT90, "bootleg", "Venus" )

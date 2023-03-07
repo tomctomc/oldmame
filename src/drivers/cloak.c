@@ -92,23 +92,47 @@ Playfield ROM: 136023.306,136023.305
 #include "driver.h"
 #include "vidhrdw/generic.h"
 
-extern unsigned char *enable_nvRAM;
-extern unsigned char *cloak_nvRAM;
-extern unsigned char *cloak_sharedram;
-extern int  cloak_sharedram_r(int offset);
-extern void cloak_sharedram_w(int offset, int data);
-extern void cloak_paletteram_w(int offset,int data);
-extern int  graph_processor_r(int offset);
-extern void graph_processor_w(int offset, int data);
-extern void cloak_clearbmp_w(int offset, int data);
+static unsigned char *enable_nvRAM;
+static unsigned char *cloak_sharedram;
+WRITE_HANDLER( cloak_paletteram_w );
+READ_HANDLER( graph_processor_r );
+WRITE_HANDLER( graph_processor_w );
+WRITE_HANDLER( cloak_clearbmp_w );
 extern int  cloak_vh_start(void);
 extern void cloak_vh_stop(void);
-extern void cloak_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
-extern void cloak_vh_screenrefresh(struct osd_bitmap *bitmap);
+extern void cloak_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
 
+static unsigned char *nvram;
+static size_t nvram_size;
 
-void cloak_led_w(int offset,int data)
+
+static READ_HANDLER( cloak_sharedram_r )
+{
+	return cloak_sharedram[offset];
+}
+
+static WRITE_HANDLER( cloak_sharedram_w )
+{
+	cloak_sharedram[offset] = data;
+}
+
+
+static void nvram_handler(void *file, int read_or_write)
+{
+	if (read_or_write)
+		osd_fwrite(file,nvram,nvram_size);
+	else
+	{
+		if (file)
+			osd_fread(file,nvram,nvram_size);
+		else
+			memset(nvram,0,nvram_size);
+	}
+}
+
+
+WRITE_HANDLER( cloak_led_w )
 {
 	osd_led_w(1 - offset,~data >> 7);
 }
@@ -117,17 +141,17 @@ void cloak_led_w(int offset,int data)
 
 static struct MemoryReadAddress readmem[] =
 {
-	{ 0x4000, 0xffff, MRA_ROM },
 	{ 0x0000, 0x07ff, MRA_RAM },
-	{ 0x0800, 0x0fff, cloak_sharedram_r, &cloak_sharedram },
-	{ 0x2800, 0x29ff, MRA_RAM, &cloak_nvRAM },
+	{ 0x0800, 0x0fff, cloak_sharedram_r },
+	{ 0x2800, 0x29ff, MRA_RAM },
 	{ 0x1000, 0x100f, pokey1_r },		/* DSW0 also */
 	{ 0x1800, 0x180f, pokey2_r },		/* DSW1 also */
 	{ 0x2000, 0x2000, input_port_0_r },	/* IN0 */
 	{ 0x2200, 0x2200, input_port_1_r },	/* IN1 */
 	{ 0x2400, 0x2400, input_port_2_r },	/* IN2 */
-	{ 0x3000, 0x30ff, MRA_RAM, &spriteram },
+	{ 0x3000, 0x30ff, MRA_RAM },
 	{ 0x3800, 0x3807, MRA_RAM },
+	{ 0x4000, 0xffff, MRA_ROM },
 	{ -1 }	/* end of table */
 };
 
@@ -135,16 +159,16 @@ static struct MemoryWriteAddress writemem[] =
 {
 	{ 0x0000, 0x03ff, MWA_RAM },
 	{ 0x0400, 0x07ff, videoram_w, &videoram, &videoram_size },
-	{ 0x0400, 0x07ff, colorram_w, &colorram },
-	{ 0x0800, 0x0fff, cloak_sharedram_w },
+	{ 0x0800, 0x0fff, cloak_sharedram_w, &cloak_sharedram },
 	{ 0x1000, 0x100f, pokey1_w },
 	{ 0x1800, 0x180f, pokey2_w },
-	{ 0x2800, 0x29ff, MWA_RAM, &cloak_nvRAM },
+	{ 0x2800, 0x29ff, MWA_RAM, &nvram, &nvram_size },
 	{ 0x3000, 0x30ff, MWA_RAM, &spriteram, &spriteram_size },
 	{ 0x3200, 0x327f, cloak_paletteram_w },
-	{ 0x3800, 0x3805, MWA_RAM },
+	{ 0x3800, 0x3801, coin_counter_w },
+	{ 0x3802, 0x3805, MWA_RAM },
 	{ 0x3806, 0x3807, cloak_led_w },
-	{ 0x3a00, 0x3a00, MWA_NOP },
+	{ 0x3a00, 0x3a00, watchdog_reset_w },
 	{ 0x3e00, 0x3e00, MWA_RAM, &enable_nvRAM },
 	{ 0x4000, 0xffff, MWA_ROM },
 	{ -1 }	/* end of table */
@@ -171,38 +195,36 @@ static struct MemoryWriteAddress writemem2[] =
 	{ -1 }	/* end of table */
 };
 
-INPUT_PORTS_START( cloak_input_ports )
+INPUT_PORTS_START( cloak )
 	PORT_START	/* IN0 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_DOWN  | IPF_8WAY )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_UP    | IPF_8WAY )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_RIGHT | IPF_8WAY )
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_LEFT  | IPF_8WAY )
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_DOWN  | IPF_8WAY )
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_UP    | IPF_8WAY )
-	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_RIGHT | IPF_8WAY )
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_LEFT  | IPF_8WAY )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_DOWN   | IPF_8WAY )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_UP     | IPF_8WAY )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_RIGHT  | IPF_8WAY )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_LEFT   | IPF_8WAY )
 
 	PORT_START	/* IN1 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_DOWN  | IPF_8WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_UP    | IPF_8WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_RIGHT | IPF_8WAY | IPF_COCKTAIL )
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_JOYSTICKRIGHT_LEFT  | IPF_8WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_DOWN  | IPF_8WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_UP    | IPF_8WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_RIGHT | IPF_8WAY | IPF_COCKTAIL )
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_LEFT  | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_DOWN   | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_UP     | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_RIGHT  | IPF_8WAY | IPF_COCKTAIL )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_JOYSTICKLEFT_LEFT   | IPF_8WAY | IPF_COCKTAIL )
 
 	PORT_START	/* IN2 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_VBLANK )
-	PORT_BITX(    0x02, 0x02, IPT_DIPSWITCH_NAME | IPF_TOGGLE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
-	PORT_DIPSETTING(    0x02, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_SERVICE( 0x02, IP_ACTIVE_LOW )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_COIN2 )
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_COIN1 )
-	PORT_DIPNAME( 0x10, 0x10, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x10, "Upright" )
-	PORT_DIPSETTING(    0x00, "Cocktail" )
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_COIN3 )
+	PORT_DIPNAME( 0x10, 0x10, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Cocktail ) )
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_SERVICE1 )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_BUTTON2 )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON1 )
 
@@ -212,23 +234,28 @@ INPUT_PORTS_START( cloak_input_ports )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_START1 )
 
 	PORT_START      /* DSW1 */
-	PORT_DIPNAME( 0x03, 0x02, "Credit mode", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "1 Credit=1 Game" )
-	PORT_DIPSETTING(    0x01, "1 Credit=2 Games" )
-	PORT_DIPSETTING(    0x03, "2 Credits=1 Game" )
-	PORT_DIPSETTING(    0x00, "Free Play" )
-	PORT_DIPNAME( 0x30, 0x00, "Right Coin",IP_KEY_NONE)
-	PORT_DIPSETTING(    0x00, "1 Coin=1 Credit" )
-	PORT_DIPSETTING(    0x10, "1 Coin=2 Credits" )
-	PORT_DIPNAME( 0x0C, 0x00, "Left Coin",IP_KEY_NONE)
-	PORT_DIPSETTING(    0x00, "1 Coin=1 Credit" )
-	PORT_DIPSETTING(    0x04, "1 Coin=4 Credits" )
-	PORT_DIPSETTING(    0x08, "1 Coin=5 Credits" )
-	PORT_DIPSETTING(    0x0C, "1 Coin=6 Credits" )
-	PORT_DIPNAME( 0x40, 0x00, "Demo mode",IP_KEY_NONE)
-	PORT_DIPSETTING(    0x40, "Freeze on" )
-	PORT_DIPSETTING(    0x00, "Freeze off" )
-
+	PORT_DIPNAME( 0x03, 0x02, "Credits" )
+	PORT_DIPSETTING(    0x02, "*1" )
+	PORT_DIPSETTING(    0x01, "*2" )
+	PORT_DIPSETTING(    0x03, "/2" )
+	PORT_DIPSETTING(    0x00, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x0c, 0x00, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 1C_5C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_6C ) )
+	PORT_DIPNAME( 0x10, 0x00, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 1C_2C ) )
+	PORT_DIPNAME( 0x20, 0x20, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x20, DEF_STR( On ) )
+	PORT_DIPNAME( 0x40, 0x00, "Allow Freeze" )	/* when active, press button 1 to freeze */
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( On ) )
+	PORT_DIPNAME( 0x80, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( On ) )
 
 INPUT_PORTS_END
 
@@ -258,8 +285,8 @@ static struct GfxLayout spritelayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout,     0,  2 },
-	{ 1, 0x2000, &spritelayout,  32,  2 },
+	{ REGION_GFX1, 0, &charlayout,     0,  1 },
+	{ REGION_GFX2, 0, &spritelayout,  32,  1 },
 	{ -1 }
 };
 
@@ -269,9 +296,7 @@ static struct POKEYinterface pokey_interface =
 {
 	2,	/* 2 chips */
 	1500000,	/* 1.5 MHz??? */
-	255,
-	POKEY_DEFAULT_GAIN/2,
-	NO_CLIP,
+	{ 50, 50 },
 	/* The 8 pot handlers */
 	{ 0, 0 },
 	{ 0, 0 },
@@ -287,21 +312,19 @@ static struct POKEYinterface pokey_interface =
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_cloak =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
 			1000000,	/* 1 Mhz ???? */
-			0,
 			readmem,writemem,0,0,
 			interrupt,4
 		},
 		{
 			CPU_M6502,
-                        1250000,        /* 1 Mhz ???? */
-			2,
+            1250000,        /* 1 Mhz ???? */
 			readmem2,writemem2,0,0,
 			interrupt,2
 		}
@@ -311,10 +334,10 @@ static struct MachineDriver machine_driver =
 	0,
 
 	/* video hardware */
-	32*8, 32*8, { 0*8, 32*8-1, 0*8, 32*8-1 },
+	32*8, 32*8, { 0*8, 32*8-1, 3*8, 32*8-1 },
 	gfxdecodeinfo,
-	64,32+32,
-	cloak_vh_convert_color_prom,
+	64, 64,
+	0,
 
 
 	VIDEO_TYPE_RASTER | VIDEO_MODIFIES_PALETTE | VIDEO_SUPPORTS_DIRTY,
@@ -330,7 +353,9 @@ static struct MachineDriver machine_driver =
 			SOUND_POKEY,
 			&pokey_interface
 		}
-	}
+	},
+
+	nvram_handler
 };
 
 
@@ -341,46 +366,31 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( cloak_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "136023.501", 0x4000, 0x2000, 0x5e990f4f )
-	ROM_LOAD( "136023.502", 0x6000, 0x2000, 0x47022646 )
-	ROM_LOAD( "136023.503", 0x8000, 0x4000, 0xdbe10b8b )
-	ROM_LOAD( "136023.504", 0xc000, 0x4000, 0xd84cf636 )
+ROM_START( cloak )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "136023.501",   0x4000, 0x2000, 0xc2dbef1b )
+	ROM_LOAD( "136023.502",   0x6000, 0x2000, 0x316d0c7b )
+	ROM_LOAD( "136023.503",   0x8000, 0x4000, 0xb9c291a6 )
+	ROM_LOAD( "136023.504",   0xc000, 0x4000, 0xd014a1c0 )
 
-	ROM_REGION(0x4000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "136023.305", 0x0000, 0x1000, 0xac30bd92 )
-	ROM_LOAD( "136023.306", 0x1000, 0x1000, 0x406e8ada )
-	ROM_LOAD( "136023.307", 0x2000, 0x1000, 0x8c097ddd )
-	ROM_LOAD( "136023.308", 0x3000, 0x1000, 0x0f92033e )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for code */
+	ROM_LOAD( "136023.509",   0x2000, 0x2000, 0x46c021a4 )
+	ROM_LOAD( "136023.510",   0x4000, 0x2000, 0x8c9cf017 )
+	ROM_LOAD( "136023.511",   0x6000, 0x2000, 0x66fd8a34 )
+	ROM_LOAD( "136023.512",   0x8000, 0x2000, 0x48c8079e )
+	ROM_LOAD( "136023.513",   0xa000, 0x2000, 0x13f1cbab )
+	ROM_LOAD( "136023.514",   0xc000, 0x2000, 0x6f8c7991 )
+	ROM_LOAD( "136023.515",   0xe000, 0x2000, 0x835438a0 )
 
-	ROM_REGION(0x10000)	/* space for the sound ROMs */
-	ROM_LOAD( "136023.509", 0x2000, 0x2000, 0x0ba00626 )
-	ROM_LOAD( "136023.510", 0x4000, 0x2000, 0x0fd75919 )
-	ROM_LOAD( "136023.511", 0x6000, 0x2000, 0x0a2abcdc )
-	ROM_LOAD( "136023.512", 0x8000, 0x2000, 0xb4f3f575 )
-	ROM_LOAD( "136023.513", 0xa000, 0x2000, 0x0d28e242 )
-	ROM_LOAD( "136023.514", 0xc000, 0x2000, 0xd380fc3c )
-	ROM_LOAD( "136023.515", 0xe000, 0x2000, 0x8c4e56b6 )
+	ROM_REGION( 0x2000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "136023.305",   0x0000, 0x1000, 0xee443909 )
+	ROM_LOAD( "136023.306",   0x1000, 0x1000, 0xd708b132 )
+
+	ROM_REGION( 0x2000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "136023.307",   0x0000, 0x1000, 0xc42c84a4 )
+	ROM_LOAD( "136023.308",   0x1000, 0x1000, 0x4fe13d58 )
 ROM_END
 
-struct GameDriver cloak_driver =
-{
-	"Cloak & Dagger",
-	"cloak",
-	"Dan Boris        (hardware info)\nMirko Buffoni      (MAME driver)",
-	&machine_driver,
 
-	cloak_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
 
-	cloak_input_ports,
-
-	0, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	0, 0
-};
-
+GAMEX( 1983, cloak, 0, cloak, cloak, 0, ROT0, "Atari", "Cloak & Dagger", GAME_NO_COCKTAIL )

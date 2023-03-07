@@ -1,17 +1,13 @@
 /***************************************************************************
 
-  vidhrdw.c
+	Atari System 1 hardware
 
-  Functions to emulate the video hardware of the machine.
+****************************************************************************/
 
-***************************************************************************/
 
 #include "driver.h"
+#include "machine/atarigen.h"
 #include "vidhrdw/generic.h"
-
-
-#define SYSTEM1_DEBUG 0
-
 
 #define XCHARS 42
 #define YCHARS 30
@@ -19,207 +15,219 @@
 #define XDIM (XCHARS*8)
 #define YDIM (YCHARS*8)
 
-#define ROADBLST_CLIP 200
 
+
+/*************************************
+ *
+ *	Constants
+ *
+ *************************************/
+
+/* the color and remap PROMs are mapped as follows */
+#define PROM1_BANK_4			0x80		/* active low */
+#define PROM1_BANK_3			0x40		/* active low */
+#define PROM1_BANK_2			0x20		/* active low */
+#define PROM1_BANK_1			0x10		/* active low */
+#define PROM1_OFFSET_MASK		0x0f		/* postive logic */
+
+#define PROM2_BANK_6_OR_7		0x80		/* active low */
+#define PROM2_BANK_5			0x40		/* active low */
+#define PROM2_PLANE_5_ENABLE	0x20		/* active high */
+#define PROM2_PLANE_4_ENABLE	0x10		/* active high */
+#define PROM2_PF_COLOR_MASK		0x0f		/* negative logic */
+#define PROM2_BANK_7			0x08		/* active low, plus PROM2_BANK_6_OR_7 low as well */
+#define PROM2_MO_COLOR_MASK		0x07		/* negative logic */
+
+#define OVERRENDER_PRIORITY		1
+#define OVERRENDER_SPECIAL		2
+
+
+
+/*************************************
+ *
+ *	Macros
+ *
+ *************************************/
 
 /* these macros make accessing the indirection table easier, plus this is how the data
    is stored for the pfmapped array */
-#define LDATA(bank,color,offset) ((((color) & 255) << 16) | (((bank) & 15) << 12) | (((offset) & 15) << 8))
-#define LCOLOR(data) (((data) >> 16) & 0xff)
-#define LBANK(data) (((data) >> 12) & 15)
-#define LPICT(data) ((data) & 0x0fff)
-#define LFLIP(data) ((data) & 0x01000000)
-#define LDIRTYFLAG 0x02000000
-#define LDIRTY(data) ((data) & LDIRTYFLAG)
+#define PACK_LOOKUP_DATA(bank,color,offset,bpp) \
+		(((((bpp) - 4) & 7) << 24) | \
+		 (((color) & 255) << 16) | \
+		 (((bank) & 15) << 12) | \
+		 (((offset) & 15) << 8))
 
-/* these macros are for more conveniently defining groups of motion and playfield objects */
-#define LDATA2(b,c,o) LDATA(b,c,(o)+0), LDATA(b,c,(o)+1)
-#define LDATA3(b,c,o) LDATA(b,c,(o)+0), LDATA(b,c,(o)+1), LDATA(b,c,(o)+2)
-#define LDATA4(b,c,o) LDATA(b,c,(o)+0), LDATA(b,c,(o)+1), LDATA(b,c,(o)+2), LDATA(b,c,(o)+3)
-#define LDATA5(b,c,o) LDATA4(b,c,(o)+0), LDATA(b,c,(o)+4)
-#define LDATA6(b,c,o) LDATA4(b,c,(o)+0), LDATA2(b,c,(o)+4)
-#define LDATA7(b,c,o) LDATA4(b,c,(o)+0), LDATA3(b,c,(o)+4)
-#define LDATA8(b,c,o) LDATA4(b,c,(o)+0), LDATA4(b,c,(o)+4)
-#define LDATA9(b,c,o) LDATA8(b,c,(o)+0), LDATA(b,c,(o)+8)
-#define LDATA10(b,c,o) LDATA8(b,c,(o)+0), LDATA2(b,c,(o)+8)
-#define LDATA11(b,c,o) LDATA8(b,c,(o)+0), LDATA3(b,c,(o)+8)
-#define LDATA12(b,c,o) LDATA8(b,c,(o)+0), LDATA4(b,c,(o)+8)
-#define LDATA13(b,c,o) LDATA8(b,c,(o)+0), LDATA5(b,c,(o)+8)
-#define LDATA14(b,c,o) LDATA8(b,c,(o)+0), LDATA6(b,c,(o)+8)
-#define LDATA15(b,c,o) LDATA8(b,c,(o)+0), LDATA7(b,c,(o)+8)
-#define LDATA16(b,c,o) LDATA8(b,c,(o)+0), LDATA8(b,c,(o)+8)
-#define EMPTY2 0,0
-#define EMPTY5 0,0,0,0,0
-#define EMPTY6 0,0,0,0,0,0
-#define EMPTY8 0,0,0,0,0,0,0,0
-#define EMPTY15 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-#define EMPTY16 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+#define LOOKUP_BPP(data)			(((data) >> 24) & 7)
+#define LOOKUP_COLOR(data) 			(((data) >> 16) & 0xff)
+#define LOOKUP_GFX(data) 			(((data) >> 12) & 15)
+#define LOOKUP_CODE(data) 			((data) & 0x0fff)
 
 
 
 /*************************************
  *
- *		Globals we own
+ *	Structures
  *
  *************************************/
 
-unsigned char *atarisys1_playfieldram;
-unsigned char *atarisys1_spriteram;
-unsigned char *atarisys1_alpharam;
-unsigned char *atarisys1_paletteram;
-unsigned char *atarisys1_vscroll;
-unsigned char *atarisys1_hscroll;
-unsigned char *atarisys1_bankselect;
-unsigned char *atarisys1_prioritycolor;
-
-int atarisys1_playfieldram_size;
-int atarisys1_spriteram_size;
-int atarisys1_alpharam_size;
-int atarisys1_paletteram_size;
+struct pf_overrender_data
+{
+	struct osd_bitmap *bitmap;
+	int type;
+};
 
 
 
 /*************************************
  *
- *		Statics
+ *	Globals we own
  *
  *************************************/
 
-static unsigned char *colordirty;
-static unsigned char *spritevisit;
-static unsigned short *displaylist;
-static unsigned int *scrolllist;
+UINT8 *atarisys1_bankselect;
+UINT8 *atarisys1_prioritycolor;
 
-static unsigned short *displaylist_end;
-static unsigned short *displaylist_last;
-static int scrolllist_end;
 
-static int *pflookup, *molookup;
 
-static int *pfmapped;
-static int pfbank;
+/*************************************
+ *
+ *	Statics
+ *
+ *************************************/
 
-static int playfield_count[32];
-static int last_map[16], this_map[16];
-static int sprite_map_shift, pf_map_shift;
-static int hipri_color0;
+/* playfield parameters */
+static struct atarigen_pf_state pf_state;
+static UINT16 priority_pens;
 
-static struct osd_bitmap *playfieldbitmap;
-static struct osd_bitmap *tempbitmap;
+/* indirection tables */
+static UINT32 pf_lookup[256];
+static UINT32 mo_lookup[256];
 
+/* INT3 tracking */
 static void *int3_timer[YDIM];
 static void *int3off_timer;
-static int int3_state;
 
-static const int intensity_table[16] =
-	{ 0x00, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xa0, 0xb0, 0xc0, 0xd0, 0xe0, 0xf0, 0x100, 0x110 };
+/* graphics bank tracking */
+static UINT8 bank_gfx[3][8];
+static unsigned int *pen_usage[MAX_GFX_ELEMENTS];
+
+/* basic form of a graphics bank */
+static struct GfxLayout objlayout =
+{
+	8,8,	/* 8*8 sprites */
+	4096,	/* 4096 of them */
+	6,		/* 6 bits per pixel */
+	{ 5*8*0x08000, 4*8*0x08000, 3*8*0x08000, 2*8*0x08000, 1*8*0x08000, 0*8*0x08000 },
+	{ 0, 1, 2, 3, 4, 5, 6, 7 },
+	{ 0*8, 1*8, 2*8, 3*8, 4*8, 5*8, 6*8, 7*8 },
+	8*8		/* every sprite takes 8 consecutive bytes */
+};
 
 
 
 /*************************************
  *
- *		Prototypes from other modules
+ *	Prototypes
  *
  *************************************/
 
-void atarisys1_vh_stop (void);
-void atarisys1_sound_reset (void);
-void atarisys1_update_display_list (int scanline);
+static const UINT8 *update_palette(void);
 
-static int atarisys1_debug (void);
+static void pf_color_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *data);
+static void pf_render_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *data);
+static void pf_overrender_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *data);
 
+static void mo_color_callback(const UINT16 *data, const struct rectangle *clip, void *param);
+static void mo_render_callback(const UINT16 *data, const struct rectangle *clip, void *param);
 
-/***************************************************************************
+static int decode_gfx(void);
+static int get_bank(UINT8 prom1, UINT8 prom2, int bpp);
 
-  Convert the color PROMs into a more useable format.
-
-  System 1 doesn't have a color PROM. It uses 1024 words of RAM to
-  dynamically create the palette. Each word defines one color (5 bits
-  per pixel). However, more than 256 colors is rarely used, so the
-  video system has a dynamic palette mapping function
-
-***************************************************************************/
-
-void atarisys1_vh_convert_color_prom (unsigned char *palette, unsigned char *colortable, const unsigned char *color_prom)
-{
-	int i;
-
-	/* the palette will be initialized by the game. We just set it to some */
-	/* pre-cooked values so the startup copyright notice can be displayed. */
-	for (i = 0; i < Machine->drv->total_colors; i++)
-	{
-		*(palette++) = ((i & 1) >> 0) * 0xff;
-		*(palette++) = ((i & 2) >> 1) * 0xff;
-		*(palette++) = ((i & 4) >> 2) * 0xff;
-	}
-
-	/* initialize the color table */
-	for (i = 0; i < Machine->drv->color_table_len; i++)
-		colortable[i] = i & 0xff;
-}
+void atarisys1_scanline_update(int scanline);
 
 
 
 /*************************************
  *
- *		Generic video system start
+ *	Generic video system start
  *
  *************************************/
 
 int atarisys1_vh_start(void)
 {
-	int i;
-
-	/* allocate dirty buffers */
-	if (!pfmapped)
-		pfmapped = calloc (atarisys1_playfieldram_size / 2 * sizeof (int) +
-		                   atarisys1_paletteram_size / 2 +
-		                   atarisys1_spriteram_size / 8 / 8 +
-		                   atarisys1_spriteram_size * sizeof (short) +
-		                   YDIM * sizeof (int), 1);
-	if (!pfmapped)
+	static struct atarigen_mo_desc mo_desc =
 	{
-		atarisys1_vh_stop ();
+		64,                  /* maximum number of MO's */
+		2,                   /* number of bytes per MO entry */
+		0x80,                /* number of bytes between MO words */
+		1,                   /* ignore an entry if this word == 0xffff */
+		3, 0, 0x3f,          /* link = (data[linkword] >> linkshift) & linkmask */
+		0                    /* render in reverse link order */
+	};
+
+	static struct atarigen_pf_desc pf_desc =
+	{
+		8, 8,				/* width/height of each tile */
+		64, 64				/* number of tiles in each direction */
+	};
+
+	int i, e;
+
+	/* first decode the graphics */
+	if (decode_gfx())
+		return 1;
+
+	/* reset the statics */
+	memset(&pf_state, 0, sizeof(pf_state));
+	memset(int3_timer, 0, sizeof(int3_timer));
+
+	/* initialize the pen usage array */
+	for (e = 0; e < MAX_GFX_ELEMENTS; e++)
+		if (Machine->gfx[e])
+		{
+			pen_usage[e] = Machine->gfx[e]->pen_usage;
+
+			/* if this element has 6bpp data, create a special new usage array for it */
+			if (Machine->gfx[e]->color_granularity == 64)
+			{
+				const struct GfxElement *gfx = Machine->gfx[e];
+
+				/* allocate storage */
+				pen_usage[e] = malloc(gfx->total_elements * 2 * sizeof(int));
+				if (pen_usage[e])
+				{
+					unsigned int *entry;
+					int x, y;
+
+					/* scan each entry, marking which pens are used */
+					memset(pen_usage[e], 0, gfx->total_elements * 2 * sizeof(int));
+					for (i = 0, entry = pen_usage[e]; i < gfx->total_elements; i++, entry += 2)
+					{
+						UINT8 *dp = gfx->gfxdata + i * gfx->char_modulo;
+						for (y = 0; y < gfx->height; y++)
+						{
+							for (x = 0; x < gfx->width; x++)
+							{
+								int color = dp[x];
+								entry[(color >> 5) & 1] |= 1 << (color & 31);
+							}
+							dp += gfx->line_modulo;
+						}
+					}
+				}
+			}
+		}
+
+	/* initialize the playfield */
+	if (atarigen_pf_init(&pf_desc))
+		return 1;
+
+	/* initialize the motion objects */
+	if (atarigen_mo_init(&mo_desc))
+	{
+		atarigen_pf_free();
 		return 1;
 	}
-	colordirty = (unsigned char *)(pfmapped + atarisys1_playfieldram_size / 2);
-	spritevisit = (unsigned char *)(colordirty + atarisys1_paletteram_size / 2);
-	displaylist = (unsigned short *)(spritevisit + atarisys1_spriteram_size / 8 / 8);
-	scrolllist = (unsigned int *)(displaylist + atarisys1_spriteram_size);
-
-	/* allocate bitmaps */
-	if (!playfieldbitmap)
-		playfieldbitmap = osd_new_bitmap (64*8, 64*8, Machine->scrbitmap->depth);
-	if (!playfieldbitmap)
-	{
-		atarisys1_vh_stop ();
-		return 1;
-	}
-
-	if (!tempbitmap)
-		tempbitmap = osd_new_bitmap (Machine->drv->screen_width, Machine->drv->screen_height, Machine->scrbitmap->depth);
-	if (!tempbitmap)
-	{
-		atarisys1_vh_stop ();
-		return 1;
-	}
-
-	/* no motion object lists */
-	displaylist_end = displaylist;
-	displaylist_last = NULL;
-	scrolllist_end = 0;
-
-	/* reset the timers */
-	memset (int3_timer, 0, sizeof (int3_timer));
-	int3_state = 0;
-
-	/* reset the color counter */
-	memset (playfield_count, 0, sizeof (playfield_count));
-	playfield_count[LCOLOR (pflookup[0])] = 64 * 64;
-
-	/* initialize the pre-mapped playfield */
-	for (i = atarisys1_playfieldram_size / 2; i >= 0; i--)
-		pfmapped[i] = pflookup[0] | LDIRTYFLAG;
 
 	return 0;
 }
@@ -228,386 +236,59 @@ int atarisys1_vh_start(void)
 
 /*************************************
  *
- *		Game-specific video system start
+ *	Video system shutdown
  *
  *************************************/
 
-int marble_vh_start(void)
+void atarisys1_vh_stop(void)
 {
-	static int marble_pflookup[256] =
+	int i;
+
+	/* free any extra pen usage */
+	for (i = 0; i < MAX_GFX_ELEMENTS; i++)
 	{
-		LDATA16 (1,0+8,0),
-		LDATA16 (1,1+8,0),
-		LDATA16 (1,2+8,0),
-		LDATA16 (1,3+8,0),
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16
-	};
+		if (pen_usage[i] && Machine->gfx[i] && pen_usage[i] != Machine->gfx[i]->pen_usage)
+			free(pen_usage[i]);
+		pen_usage[i] = 0;
+	}
 
-	static int marble_molookup[256] =
-	{
-		LDATA8 (2,0,8),
-		LDATA8 (2,2,8),
-		LDATA8 (2,4,8),
-		LDATA8 (2,6,8),
-		LDATA8 (2,8,8),
-		LDATA8 (2,10,8),
-		LDATA8 (2,12,8),
-		LDATA8 (2,14,8),
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16
-	};
-
-	pflookup = marble_pflookup;
-	molookup = marble_molookup;
-	sprite_map_shift = 1;
-	pf_map_shift = 1;
-	hipri_color0 = 1;
-	return atarisys1_vh_start ();
-}
-
-
-int peterpak_vh_start(void)
-{
-	static int peterpak_pflookup[256] =
-	{
-		LDATA16 (1,0+16,0),
-		LDATA16 (2,0+16,0),
-		LDATA8 (3,0+16,8), EMPTY8,
-		EMPTY16,
-		LDATA16 (1,1+16,0),
-		LDATA16 (2,1+16,0),
-		LDATA8 (3,1+16,8), EMPTY8,
-		EMPTY16,
-		LDATA16 (1,2+16,0),
-		LDATA16 (2,2+16,0),
-		LDATA8 (3,2+16,8), EMPTY8,
-		EMPTY16,
-		LDATA16 (1,3+16,0),
-		LDATA16 (2,3+16,0),
-		LDATA8 (3,3+16,8), EMPTY8,
-		EMPTY16,
-	};
-
-	static int peterpak_molookup[256] =
-	{
-		LDATA16 (1,0,0),
-		LDATA16 (2,0,0),
-		LDATA8 (3,0,8), EMPTY8,
-		EMPTY16,
-		LDATA16 (1,1,0),
-		LDATA16 (2,1,0),
-		LDATA8 (3,1,8), EMPTY8,
-		EMPTY16,
-		LDATA16 (1,2,0),
-		LDATA16 (2,2,0),
-		LDATA8 (3,2,8), EMPTY8,
-		EMPTY16,
-		LDATA16 (1,3,0),
-		LDATA16 (2,3,0),
-		LDATA8 (3,3,8), EMPTY8,
-		EMPTY16,
-	};
-
-	pflookup = peterpak_pflookup;
-	molookup = peterpak_molookup;
-	sprite_map_shift = 0;
-	pf_map_shift = 0;
-	hipri_color0 = 1;
-	return atarisys1_vh_start ();
-}
-
-
-int indytemp_vh_start(void)
-{
-	#define SEVEN 1
-	#define SIX 2
-	#define FIVE 3
-	#define THREE 4
-
-	static int indytemp_pflookup[256] =
-	{
-		LDATA (SEVEN,0+16,0), LDATA7 (SIX,3+16,8), LDATA8 (THREE,2+16,0),
-		LDATA8 (THREE,2+16,8), LDATA8 (SIX,1+16,8),
-		LDATA16 (FIVE,1+16,0),
-		LDATA16 (THREE,1+16,0),
-		LDATA8 (SIX,0+16,8), LDATA8 (FIVE,0+16,0),
-		LDATA8 (FIVE,0+16,8), LDATA8 (THREE,0+16,0),
-		LDATA8 (THREE,0+16,8), LDATA8 (SIX,2+16,8),
-		LDATA16 (FIVE,2+16,0),
-		LDATA (SEVEN,0+16,0), LDATA7 (SIX,3+16,8), LDATA8 (THREE,2+16,0),
-		LDATA8 (THREE,2+16,8), LDATA8 (SIX,1+16,8),
-		LDATA16 (FIVE,1+16,0),
-		LDATA16 (THREE,1+16,0),
-		LDATA8 (SIX,0+16,8), LDATA8 (FIVE,0+16,0),
-		LDATA8 (FIVE,0+16,8), LDATA8 (THREE,0+16,0),
-		LDATA8 (THREE,0+16,8), LDATA8 (SIX,2+16,8),
-		LDATA16 (FIVE,2+16,0),
-	};
-
-	static int indytemp_molookup[256] =
-	{
-		LDATA16 (SEVEN,1,0),
-		LDATA16 (SIX,1,0),
-		LDATA16 (SEVEN,0,0),
-		LDATA16 (SIX,0,0),
-		LDATA16 (SEVEN,2,0),
-		LDATA16 (SIX,2,0),
-		LDATA16 (SEVEN,3,0),
-		LDATA16 (SIX,3,0),
-		LDATA16 (SEVEN,4,0),
-		LDATA16 (SIX,4,0),
-		LDATA16 (SEVEN,5,0),
-		LDATA16 (SIX,5,0),
-		LDATA16 (SEVEN,6,0),
-		LDATA16 (SIX,6,0),
-		LDATA16 (SEVEN,7,0),
-		LDATA16 (SIX,7,0),
-	};
-
-	#undef THREE
-	#undef FIVE
-	#undef SIX
-	#undef SEVEN
-
-	pflookup = indytemp_pflookup;
-	molookup = indytemp_molookup;
-	sprite_map_shift = 0;
-	pf_map_shift = 0;
-	hipri_color0 = 0;
-	return atarisys1_vh_start ();
-}
-
-
-int roadrunn_vh_start(void)
-{
-	#define SEVEN 1	/* enable off */
-	#define SIX 2
-	#define FIVE 3
-	#define THREE 4
-	#define SEVENY 5	/* enable on */
-	#define SEVENX 6  /* looks like 3bpp */
-
-	static int roadrunn_pflookup[256] =
-	{
-		LDATA (SEVEN,0+16,0), LDATA (SEVEN,15+16,0), LDATA (SEVEN,14+16,0), LDATA (SEVEN,13+16,0),
-			LDATA (SEVEN,12+16,0), LDATA (SEVEN,11+16,0), LDATA (SEVEN,10+16,0), LDATA (SEVEN,9+16,0),
-			LDATA (SEVEN,8+16,0), LDATA (SEVEN,7+16,0), LDATA (SEVEN,6+16,0), LDATA (SEVEN,5+16,0),
-			LDATA (SEVEN,4+16,0), LDATA (SEVEN,3+16,0), LDATA (SEVEN,2+16,0), LDATA (SEVEN,1+16,0),
-		LDATA (SEVEN,0+16,0), LDATA9 (SIX,12+16,1), LDATA6 (SIX,1+16,10),
-		LDATA16 (FIVE,1+16,0),
-		LDATA13 (THREE,5+16,0), LDATA3 (THREE,2+16,13),
-		LDATA16 (SEVENY,2+16,0),
-		LDATA3 (SEVENX,2+16,0), LDATA7 (SEVENX,4+16,3), LDATA2 (SEVENX,3+16,10), LDATA (SEVENX,6+16,12),
-			LDATA (SEVENX,7+16,13), LDATA2 (SEVENX,0+16,14),
-		LDATA (FIVE,5+16,15), LDATA (FIVE,2+16,15), LDATA6 (THREE,2+16,7), LDATA (FIVE,4+16,15),
-			LDATA2 (THREE,4+16,11), LDATA (SEVENX,4+16,2), LDATA (THREE,3+16,12), LDATA (SEVENX,3+16,9),
-			LDATA (FIVE,6+16,15), LDATA (THREE,6+16,11),
-		LDATA (THREE,6+16,12), LDATA (SEVENX,6+16,2), LDATA (SEVENX,6+16,9), LDATA (SEVENX,6+16,11),
-			LDATA (FIVE,7+16,15), LDATA (THREE,7+16,12), LDATA (SEVENX,7+16,9), LDATA2 (SEVENX,7+16,11),
-			LDATA (FIVE,0+16,15), LDATA (SEVENX,0+16,13), EMPTY5,
-		LDATA16 (SEVEN,0+16,0),
-		LDATA16 (SIX,0+16,0),
-		LDATA16 (FIVE,0+16,0),
-		LDATA16 (THREE,0+16,0),
-		LDATA16 (SEVENY,0+16,0),
-		LDATA16 (SEVENX,0+16,0),
-		LDATA (SEVEN,1+16,15), LDATA14 (SIX,1+16,0),
-		LDATA (SIX,1+16,15), LDATA14 (FIVE,1+16,0)
-	};
-
-	static int roadrunn_molookup[256] =
-	{
-		LDATA16 (SEVEN,0,0),
-		LDATA16 (SIX,0,0),
-		LDATA16 (SEVEN,1,0),
-		LDATA16 (SIX,1,0),
-		LDATA16 (SEVEN,2,0),
-		LDATA16 (SIX,2,0),
-		LDATA16 (SEVEN,3,0),
-		LDATA16 (SIX,3,0),
-		LDATA16 (SEVEN,4,0),
-		LDATA16 (SIX,4,0),
-		LDATA16 (SEVEN,5,0),
-		LDATA16 (SIX,5,0),
-		LDATA16 (SEVEN,6,0),
-		LDATA16 (SIX,6,0),
-		LDATA16 (SEVEN,7,0),
-		LDATA16 (SIX,7,0)
-	};
-
-	#undef THREE
-	#undef FIVE
-	#undef SIX
-	#undef SEVEN
-	#undef SEVENX
-	#undef SEVENY
-
-	pflookup = roadrunn_pflookup;
-	molookup = roadrunn_molookup;
-	sprite_map_shift = 0;
-	pf_map_shift = 0;
-	hipri_color0 = 0;
-	return atarisys1_vh_start ();
-}
-
-
-int roadblst_vh_start(void)
-{
-	#define SEVEN6 1
-	#define SEVEN 2
-	#define SIX 3
-	#define FIVE 4
-	#define THREE 5
-	#define SEVENMO 6
-	#define SEVENMO0 7  /* looks like 3bpp, with a 0 in the high bit of the 2nd byte */
-	#define SEVENMO1 8  /* looks like 3bpp, with a 1 in the high bit of the 2nd byte */
-
-	static int roadblst_pflookup[256] =
-	{
-		LDATA2 (SEVEN6,2+4,0), LDATA14 (SEVEN,1+16,2),
-		LDATA2 (SEVEN6,3+4,0), LDATA14 (SEVEN,2+16,2),
-		LDATA2 (SEVEN6,1+4,0), LDATA14 (SEVEN,0+16,2),
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16,
-		EMPTY16
-	};
-
-	static int roadblst_molookup[256] =
-	{
-		LDATA16 (SIX,0,0),
-		LDATA16 (FIVE,0,0),
-		LDATA16 (THREE,0,0),
-		LDATA16 (SEVENMO,0,0),
-		LDATA16 (SEVENMO0,0,0),
-		LDATA16 (SEVENMO1,0,0),
-		LDATA14 (FIVE,1,2), LDATA2 (THREE,1,0),
-		LDATA4 (FIVE,2,12), LDATA12 (THREE,2,0),
-		LDATA9 (THREE,3,7), LDATA7 (SEVENMO,3,0),
-		LDATA (SEVENMO,3,7), EMPTY15,
-		LDATA11 (SEVENMO,4,5), LDATA5 (SEVENMO0,4,0),
-		LDATA (SEVENMO,6,15), LDATA15 (SEVENMO0,6,0),
-		LDATA5 (SEVENMO0,7,11), LDATA11 (SEVENMO1,7,0),
-		LDATA10 (SEVENMO1,5,6), EMPTY6,
-		EMPTY16,
-		LDATA14 (SEVENMO,0,2), EMPTY2
-	};
-	#undef THREE
-	#undef FIVE
-	#undef SIX
-	#undef SEVEN
-	#undef SEVEN6
-
-	pflookup = roadblst_pflookup;
-	molookup = roadblst_molookup;
-	return atarisys1_vh_start ();
+	atarigen_pf_free();
+	atarigen_mo_free();
 }
 
 
 
 /*************************************
  *
- *		Video system shutdown
+ *	Graphics bank selection
  *
  *************************************/
 
-void atarisys1_vh_stop (void)
+WRITE_HANDLER( atarisys1_bankselect_w )
 {
-	/* free bitmaps */
-	if (playfieldbitmap)
-		osd_free_bitmap (playfieldbitmap);
-	playfieldbitmap = 0;
-	if (tempbitmap)
-		osd_free_bitmap (tempbitmap);
-	tempbitmap = 0;
-
-	/* free dirty buffers */
-	if (pfmapped)
-		free (pfmapped);
-	colordirty = spritevisit = 0;
-	pfmapped = 0;
-	displaylist = 0;
-	scrolllist = 0;
-}
-
-
-
-/*************************************
- *
- *		Graphics bank selection
- *
- *************************************/
-
-void atarisys1_bankselect_w (int offset, int data)
-{
-	int oldword = READ_WORD (&atarisys1_bankselect[offset]);
-	int newword = COMBINE_WORD (oldword, data);
+	int oldword = READ_WORD(&atarisys1_bankselect[offset]);
+	int newword = COMBINE_WORD(oldword, data);
+	int scanline = cpu_getscanline();
 	int diff = oldword ^ newword;
 
 	/* update memory */
-	WRITE_WORD (&atarisys1_bankselect[offset], newword);
+	WRITE_WORD(&atarisys1_bankselect[offset], newword);
 
 	/* sound CPU reset */
-	if (diff & 0x80)
+	if (diff & 0x0080)
 	{
-		if (data & 0x80)
-			atarisys1_sound_reset ();
-		else
-			cpu_halt (1, 0);
+		cpu_set_reset_line(1, (newword & 0x0080) ? CLEAR_LINE : ASSERT_LINE);
+		if (!(newword & 0x0080)) atarigen_sound_reset();
 	}
 
 	/* motion object bank select */
-	atarisys1_update_display_list (cpu_getscanline ());
+	atarisys1_scanline_update(scanline);
 
 	/* playfield bank select */
 	if (diff & 0x04)
 	{
-		int i, *pf;
-
-		/* set the new bank globally */
-		pfbank = (newword & 0x04) ? 0x80 : 0x00;
-
-		/* reset the color counters */
-		memset (playfield_count, 0, sizeof (playfield_count));
-
-		/* and remap the entire playfield */
-		for (i = atarisys1_playfieldram_size / 2, pf = pfmapped; i >= 0; i--)
-		{
-			int val = READ_WORD (&atarisys1_playfieldram[i * 2]);
-			int map = pflookup[pfbank | ((val >> 8) & 0x7f)] | (val & 0xff) | ((val & 0x8000) << 9) | LDIRTYFLAG;
-			playfield_count[LCOLOR (map)] += 1;
-			*pf++ = map;
-		}
+		pf_state.param[0] = (newword & 0x04) ? 0x80 : 0x00;
+		atarigen_pf_update(&pf_state, cpu_getscanline() + 1);
 	}
 }
 
@@ -615,112 +296,61 @@ void atarisys1_bankselect_w (int offset, int data)
 
 /*************************************
  *
- *		Playfield special priority color
+ *	Playfield horizontal scroll
  *
  *************************************/
 
-int atarisys1_prioritycolor_r (int offset)
+WRITE_HANDLER( atarisys1_hscroll_w )
 {
-	return READ_WORD (&atarisys1_prioritycolor[offset]);
-}
+	int oldword = READ_WORD(&atarigen_hscroll[offset]);
+	int newword = COMBINE_WORD(oldword, data);
+	WRITE_WORD(&atarigen_hscroll[offset], newword);
 
-
-void atarisys1_prioritycolor_w (int offset, int data)
-{
-	COMBINE_WORD_MEM (&atarisys1_prioritycolor[offset], data);
+	/* set the new scroll value and update the playfield status */
+	pf_state.hscroll = newword & 0x1ff;
+	atarigen_pf_update(&pf_state, cpu_getscanline() + 1);
 }
 
 
 
 /*************************************
  *
- *		Playfield horizontal scroll
+ *	Playfield vertical scroll
  *
  *************************************/
 
-void atarisys1_hscroll_w (int offset, int data)
+WRITE_HANDLER( atarisys1_vscroll_w )
 {
-	int oldword = READ_WORD (&atarisys1_hscroll[offset]);
-	int newword = COMBINE_WORD (oldword, data);
+	int scanline = cpu_getscanline() + 1;
 
-	WRITE_WORD (&atarisys1_hscroll[offset], newword);
+	int oldword = READ_WORD(&atarigen_vscroll[offset]);
+	int newword = COMBINE_WORD(oldword, data);
+	WRITE_WORD(&atarigen_vscroll[offset], newword);
 
-	if (!offset && (oldword & 0x1ff) != (newword & 0x1ff))
-	{
-		int scrollval = ((oldword & 0x1ff) << 12) + (READ_WORD (&atarisys1_vscroll[0]) & 0x1ff);
-		int i, end = cpu_getscanline ();
-
-		if (end > YDIM)
-			end = YDIM;
-
-		for (i = scrolllist_end; i < end; i++)
-			scrolllist[i] = scrollval;
-		scrolllist_end = end;
-	}
+	/* because this latches a new value into the scroll base,
+	   we need to adjust for the scanline */
+	pf_state.vscroll = newword & 0x1ff;
+	if (scanline < YDIM) pf_state.vscroll -= scanline;
+	atarigen_pf_update(&pf_state, scanline);
 }
 
 
 
 /*************************************
  *
- *		Playfield vertical scroll
+ *	Playfield RAM write handler
  *
  *************************************/
 
-void atarisys1_vscroll_w (int offset, int data)
+WRITE_HANDLER( atarisys1_playfieldram_w )
 {
-	int oldword = READ_WORD (&atarisys1_vscroll[offset]);
-	int newword = COMBINE_WORD (oldword, data);
-
-	WRITE_WORD (&atarisys1_vscroll[offset], newword);
-
-	if (!offset && (oldword & 0x1ff) != (newword & 0x1ff))
-	{
-		int scrollval = ((READ_WORD (&atarisys1_hscroll[0]) & 0x1ff) << 12) + (oldword & 0x1ff);
-		int i, end = cpu_getscanline ();
-
-		if (end > YDIM)
-			end = YDIM;
-
-		for (i = scrolllist_end; i < end; i++)
-			scrolllist[i] = scrollval;
-		scrolllist_end = end;
-	}
-}
-
-
-
-/*************************************
- *
- *		Playfield RAM read/write handlers
- *
- *************************************/
-
-int atarisys1_playfieldram_r (int offset)
-{
-	return READ_WORD (&atarisys1_playfieldram[offset]);
-}
-
-
-void atarisys1_playfieldram_w (int offset, int data)
-{
-	int oldword = READ_WORD (&atarisys1_playfieldram[offset]);
-	int newword = COMBINE_WORD (oldword, data);
+	int oldword = READ_WORD(&atarigen_playfieldram[offset]);
+	int newword = COMBINE_WORD(oldword, data);
 
 	if (oldword != newword)
 	{
-		int map, oldmap;
-
-		WRITE_WORD (&atarisys1_playfieldram[offset], newword);
-
-		/* remap it now and mark it dirty in the process */
-		map = pflookup[pfbank | ((newword >> 8) & 0x7f)] | (newword & 0xff) | ((newword & 0x8000) << 9) | LDIRTYFLAG;
-		oldmap = pfmapped[offset / 2];
-		pfmapped[offset / 2] = map;
-
-		/* update the color counts */
-		playfield_count[LCOLOR (oldmap)] -= 1;
-		playfield_count[LCOLOR (map)] += 1;
+		WRITE_WORD(&atarigen_playfieldram[offset], newword);
+		atarigen_pf_dirty[offset / 2] = 0xff;
 	}
 }
 
@@ -728,34 +358,28 @@ void atarisys1_playfieldram_w (int offset, int data)
 
 /*************************************
  *
- *		Sprite RAM read/write handlers
+ *	Sprite RAM write handler
  *
  *************************************/
 
-int atarisys1_spriteram_r (int offset)
+WRITE_HANDLER( atarisys1_spriteram_w )
 {
-	return READ_WORD (&atarisys1_spriteram[offset]);
-}
-
-
-void atarisys1_spriteram_w (int offset, int data)
-{
-	int oldword = READ_WORD (&atarisys1_spriteram[offset]);
-	int newword = COMBINE_WORD (oldword, data);
+	int oldword = READ_WORD(&atarigen_spriteram[offset]);
+	int newword = COMBINE_WORD(oldword, data);
 
 	if (oldword != newword)
 	{
-		WRITE_WORD (&atarisys1_spriteram[offset], newword);
+		WRITE_WORD(&atarigen_spriteram[offset], newword);
 
 		/* if modifying a timer, beware */
-		if (((offset & 0x180) == 0x000 && READ_WORD (&atarisys1_spriteram[offset | 0x080]) == 0xffff) ||
+		if (((offset & 0x180) == 0x000 && READ_WORD(&atarigen_spriteram[offset | 0x080]) == 0xffff) ||
 		    ((offset & 0x180) == 0x080 && newword == 0xffff))
 		{
 			/* if the timer is in the active bank, update the display list */
-			if ((offset >> 9) == ((READ_WORD (&atarisys1_bankselect[0]) >> 3) & 7))
+			if ((offset >> 9) == ((READ_WORD(&atarisys1_bankselect[0]) >> 3) & 7))
 			{
-				if (errorlog) fprintf (errorlog, "Caught timer mod!\n");
-				atarisys1_update_display_list (cpu_getscanline ());
+				logerror("Caught timer mod!\n");
+				atarisys1_scanline_update(cpu_getscanline());
 			}
 		}
 	}
@@ -765,108 +389,85 @@ void atarisys1_spriteram_w (int offset, int data)
 
 /*************************************
  *
- *		Palette RAM read/write handlers
+ *	MO interrupt handlers
  *
  *************************************/
 
-int atarisys1_paletteram_r (int offset)
-{
-	return READ_WORD (&atarisys1_paletteram[offset]);
-}
-
-
-void atarisys1_paletteram_w (int offset, int data)
-{
-	int oldword = READ_WORD (&atarisys1_paletteram[offset]);
-	int newword = COMBINE_WORD (oldword, data);
-
-	if (oldword != newword)
-	{
-		WRITE_WORD (&atarisys1_paletteram[offset], newword);
-		colordirty[offset / 2] = 1;
-	}
-}
-
-
-
-/*************************************
- *
- *		Motion object interrupt handlers
- *
- *************************************/
-
-void atarisys1_int3off_callback (int param)
+static void int3off_callback(int param)
 {
 	/* clear the state */
-	int3_state = 0;
-
-	/* clear the interrupt generated as well */
-	cpu_clear_pending_interrupts (0);
+	atarigen_scanline_int_ack_w(0, 0);
 
 	/* make this timer go away */
 	int3off_timer = 0;
 }
 
 
-void atarisys1_int3_callback (int param)
+void atarisys1_int3_callback(int param)
 {
-	/* generate the interrupt */
-	cpu_cause_interrupt (0, 3);
-
 	/* update the state */
-	int3_state = 1;
+	atarigen_scanline_int_gen();
 
 	/* set a timer to turn it off */
 	if (int3off_timer)
-		timer_remove (int3off_timer);
-	int3off_timer = timer_set (cpu_getscanlineperiod (), 0, atarisys1_int3off_callback);
+		timer_remove(int3off_timer);
+	int3off_timer = timer_set(cpu_getscanlineperiod(), 0, int3off_callback);
 
 	/* set ourselves up to go off next frame */
-	int3_timer[param] = timer_set (TIME_IN_HZ (Machine->drv->frames_per_second), param, atarisys1_int3_callback);
-}
-
-
-int atarisys1_int3state_r (int offset)
-{
-	return int3_state ? 0x0080 : 0x0000;
+	int3_timer[param] = timer_set(TIME_IN_HZ(Machine->drv->frames_per_second), param, atarisys1_int3_callback);
 }
 
 
 
 /*************************************
  *
- *		Motion object list handlers
+ *	MO interrupt state read
  *
  *************************************/
 
-void atarisys1_update_display_list (int scanline)
+READ_HANDLER( atarisys1_int3state_r )
 {
-	unsigned short *d = displaylist_end, *startd = d, *lastd = displaylist_last;
-	int bank = ((READ_WORD (&atarisys1_bankselect[0]) >> 3) & 7) * 0x200;
-	int link = 0, match = 0, i;
-	char timer[YDIM];
+	return atarigen_scanline_int_state ? 0x0080 : 0x0000;
+}
 
-	/* if the last list entries were on the same scanline, overwrite them */
-	if (lastd)
+
+
+/*************************************
+ *
+ *	Periodic MO updater
+ *
+ *************************************/
+
+void atarisys1_scanline_update(int scanline)
+{
+	int bank = ((READ_WORD(&atarisys1_bankselect[0]) >> 3) & 7) * 0x200;
+	UINT8 *base = &atarigen_spriteram[bank];
+	UINT8 spritevisit[64];
+	UINT8 timer[YDIM];
+	int link = 0;
+	int i;
+
+	/* only process if we're still onscreen */
+	if (scanline < YDIM)
 	{
-		if (*lastd == scanline)
-			d = startd = lastd;
+		/* generic update first */
+		if (!scanline)
+			atarigen_mo_update(base, 0, 0);
 		else
-			match = 1;
+			atarigen_mo_update(base, 0, scanline + 1);
 	}
 
-	/* visit all the sprites and copy their data into the display list */
-	memset (spritevisit, 0, atarisys1_spriteram_size / 8 / 8);
-	memset (timer, 0, sizeof (timer));
+	/* visit all the sprites and look for timers */
+	memset(spritevisit, 0, sizeof(spritevisit));
+	memset(timer, 0, sizeof(timer));
 	while (!spritevisit[link])
 	{
-		int data1 = READ_WORD (&atarisys1_spriteram[bank + link * 2 + 0x000]);
-		int data2 = READ_WORD (&atarisys1_spriteram[bank + link * 2 + 0x080]);
-		int data3 = READ_WORD (&atarisys1_spriteram[bank + link * 2 + 0x100]);
+		int data2 = READ_WORD(&base[link * 2 + 0x080]);
 
-		/* a picture of 0xffff is really an interrupt - gross! */
+		/* a codeure of 0xffff is really an interrupt - gross! */
 		if (data2 == 0xffff)
 		{
+			int data1 = READ_WORD(&base[link * 2 + 0x000]);
 			int vsize = (data1 & 15) + 1;
 			int ypos = (256 - (data1 >> 5) - vsize * 8) & 0x1ff;
 
@@ -875,43 +476,19 @@ void atarisys1_update_display_list (int scanline)
 				timer[ypos] = 1;
 		}
 
-		/* ignore updates after the end of the frame */
-		else if (scanline < YDIM && data2)
-		{
-			*d++ = scanline;
-			*d++ = data1;
-			*d++ = data2;
-			*d++ = data3;
-
-			/* update our match status */
-			if (match)
-			{
-				lastd++;
-				if (*lastd++ != data1 || *lastd++ != data2 || *lastd++ != data3)
-					match = 0;
-			}
-		}
-
 		/* link to the next object */
 		spritevisit[link] = 1;
-		link = READ_WORD (&atarisys1_spriteram[bank + link * 2 + 0x180]) & 0x3f;
-	}
-
-	/* if we didn't match the last set of entries, update the counters */
-	if (!match)
-	{
-		displaylist_end = d;
-		displaylist_last = startd;
+		link = READ_WORD(&atarigen_spriteram[bank + link * 2 + 0x180]) & 0x3f;
 	}
 
 	/* update our interrupt timers */
 	for (i = 0; i < YDIM; i++)
 	{
 		if (timer[i] && !int3_timer[i])
-			int3_timer[i] = timer_set (cpu_getscanlinetime (i), i, atarisys1_int3_callback);
+			int3_timer[i] = timer_set(cpu_getscanlinetime(i), i, atarisys1_int3_callback);
 		else if (!timer[i] && int3_timer[i])
 		{
-			timer_remove (int3_timer[i]);
+			timer_remove(int3_timer[i]);
 			int3_timer[i] = 0;
 		}
 	}
@@ -919,110 +496,276 @@ void atarisys1_update_display_list (int scanline)
 
 
 
-void atarisys1_begin_frame (int param)
-{
-	/* update the counts in preparation for the new frame */
-	displaylist_end = displaylist;
-	displaylist_last = NULL;
-	scrolllist_end = 0;
+/*************************************
+ *
+ *	Main refresh
+ *
+ *************************************/
 
-	/* update the display list for the beginning of the frame */
-	atarisys1_update_display_list (0);
+void atarisys1_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	int i;
+
+	/* update the palette */
+	if (update_palette())
+		memset(atarigen_pf_dirty, 0xff, atarigen_playfieldram_size / 2);
+
+	/* set up the all-transparent overrender palette */
+	for (i = 0; i < 16; i++)
+		atarigen_overrender_colortable[i] = palette_transparent_pen;
+
+	/* render the playfield */
+	memset(atarigen_pf_visit, 0, 64*64);
+	atarigen_pf_process(pf_render_callback, bitmap, &Machine->visible_area);
+
+	/* render the motion objects */
+	priority_pens = READ_WORD(&atarisys1_prioritycolor[0]) & 0xff;
+	atarigen_mo_process(mo_render_callback, bitmap);
+
+	/* redraw the alpha layer completely */
+	{
+		const struct GfxElement *gfx = Machine->gfx[0];
+		int sx, sy, offs;
+
+		for (sy = 0; sy < YCHARS; sy++)
+			for (sx = 0, offs = sy*64; sx < XCHARS; sx++, offs++)
+			{
+				int data = READ_WORD(&atarigen_alpharam[offs * 2]);
+				int opaque = data & 0x2000;
+				int code = data & 0x3ff;
+
+				if (code || opaque)
+				{
+					int color = (data >> 10) & 7;
+					drawgfx(bitmap, gfx, code, color, 0, 0, 8 * sx, 8 * sy, 0,
+							opaque ? TRANSPARENCY_NONE : TRANSPARENCY_PEN, 0);
+				}
+			}
+	}
+
+	/* update onscreen messages */
+	atarigen_update_messages();
 }
 
 
 
-/***************************************************************************
-
-  Draw the game screen in the given osd_bitmap.
-  Do NOT call osd_update_display() from this function, it will be called by
-  the main emulation engine.
-
-***************************************************************************/
-
-static int xscroll, yscroll;
-
-
 /*************************************
  *
- *		Refresh helpers
+ *	Palette management
  *
  *************************************/
 
-static inline void remap_color (int color)
+static const UINT8 *update_palette(void)
 {
+	UINT16 al_map[8], pfmo_map[32];
 	int i, j;
 
-	/* first see if there is a match from last frame */
-	for (i = 0; i < 16; i++)
-		if (last_map[i] == color && this_map[i] < 0)
-		{
-			this_map[i] = color;
-			return;
-		}
+	/* reset color tracking */
+	memset(pfmo_map, 0, sizeof(pfmo_map));
+	memset(al_map, 0, sizeof(al_map));
+	palette_init_used_colors();
 
-	/* if not, pick a blank entry from last frame and use it */
-	for (i = 0; i < 16; i++)
-		if (last_map[i] < 0 && this_map[i] < 0)
-		{
-			this_map[i] = color;
+	/* always remap the transluscent colors */
+	memset(&palette_used_colors[0x300], PALETTE_COLOR_USED, 16);
 
-			/* and update the colortable appropriately */
+	/* update color usage for the playfield */
+	atarigen_pf_process(pf_color_callback, pfmo_map, &Machine->visible_area);
+
+	/* update color usage for the mo's */
+	atarigen_mo_process(mo_color_callback, pfmo_map);
+
+	/* update color usage for the alphanumerics */
+	{
+		const unsigned int *usage = Machine->gfx[0]->pen_usage;
+		int sx, sy, offs;
+
+		for (sy = 0; sy < YCHARS; sy++)
+			for (sx = 0, offs = sy * 64; sx < XCHARS; sx++, offs++)
+			{
+				int data = READ_WORD(&atarigen_alpharam[offs * 2]);
+				int color = (data >> 10) & 7;
+				int code = data & 0x3ff;
+				al_map[color] |= usage[code];
+			}
+	}
+
+	/* determine the final playfield palette */
+	for (i = 16; i < 32; i++)
+	{
+		UINT16 used = pfmo_map[i];
+		if (used)
 			for (j = 0; j < 16; j++)
-				Machine->colortable[color * 16 + j] = Machine->pens[i * 16 + j];
-			return;
-		}
+				if (used & (1 << j))
+					palette_used_colors[0x100 + i * 16 + j] = PALETTE_COLOR_USED;
+	}
 
-	/* if all else fails, pick a blank entry from this frame and use it */
+	/* determine the final motion object palette */
 	for (i = 0; i < 16; i++)
-		if (this_map[i] < 0)
+	{
+		UINT16 used = pfmo_map[i];
+		if (used)
 		{
-			this_map[i] = color;
+			palette_used_colors[0x100 + i * 16] = PALETTE_COLOR_TRANSPARENT;
+			for (j = 1; j < 16; j++)
+				if (used & (1 << j))
+					palette_used_colors[0x100 + i * 16 + j] = PALETTE_COLOR_USED;
+		}
+	}
 
-			/* and update the colortable appropriately */
-			for (j = 0; j < 16; j++)
-				Machine->colortable[color * 16 + j] = Machine->pens[i * 16 + j];
-			return;
+	/* determine the final alpha palette */
+	for (i = 0; i < 8; i++)
+	{
+		UINT16 used = al_map[i];
+		if (used)
+			for (j = 0; j < 4; j++)
+				if (used & (1 << j))
+					palette_used_colors[0x000 + i * 4 + j] = PALETTE_COLOR_USED;
+	}
+
+	/* recalculate the palette */
+	return palette_recalc();
+}
+
+
+
+/*************************************
+ *
+ *	Playfield palette
+ *
+ *************************************/
+
+static void pf_color_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *param)
+{
+	const UINT32 *lookup_table = &pf_lookup[state->param[0]];
+	UINT16 *colormap = param;
+	int x, y;
+
+	/* standard loop over tiles */
+	for (y = tiles->min_y; y != tiles->max_y; y = (y + 1) & 63)
+		for (x = tiles->min_x; x != tiles->max_x; x = (x + 1) & 63)
+		{
+			int offs = y * 64 + x;
+			int data = READ_WORD(&atarigen_playfieldram[offs * 2]);
+			int lookup = lookup_table[(data >> 8) & 0x7f];
+			const unsigned int *usage = pen_usage[LOOKUP_GFX(lookup)];
+			int bpp = LOOKUP_BPP(lookup);
+			int code = LOOKUP_CODE(lookup) | (data & 0xff);
+			int color = LOOKUP_COLOR(lookup);
+			unsigned int bits;
+
+			/* based on the depth, we need to tweak our pen mapping */
+			if (bpp == 0)
+				colormap[color] |= usage[code];
+			else if (bpp == 1)
+			{
+				bits = usage[code];
+				colormap[color * 2] |= bits;
+				colormap[color * 2 + 1] |= bits >> 16;
+			}
+			else
+			{
+				bits = usage[code * 2];
+				colormap[color * 4] |= bits;
+				colormap[color * 4 + 1] |= bits >> 16;
+				bits = usage[code * 2 + 1];
+				colormap[color * 4 + 2] |= bits;
+				colormap[color * 4 + 3] |= bits >> 16;
+			}
+
+			/* also mark unvisited tiles dirty */
+			if (!atarigen_pf_visit[offs]) atarigen_pf_dirty[offs] = 0xff;
 		}
 }
 
 
-/*
- *   playfield redraw function
- */
 
-void redraw_playfield_chunk (struct osd_bitmap *bitmap, int xpos, int ypos, int w, int h, int transparency, int transparency_color, int check_color)
+/*************************************
+ *
+ *	Playfield rendering
+ *
+ *************************************/
+
+static void pf_render_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *param)
 {
-	int y, x;
+	int bank = state->param[0];
+	const UINT32 *lookup_table = &pf_lookup[bank];
+	struct osd_bitmap *bitmap = param;
+	int x, y;
 
-	/* round the positions */
-	xpos = (xpos - xscroll) / 8;
-	ypos = (ypos - yscroll) / 8;
-
-	/* loop over the rows */
-	for (y = ypos + h; y >= ypos; y--)
-	{
-		/* compute the scroll-adjusted y position */
-		int sy = (y * 8 + yscroll) & 0x1ff;
-		if (sy > 0x1f8) sy -= 0x200;
-
-		/* loop over the columns */
-		for (x = xpos + w; x >= xpos; x--)
+	/* standard loop over tiles */
+	for (y = tiles->min_y; y != tiles->max_y; y = (y + 1) & 63)
+		for (x = tiles->min_x; x != tiles->max_x; x = (x + 1) & 63)
 		{
-			/* compute the scroll-adjusted x position */
-			int sx = (x * 8 + xscroll) & 0x1ff;
-			if (sx > 0x1f8) sx -= 0x200;
+			int offs = y * 64 + x;
 
+			/* update only if dirty */
+			if (atarigen_pf_dirty[offs] != bank)
 			{
-				/* process the data */
-				int data = pfmapped[(y & 0x3f) * 64 + (x & 0x3f)];
-				int color = LCOLOR (data);
+				int data = READ_WORD(&atarigen_playfieldram[offs * 2]);
+				int lookup = lookup_table[(data >> 8) & 0x7f];
+				const struct GfxElement *gfx = Machine->gfx[LOOKUP_GFX(lookup)];
+				int code = LOOKUP_CODE(lookup) | (data & 0xff);
+				int color = LOOKUP_COLOR(lookup);
+				int hflip = data & 0x8000;
 
-				/* draw */
-				if (check_color < 0 || color == check_color)
-					drawgfx (bitmap, Machine->gfx[LBANK (data)], LPICT (data), color, LFLIP (data), 0,
-							sx, sy, &Machine->drv->visible_area, transparency, transparency_color);
+				drawgfx(atarigen_pf_bitmap, gfx, code, color, hflip, 0, 8 * x, 8 * y, 0, TRANSPARENCY_NONE, 0);
+				atarigen_pf_dirty[offs] = bank;
 			}
+
+			/* track the tiles we've visited */
+			atarigen_pf_visit[offs] = 1;
+		}
+
+	/* then blast the result */
+	x = -state->hscroll;
+	y = -state->vscroll;
+	copyscrollbitmap(bitmap, atarigen_pf_bitmap, 1, &x, 1, &y, clip, TRANSPARENCY_NONE, 0);
+}
+
+
+
+/*************************************
+ *
+ *	Playfield overrendering
+ *
+ *************************************/
+
+static void pf_overrender_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *param)
+{
+	const UINT32 *lookup_table = &pf_lookup[state->param[0]];
+	const struct pf_overrender_data *overrender_data = param;
+	struct osd_bitmap *bitmap = overrender_data->bitmap;
+	int type = overrender_data->type;
+	int x, y;
+
+	/* standard loop over tiles */
+	for (y = tiles->min_y; y != tiles->max_y; y = (y + 1) & 63)
+	{
+		int sy = (8 * y - state->vscroll) & 0x1ff;
+		if (sy >= YDIM) sy -= 0x200;
+
+		for (x = tiles->min_x; x != tiles->max_x; x = (x + 1) & 63)
+		{
+			int offs = y * 64 + x;
+			int data = READ_WORD(&atarigen_playfieldram[offs * 2]);
+			int lookup = lookup_table[(data >> 8) & 0x7f];
+			const struct GfxElement *gfx = Machine->gfx[LOOKUP_GFX(lookup)];
+			int code = LOOKUP_CODE(lookup) | (data & 0xff);
+			int color = LOOKUP_COLOR(lookup);
+			int hflip = data & 0x8000;
+
+			int sx = (8 * x - state->hscroll) & 0x1ff;
+			if (sx >= XDIM) sx -= 0x200;
+
+			/* overrender based on the type */
+			if (type == OVERRENDER_PRIORITY)
+			{
+				int bpp = LOOKUP_BPP(lookup);
+				if (color == (16 >> bpp))
+					drawgfx(bitmap, gfx, code, color, hflip, 0, sx, sy, clip, TRANSPARENCY_PENS, ~priority_pens);
+			}
+			else
+				drawgfx(bitmap, gfx, code, color, hflip, 0, sx, sy, clip, TRANSPARENCY_PEN, 0);
 		}
 	}
 }
@@ -1031,838 +774,107 @@ void redraw_playfield_chunk (struct osd_bitmap *bitmap, int xpos, int ypos, int 
 
 /*************************************
  *
- *		Generic System 1 refresh
+ *	Motion object palette
  *
  *************************************/
 
-void atarisys1_vh_screenrefresh (struct osd_bitmap *bitmap)
+static void mo_color_callback(const UINT16 *data, const struct rectangle *clip, void *param)
 {
-	int x, y, sx, sy, xoffs, yoffs, offs, hipri_pen = -1, i;
-	int pcolor = READ_WORD (&atarisys1_prioritycolor[0]) & 0xff;
-	int redraw_list[1024], *redraw = redraw_list;
-	int sprite_map[16], alpha_map[16];
+	UINT16 *colormap = param;
+	UINT16 temp = 0;
+	int i;
 
+	UINT32 lookup = mo_lookup[data[1] >> 8];
+	const unsigned int *usage = pen_usage[LOOKUP_GFX(lookup)];
+	int code = LOOKUP_CODE(lookup) | (data[1] & 0xff);
+	int color = LOOKUP_COLOR(lookup);
+	int vsize = (data[0] & 0x000f) + 1;
+	int bpp = LOOKUP_BPP(lookup);
 
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 0: debugging
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	#if SYSTEM1_DEBUG
-		int hidebank = atarisys1_debug ();
-	#endif
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 1: give the playfield first pick of colors
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	for (i = 0; i < 16; i++)
+	if (bpp == 0)
 	{
-		last_map[i] = this_map[i];
-		this_map[i] = playfield_count[(i + 16) >> pf_map_shift] ? i + 32 : -1;
-		sprite_map[i] = alpha_map[i] = 0;
+		for (i = 0; i < vsize; i++)
+			temp |= usage[code++];
+		colormap[color] |= temp;
 	}
 
+	/* in theory we should support all 3 possible depths, but motion objects are all 4bpp */
+}
 
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 2: load the scroll values from the start of the previous frame
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	if (scrolllist_end)
+
+
+/*************************************
+ *
+ *	Motion object rendering
+ *
+ *************************************/
+
+static void mo_render_callback(const UINT16 *data, const struct rectangle *clip, void *param)
+{
+	struct osd_bitmap *bitmap = param;
+	struct pf_overrender_data overrender_data;
+	struct rectangle pf_clip;
+
+	/* extract data from the various words */
+	UINT32 lookup = mo_lookup[data[1] >> 8];
+	struct GfxElement *gfx = Machine->gfx[LOOKUP_GFX(lookup)];
+	int code = LOOKUP_CODE(lookup) | (data[1] & 0xff);
+	int color = LOOKUP_COLOR(lookup);
+	int xpos = data[2] >> 5;
+	int ypos = 256 - (data[0] >> 5);
+	int hflip = data[0] & 0x8000;
+	int vsize = (data[0] & 0x000f) + 1;
+	int priority = data[2] >> 15;
+
+	/* adjust for height */
+	ypos -= vsize * 8;
+
+	/* adjust the final coordinates */
+	xpos &= 0x1ff;
+	ypos &= 0x1ff;
+	if (xpos >= XDIM) xpos -= 0x200;
+	if (ypos >= YDIM) ypos -= 0x200;
+
+	/* bail if X coordinate is out of range */
+	if (xpos <= -8 || xpos >= XDIM)
+		return;
+
+	/* determine the bounding box */
+	atarigen_mo_compute_clip_8x8(pf_clip, xpos, ypos, 1, vsize, clip);
+
+	/* standard priority case? */
+	if (!priority)
 	{
-		xscroll = scrolllist[0] >> 12;
-		yscroll = scrolllist[0];
+		/* draw the motion object */
+		atarigen_mo_draw_8x8_strip(bitmap, gfx, code, color, hflip, 0, xpos, ypos, vsize, clip, TRANSPARENCY_PEN, 0);
+
+		/* do we have a priority color active? */
+		if (priority_pens)
+		{
+			overrender_data.bitmap = bitmap;
+			overrender_data.type = OVERRENDER_PRIORITY;
+
+			/* overrender the playfield */
+			atarigen_pf_process(pf_overrender_callback, &overrender_data, &pf_clip);
+		}
 	}
+
+	/* high priority case? */
 	else
 	{
-		xscroll = READ_WORD (&atarisys1_hscroll[0]);
-		yscroll = READ_WORD (&atarisys1_vscroll[0]);
-	}
-
-	xscroll = -(xscroll & 0x1ff);
-	yscroll = -(yscroll & 0x1ff);
-
-	xoffs = (-xscroll / 8);
-	yoffs = (-yscroll / 8);
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 3: update the offscreen version of the visible area of the playfield
-	 *
-	 *---------------------------------------------------------------------------------
-	 *
-	 * 	Playfield encoding
-	 *
-	 *		1 16-bit word is used
-	 *
-	 *			Bits 0-14  = index of the image; a 16th bit is pulled from the playfield
-	 *                    bank selection bit.  The upper 8 bits of this 16-bit index
-	 *                    are passed through a pair of lookup PROMs to select which
-	 *                    graphics bank and color to use
-	 *			Bit  15    = horizontal flip
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	for (y = yoffs + YCHARS + 1; y >= yoffs; y--)
-	{
-		sy = y & 63;
-		for (x = xoffs + XCHARS + 1; x >= xoffs; x--)
-		{
-			int data;
-
-			sx = x & 63;
-			offs = sy * 64 + sx;
-			data = pfmapped[offs];
-
-			if (LDIRTY (data))
-			{
-				int bank = LBANK (data);
-				if (bank)
-					drawgfx (playfieldbitmap, Machine->gfx[bank], LPICT (data), LCOLOR (data), LFLIP (data), 0,
-							8*sx, 8*sy, 0, TRANSPARENCY_NONE, 0);
-				pfmapped[offs] = data & ~LDIRTYFLAG;
-			}
-		}
-	}
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 4: copy the playfield bitmap to the destination
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	copyscrollbitmap (bitmap, playfieldbitmap,
-			1, &xscroll,
-			1, &yscroll,
-			&Machine->drv->visible_area,
-			TRANSPARENCY_NONE, 0);
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 5: render the pregenerated list of motion objects
-	 *
-	 *---------------------------------------------------------------------------------
-	 *
-	 * 	Motion Object encoding
-	 *
-	 *		4 16-bit words are used total
-	 *
-	 *		Word 1: Vertical position
-	 *
-	 *			Bits 0-3   = vertical size of the object, in tiles
-	 *			Bits 5-13  = vertical position
-	 *			Bit  15    = horizontal flip
-	 *
-	 *		Word 2: Image
-	 *
-	 *			Bits 0-15  = index of the image; the upper 8 bits are passed through a
-	 *			             pair of lookup PROMs to select which graphics bank and color
-	 *			              to use (high bit of color is ignored and comes from Bit 15, below)
-	 *
-	 *		Word 3: Horizontal position
-	 *
-	 *			Bits 0-3   = horizontal size of the object, in tiles
-	 *			Bits 5-13  = horizontal position
-	 *			Bit  15    = special playfield priority
-	 *
-	 *		Word 4: Link
-	 *
-	 *			Bits 0-5   = link to the next motion object
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	{
-		int last_start_scan = -1;
-		struct rectangle clip;
-		unsigned short *d;
-
-		/* create a clipping rectangle so that only partial sections are updated at a time */
-		clip.min_x = 0;
-		clip.max_x = Machine->drv->screen_width - 1;
-
-		/* loop over the list until the end */
-		for (d = displaylist; d < displaylist_end; d += 4)
-		{
-			int start_scan = d[0], data1 = d[1], data2 = d[2], data3 = d[3];
-
-			/* extract data from the various words */
-			int pict = data2;
-			int lookup = molookup[pict >> 8];
-			int vsize = (data1 & 15) + 1;
-			int xpos = data3 >> 5;
-			int ypos = 256 - (data1 >> 5) - vsize * 8;
-			int color = LCOLOR (lookup);
-			int bank = LBANK (lookup);
-			int hflip = data1 & 0x8000;
-			int hipri = data3 & 0x8000;
-
-			#if SYSTEM1_DEBUG
-				if ((pict >> 8) == hidebank)
-					color = Machine->gfx[bank]->total_colors - 1;
-			#endif
-
-			/* do we have a priority color active? */
-			if (pcolor)
-			{
-				int *r, val;
-
-				/* if so, add an entry to the redraw list for later */
-				val = ((xpos & 0x1ff) << 23) + ((ypos & 0x1ff) << 14) + vsize;
-				for (r = redraw_list; r < redraw; )
-					if (*r++ == val)
-						break;
-
-				/* but only add it if we don't have a matching entry already */
-				if (r == redraw)
-					*redraw++ = val;
-			}
-
-			/* if this is a new region of the screen, find the end and adjust our clipping */
-			if (start_scan != last_start_scan)
-			{
-				unsigned short *df;
-
-				last_start_scan = start_scan;
-				clip.min_y = start_scan;
-
-				/* look for an entry whose scanline start is different from ours; that's our bottom */
-				for (df = d; df < displaylist_end; df += 4)
-					if (*df != start_scan)
-					{
-						clip.max_y = *df - 1;
-						break;
-					}
-
-				/* if we didn't find any additional regions, go until the bottom of the screen */
-				if (df == displaylist_end)
-					clip.max_y = Machine->drv->screen_height - 1;
-			}
-
-			/* keep them in range to start */
-			xpos &= 0x1ff;
-			ypos &= 0x1ff;
-
-			/*
-			 *
-			 *      case 1: normal
-			 *
-			 */
-			if (!hipri)
-			{
-				/* wrap and clip the X coordinate */
-				if (xpos > 0x1f8) xpos -= 0x200;
-				if (xpos > -8 && xpos < XDIM)
-				{
-					/* wrap the Y coordinate */
-					if (ypos >= YDIM) ypos -= 0x200;
-
-					/* loop over the height */
-					for (y = 0, sy = ypos; y < vsize; y++, sy += 8, pict++)
-					{
-						/* clip the Y coordinate */
-						if (sy <= -8)
-							continue;
-						else if (sy >= YDIM)
-							break;
-
-						/* if this sprite's color has not been used yet this frame, grab it */
-						/* note that by doing it here, we don't map sprites that aren't visible */
-						{
-							int temp = color >> sprite_map_shift;
-							if (!sprite_map[temp])
-							{
-								remap_color (temp + 16);
-								sprite_map[temp] = 1;
-							}
-						}
-
-						/* draw the sprite */
-						drawgfx (bitmap, Machine->gfx[bank],
-								LPICT (lookup) | (pict & 0xff), color,
-								hflip, 0, xpos, sy, &clip, TRANSPARENCY_PEN, 0);
-					}
-				}
-			}
-
-			/*
-			 *
-			 *      case 2: high priority playfield
-			 *
-			 */
-			else
-			{
-				int through_color = Machine->gfx[bank]->total_colors - 1;
-				struct rectangle tclip;
-
-				/* wrap and clip the X coordinate */
-				if (xpos > 0x1f8) xpos -= 0x200;
-				if (xpos > -8 && xpos < XDIM)
-				{
-					/* wrap the Y coordinate */
-					if (ypos >= YDIM) ypos -= 0x200;
-
-					/* loop over the height */
-					for (y = 0, sy = ypos; y < vsize; y++, sy += 8, pict++)
-					{
-						/* clip the Y coordinate */
-						if (sy <= -8)
-							continue;
-						else if (sy >= YDIM)
-							break;
-
-						/* if this sprite's color has not been used yet this frame, grab it */
-						/* note that by doing it here, we don't map sprites that aren't visible */
-						{
-							int temp = color >> sprite_map_shift;
-							if (!sprite_map[temp])
-							{
-								remap_color (temp + 16);
-								sprite_map[temp] = 1;
-							}
-						}
-
-						/* if the hipri_pen is invalid, find a new one */
-						if (hipri_pen < 0 || this_map[hipri_pen] >= 0)
-						{
-							int i, pen;
-
-							/* find an unused slice of the palette */
-							for (i = 15; i > 0; i--)
-								if (this_map[i] < 0)
-								{
-									hipri_pen = i;
-									break;
-								}
-
-							/* then set the colortable up for it */
-							pen = Machine->pens[hipri_pen * 16];
-							for (i = 1024 + 1; i < 1024 + 64; i++)
-								Machine->colortable[i] = pen;
-						}
-
-						/* draw the sprite in bright pink on the real bitmap */
-						drawgfx (bitmap, Machine->gfx[bank],
-								LPICT (lookup) | (pict & 0xff), through_color,
-								hflip, 0, xpos, sy, &clip, TRANSPARENCY_PEN, 0);
-
-						/* also draw the sprite normally on the temp bitmap */
-						if (!hipri_color0)
-							drawgfx (tempbitmap, Machine->gfx[bank],
-									LPICT (lookup) | (pict & 0xff), color,
-									hflip, 0, xpos, sy, &clip, TRANSPARENCY_NONE, 0);
-					}
-				}
-
-				/* now redraw the playfield tiles over top of the sprite */
-				if (hipri_color0)
-					redraw_playfield_chunk (bitmap, xpos, ypos, 1, vsize, TRANSPARENCY_THROUGH, hipri_pen * 16, -1);
-				else
-				{
-					redraw_playfield_chunk (tempbitmap, xpos, ypos, 1, vsize, TRANSPARENCY_PEN, 0, -1);
-
-					/* finally, copy this chunk to the real bitmap */
-					if (xpos > XDIM) xpos -= 0x200;
-					if (ypos > YDIM) ypos -= 0x200;
-					tclip.min_x = xpos;
-					tclip.max_x = xpos + 7;
-					tclip.min_y = ypos;
-					tclip.max_y = ypos + vsize * 8 - 1;
-					if (tclip.min_y < clip.min_y) tclip.min_y = clip.min_y;
-					if (tclip.max_y > clip.max_y) tclip.max_y = clip.max_y;
-					copybitmap (bitmap, tempbitmap, 0, 0, 0, 0, &tclip, TRANSPARENCY_THROUGH, hipri_pen * 16);
-				}
-			}
-		}
-	}
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 6: redraw playfield tiles that need it
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	{
-		int *r;
-		for (r = redraw_list; r < redraw; r++)
-		{
-			int val = *r;
-			int xpos = (val >> 23) & 0x1ff;
-			int ypos = (val >> 14) & 0x1ff;
-			int h = val & 0x1f;
-
-			redraw_playfield_chunk (bitmap, xpos, ypos, 1, h, TRANSPARENCY_PENS, ~pcolor, 16 >> pf_map_shift);
-		}
-	}
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 7: render the alpha layer
-	 *
-	 *---------------------------------------------------------------------------------
-	 *
-	 * 	Alpha layer encoding
-	 *
-	 *		1 16-bit word is used
-	 *
-	 *			Bits 0-9   = index of the character
-	 *			Bits 10-12 = color
-	 *			Bit  13    = transparency
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-
-	for (sy = 0; sy < YCHARS; sy++)
-	{
-		for (sx = 0, offs = sy*64; sx < XCHARS; sx++, offs++)
-		{
-			int data = READ_WORD (&atarisys1_alpharam[offs*2]);
-			int pict = (data & 0x3ff);
-
-			if (pict || (data & 0x2000))
-			{
-				int color = ((data >> 10) & 7);
-
-				/* if this character's color has not been used yet this frame, grab it */
-				/* note that by doing it here, we don't map characters that aren't visible */
-				if (!alpha_map[color / 4])
-				{
-					remap_color (color / 4);
-					alpha_map[color / 4] = 1;
-				}
-
-				drawgfx (bitmap, Machine->gfx[0],
-						pict, color,
-						0, 0,
-						8*sx, 8*sy,
-						0,
-						(data & 0x2000) ? TRANSPARENCY_NONE : TRANSPARENCY_PEN, 0);
-			}
-		}
-	}
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 8: update the palette
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	for (i = 0; i < 16; i++)
-		if (this_map[i] >= 0)
-		{
-			int index = this_map[i] * 16, pal = i * 16, j;
-
-			/* modify the pens if this set is dirty or different than last frame */
-			for (j = 0; j < 16; j++)
-				if (colordirty[index + j] || this_map[i] != last_map[i])
-				{
-					int palette = READ_WORD (&atarisys1_paletteram[(index + j) * 2]);
-
-					int inten = intensity_table[(palette >> 12) & 15];
-					int red = (((palette >> 8) & 15) * inten) >> 4;
-					int green = (((palette >> 4) & 15) * inten) >> 4;
-					int blue = ((palette & 15) * inten) >> 4;
-
-					osd_modify_pen (Machine->pens[pal + j], red, green, blue);
-
-					colordirty[index + j] = 0;
-				}
-		}
-}
-
-
-
-/*************************************
- *
- *		Road Blasters refresh
- *
- *************************************/
-
-void roadblst_vh_screenrefresh (struct osd_bitmap *bitmap)
-{
-	int pcolor = READ_WORD (&atarisys1_prioritycolor[0]) & 0xff;
-	int redraw_list[1024], *redraw = redraw_list;
-	int y, sx, sy, offs, hipri_pen = -1;
-	unsigned char smalldirty[32];
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 0: debugging
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	#if SYSTEM1_DEBUG
-		int hidebank = atarisys1_debug ();
-	#endif
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 1: update the colortable
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	memset (smalldirty, 0, sizeof (smalldirty));
-	for (offs = atarisys1_paletteram_size - 2; offs >= 0; offs -= 2)
-	{
-		if (colordirty[offs / 2])
-		{
-			int palette = READ_WORD (&atarisys1_paletteram[offs]);
-			int inten = intensity_table[(palette >> 12) & 15];
-			int red = (((palette >> 8) & 15) * inten) >> 4;
-			int green = (((palette >> 4) & 15) * inten) >> 4;
-			int blue = ((palette & 15) * inten) >> 4;
-
-			int index = offs / 2;
-			int penindex;
-
-			if (index >= 256 && index < 768)
-				smalldirty[(index - 256) >> 4] = 1;
-
-			/* compute the pen index, but map away from the high priority color */
-			penindex = rgbpenindex (red, green, blue);
-			Machine->colortable[index] = Machine->pens[penindex];
-
-			colordirty[offs / 2] = 0;
-		}
-	}
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 2: update the offscreen version of the playfield
-	 *
-	 *---------------------------------------------------------------------------------
-	 *
-	 * 	Playfield encoding
-	 *
-	 *		1 16-bit word is used
-	 *
-	 *			Bits 0-14  = index of the image; a 16th bit is pulled from the playfield bank selection
-	 *			             bit.  The upper 8 bits of this 16-bit index are passed through a pair of
-	 *			             lookup PROMs to select which graphics bank and color to use
-	 *			Bit  15    = horizontal flip
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	for (sy = offs = 0; sy < 64; sy++)
-	{
-		for (sx = 0; sx < 64; sx++, offs++)
-		{
-			int data = pfmapped[offs];
-			int color = LCOLOR (data);
-			int gfxbank = LBANK (data);
-
-			/* things only get tricky if we're not already dirty */
-			if (!LDIRTY (data))
-			{
-				/* check for the non-6-bit graphics case */
-				if (gfxbank != 1)
-				{
-					if (!smalldirty[color])
-						continue;
-				}
-				else
-				{
-					int temp = color * 4;
-					if (!smalldirty[temp] && !smalldirty[temp+1] && !smalldirty[temp+2] && !smalldirty[temp+3])
-						continue;
-				}
-			}
-
-			/* draw this character */
-			drawgfx (playfieldbitmap, Machine->gfx[gfxbank], LPICT (data), color, LFLIP (data), 0,
-					8*sx, 8*sy, 0, TRANSPARENCY_NONE, 0);
-			pfmapped[offs] = data & ~LDIRTYFLAG;
-		}
-	}
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 3: copy the playfield bitmap to the destination using the scroll list
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	{
-		int shift = bitmap->depth / 8 - 1, lasty = -1;
-		unsigned int *scroll = scrolllist;
-
-		/* finish the scrolling list from the previous frame */
-		xscroll = READ_WORD (&atarisys1_hscroll[0]);
-		yscroll = READ_WORD (&atarisys1_vscroll[0]);
-		offs = ((xscroll & 0x1ff) << 12) + (yscroll & 0x1ff);
-		for (y = scrolllist_end; y < YDIM; y++)
-			scrolllist[y] = offs;
-
-		/* loop over and copy the data row by row */
-		for (y = 0; y < YDIM; y++)
-		{
-			int xscroll = (*scroll >> 12) & 0x1ff;
-			int yscroll = *scroll++ & 0x1ff;
-			int dy;
-
-			/* when a write to the scroll register occurs, the counter is reset */
-			if (yscroll != lasty)
-			{
-				offs = y;
-				lasty = yscroll;
-			}
-			dy = (yscroll + y - offs) & 0x1ff;
-
-			/* handle the wrap around case */
-			if (xscroll + XDIM > 0x200)
-			{
-				int chunk = 0x200 - xscroll;
-				memcpy (&bitmap->line[y][0], &playfieldbitmap->line[dy][xscroll << shift], chunk << shift);
-				memcpy (&bitmap->line[y][chunk << shift], &playfieldbitmap->line[dy][0], (XDIM - chunk) << shift);
-			}
-			else
-				memcpy (&bitmap->line[y][0], &playfieldbitmap->line[dy][xscroll << shift], XDIM << shift);
-		}
-	}
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 4: render the pregenerated list of motion objects
-	 *
-	 *---------------------------------------------------------------------------------
-	 *
-	 * 	Motion Object encoding
-	 *
-	 *		4 16-bit words are used total
-	 *
-	 *		Word 1: Vertical position
-	 *
-	 *			Bits 0-3   = vertical size of the object, in tiles
-	 *			Bits 5-13  = vertical position
-	 *			Bit  15    = horizontal flip
-	 *
-	 *		Word 2: Image
-	 *
-	 *			Bits 0-15  = index of the image; the upper 8 bits are passed through a
-	 *			             pair of lookup PROMs to select which graphics bank and color
-	 *			              to use (high bit of color is ignored and comes from Bit 15, below)
-	 *
-	 *		Word 3: Horizontal position
-	 *
-	 *			Bits 0-3   = horizontal size of the object, in tiles
-	 *			Bits 5-13  = horizontal position
-	 *			Bit  15    = special playfield priority
-	 *
-	 *		Word 4: Link
-	 *
-	 *			Bits 0-5   = link to the next motion object
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-	{
-		int last_start_scan = -1;
-		struct rectangle clip;
-		unsigned short *d;
-
-		/* create a clipping rectangle so that only partial sections are updated at a time */
-		clip.min_x = 0;
-		clip.max_x = Machine->drv->screen_width - 1;
-
-		/* loop over the list until the end */
-		for (d = displaylist; d < displaylist_end; d += 4)
-		{
-			int start_scan = d[0], data1 = d[1], data2 = d[2], data3 = d[3];
-
-			/* extract data from the various words */
-			int pict = data2;
-			int lookup = molookup[pict >> 8];
-			int vsize = (data1 & 15) + 1;
-			int xpos = data3 >> 5;
-			int ypos = 256 - (data1 >> 5) - vsize * 8;
-			int color = LCOLOR (lookup);
-			int bank = LBANK (lookup);
-			int hflip = data1 & 0x8000;
-			int hipri = data3 & 0x8000;
-
-			#if SYSTEM1_DEBUG
-				if ((pict >> 12) == hidebank)
-					color = Machine->gfx[bank]->total_colors - 1;
-/*				if ((pict >> 12) == 8 && hidebank >= 1 && hidebank <= 8)
-					bank = hidebank;*/
-			#endif
-
-			/* do we have a priority color active? */
-			if (pcolor)
-			{
-				int *r, val;
-
-				/* if so, add an entry to the redraw list for later */
-				val = ((xpos & 0x1ff) << 23) + ((ypos & 0x1ff) << 14) + vsize;
-				for (r = redraw_list; r < redraw; )
-					if (*r++ == val)
-						break;
-
-				/* but only add it if we don't have a matching entry already */
-				if (r == redraw)
-					*redraw++ = val;
-			}
-
-			/* if this is a new region of the screen, find the end and adjust our clipping */
-			if (start_scan != last_start_scan)
-			{
-				unsigned short *df;
-
-				last_start_scan = start_scan;
-				clip.min_y = start_scan;
-
-				/* look for an entry whose scanline start is different from ours; that's our bottom */
-				for (df = d; df < displaylist_end; df += 4)
-					if (*df != start_scan)
-					{
-						clip.max_y = *df - 1;
-						break;
-					}
-
-				/* if we didn't find any additional regions, go until the bottom of the screen */
-				if (df == displaylist_end || clip.max_y >= ROADBLST_CLIP)
-					clip.max_y = ROADBLST_CLIP - 1;
-			}
-
-			/* keep them in range to start */
-			xpos &= 0x1ff;
-			ypos &= 0x1ff;
-
-			/*
-			 *
-			 *      case 1: normal
-			 *
-			 */
-			if (!hipri)
-			{
-				/* wrap and clip the X coordinate */
-				if (xpos > 0x1f8) xpos -= 0x200;
-				if (xpos > -8 && xpos < XDIM)
-				{
-					/* wrap the Y coordinate */
-					if (ypos >= YDIM) ypos -= 0x200;
-
-					/* loop over the height */
-					for (y = 0, sy = ypos; y < vsize; y++, sy += 8, pict++)
-					{
-						/* clip the Y coordinate */
-						if (sy <= -8)
-							continue;
-						else if (sy >= YDIM)
-							break;
-
-						/* draw the sprite */
-						drawgfx (bitmap, Machine->gfx[bank],
-								LPICT (lookup) | (pict & 0xff), color,
-								hflip, 0, xpos, sy, &clip, TRANSPARENCY_PEN, 0);
-					}
-				}
-			}
-
-			/*
-			 *
-			 *      case 2: high priority playfield
-			 *
-			 */
-			else
-			{
-				int through_color = Machine->gfx[bank]->total_colors - 1;
-
-				/* wrap and clip the X coordinate */
-				if (xpos > 0x1f8) xpos -= 0x200;
-				if (xpos > -8 && xpos < XDIM)
-				{
-					/* wrap the Y coordinate */
-					if (ypos >= YDIM) ypos -= 0x200;
-
-					/* loop over the height */
-					for (y = 0, sy = ypos; y < vsize; y++, sy += 8, pict++)
-					{
-						/* clip the Y coordinate */
-						if (sy <= -8)
-							continue;
-						else if (sy >= YDIM)
-							break;
-
-						/* draw the sprite in bright pink on the real bitmap */
-						drawgfx (bitmap, Machine->gfx[bank],
-								LPICT (lookup) | (pict & 0xff), through_color,
-								hflip, 0, xpos, sy, &clip, TRANSPARENCY_PEN, 0);
-					}
-				}
-
-				/* now redraw the playfield tiles over top of the sprite */
-/*				redraw_playfield_chunk (bitmap, xpos, ypos, 1, vsize, TRANSPARENCY_THROUGH, hipri_pen * 16, -1);*/
-			}
-		}
-	}
-
-
-	/*
-	 *---------------------------------------------------------------------------------
-	 *
-	 *   Step 5: render the alpha layer
-	 *
-	 *---------------------------------------------------------------------------------
-	 *
-	 * 	Alpha layer encoding
-	 *
-	 *		1 16-bit word is used
-	 *
-	 *			Bits 0-9   = index of the character
-	 *			Bits 10-12 = color
-	 *			Bit  13    = transparency
-	 *
-	 *---------------------------------------------------------------------------------
-	 */
-
-	for (sy = 0; sy < YCHARS; sy++)
-	{
-		for (sx = 0, offs = sy*64; sx < XCHARS; sx++, offs++)
-		{
-			int data = READ_WORD (&atarisys1_alpharam[offs*2]);
-			int pict = (data & 0x3ff);
-
-			if (pict || (data & 0x2000))
-			{
-				int color = ((data >> 10) & 7);
-
-				drawgfx (bitmap, Machine->gfx[0],
-						pict, color,
-						0, 0,
-						8*sx, 8*sy,
-						0,
-						(data & 0x2000) ? TRANSPARENCY_NONE : TRANSPARENCY_PEN, 0);
-			}
-		}
+		/* draw the sprite in bright pink on the real bitmap */
+		atarigen_mo_draw_transparent_8x8_strip(bitmap, gfx, code, hflip, 0, xpos, ypos, vsize, clip, TRANSPARENCY_PEN, 0);
+
+		/* also draw the sprite normally on the temp bitmap */
+		atarigen_mo_draw_8x8_strip(atarigen_pf_overrender_bitmap, gfx, code, 0x20, hflip, 0, xpos, ypos, vsize, clip, TRANSPARENCY_NONE, 0);
+
+		/* now redraw the playfield tiles over top of the sprite */
+		overrender_data.bitmap = atarigen_pf_overrender_bitmap;
+		overrender_data.type = OVERRENDER_SPECIAL;
+		atarigen_pf_process(pf_overrender_callback, &overrender_data, &pf_clip);
+
+		/* finally, copy this chunk to the real bitmap */
+		copybitmap(bitmap, atarigen_pf_overrender_bitmap, 0, 0, 0, 0, &pf_clip, TRANSPARENCY_THROUGH, palette_transparent_pen);
 	}
 }
 
@@ -1870,95 +882,125 @@ void roadblst_vh_screenrefresh (struct osd_bitmap *bitmap)
 
 /*************************************
  *
- *		Debugging
+ *	Graphics decoding
  *
  *************************************/
 
-static int atarisys1_debug (void)
+static int decode_gfx(void)
 {
-	int hidebank = -1;
+	UINT8 *prom1 = &memory_region(REGION_PROMS)[0x000];
+	UINT8 *prom2 = &memory_region(REGION_PROMS)[0x200];
+	int obj, i;
 
-	if (osd_key_pressed (OSD_KEY_Q)) hidebank = 0;
-	if (osd_key_pressed (OSD_KEY_W)) hidebank = 1;
-	if (osd_key_pressed (OSD_KEY_E)) hidebank = 2;
-	if (osd_key_pressed (OSD_KEY_R)) hidebank = 3;
-	if (osd_key_pressed (OSD_KEY_T)) hidebank = 4;
-	if (osd_key_pressed (OSD_KEY_Y)) hidebank = 5;
-	if (osd_key_pressed (OSD_KEY_U)) hidebank = 6;
-	if (osd_key_pressed (OSD_KEY_I)) hidebank = 7;
+	/* reset the globals */
+	memset(&bank_gfx, 0, sizeof(bank_gfx));
 
-	if (osd_key_pressed (OSD_KEY_A)) hidebank = 8;
-	if (osd_key_pressed (OSD_KEY_S)) hidebank = 9;
-	if (osd_key_pressed (OSD_KEY_D)) hidebank = 10;
-	if (osd_key_pressed (OSD_KEY_F)) hidebank = 11;
-	if (osd_key_pressed (OSD_KEY_G)) hidebank = 12;
-	if (osd_key_pressed (OSD_KEY_H)) hidebank = 13;
-	if (osd_key_pressed (OSD_KEY_J)) hidebank = 14;
-	if (osd_key_pressed (OSD_KEY_K)) hidebank = 15;
-
-	if (osd_key_pressed (OSD_KEY_9))
+	/* loop for two sets of objects */
+	for (obj = 0; obj < 2; obj++)
 	{
-		static int count;
-		char name[50];
-		FILE *f;
-		int i, bank;
+		UINT32 *table = (obj == 0) ? pf_lookup : mo_lookup;
 
-		while (osd_key_pressed (OSD_KEY_9)) { }
-
-		sprintf (name, "Dump %d", ++count);
-		f = fopen (name, "wt");
-
-		fprintf (f, "\n\nAlpha Palette:\n");
-		for (i = 0x000; i < 0x100; i++)
+		/* loop for 256 objects in the set */
+		for (i = 0; i < 256; i++, prom1++, prom2++)
 		{
-			fprintf (f, "%04X ", READ_WORD (&atarisys1_paletteram[i*2]));
-			if ((i & 15) == 15) fprintf (f, "\n");
-		}
+			int bank, bpp, color, offset;
 
-		fprintf (f, "\n\nMotion Object Palette:\n");
-		for (i = 0x100; i < 0x200; i++)
-		{
-			fprintf (f, "%04X ", READ_WORD (&atarisys1_paletteram[i*2]));
-			if ((i & 15) == 15) fprintf (f, "\n");
-		}
+			/* determine the bpp */
+			bpp = 4;
+			if (*prom2 & PROM2_PLANE_4_ENABLE)
+			{
+				bpp = 5;
+				if (*prom2 & PROM2_PLANE_5_ENABLE)
+					bpp = 6;
+			}
 
-		fprintf (f, "\n\nPlayfield Palette:\n");
-		for (i = 0x200; i < 0x300; i++)
-		{
-			fprintf (f, "%04X ", READ_WORD (&atarisys1_paletteram[i*2]));
-			if ((i & 15) == 15) fprintf (f, "\n");
-		}
+			/* determine the color */
+			if (obj == 0)
+				color = (16 + (~*prom2 & PROM2_PF_COLOR_MASK)) >> (bpp - 4); /* playfield */
+			else
+				color = (~*prom2 & PROM2_MO_COLOR_MASK) >> (bpp - 4);	/* motion objects (high bit ignored) */
 
-		fprintf (f, "\n\nTrans Palette:\n");
-		for (i = 0x300; i < 0x320; i++)
-		{
-			fprintf (f, "%04X ", READ_WORD (&atarisys1_paletteram[i*2]));
-			if ((i & 15) == 15) fprintf (f, "\n");
-		}
+			/* determine the offset */
+			offset = *prom1 & PROM1_OFFSET_MASK;
 
-		bank = (READ_WORD (&atarisys1_bankselect[0]) >> 3) & 7;
-		fprintf (f, "\n\nMotion Object Bank = %d\n", bank);
-		bank *= 0x200;
-		for (i = 0; i < 0x40; i++)
-		{
-			fprintf (f, "   Object %02X:  P=%04X  X=%04X  Y=%04X  L=%04X\n",
-					i,
-					READ_WORD (&atarisys1_spriteram[bank+0x080+i*2]),
-					READ_WORD (&atarisys1_spriteram[bank+0x100+i*2]),
-					READ_WORD (&atarisys1_spriteram[bank+0x000+i*2]),
-					READ_WORD (&atarisys1_spriteram[bank+0x180+i*2])
-			);
-		}
+			/* determine the bank */
+			bank = get_bank(*prom1, *prom2, bpp);
+			if (bank < 0)
+				return 1;
 
-		fprintf (f, "\n\nPlayfield dump\n");
-		for (i = 0; i < atarisys1_playfieldram_size / 2; i++)
-		{
-			fprintf (f, "%04X ", READ_WORD (&atarisys1_playfieldram[i*2]));
-			if ((i & 63) == 63) fprintf (f, "\n");
+			/* set the value */
+			if (bank == 0)
+				*table++ = 0;
+			else
+				*table++ = PACK_LOOKUP_DATA(bank, color, offset, bpp);
 		}
-
-		fclose (f);
 	}
+	return 0;
+}
 
-	return hidebank;
+
+
+/*************************************
+ *
+ *	Graphics bank mapping
+ *
+ *************************************/
+
+static int get_bank(UINT8 prom1, UINT8 prom2, int bpp)
+{
+	int bank_offset[8] = { 0, 0x00000, 0x30000, 0x60000, 0x90000, 0xc0000, 0xe0000, 0x100000 };
+	int bank_index, i, gfx_index;
+
+	/* determine the bank index */
+	if ((prom1 & PROM1_BANK_1) == 0)
+		bank_index = 1;
+	else if ((prom1 & PROM1_BANK_2) == 0)
+		bank_index = 2;
+	else if ((prom1 & PROM1_BANK_3) == 0)
+		bank_index = 3;
+	else if ((prom1 & PROM1_BANK_4) == 0)
+		bank_index = 4;
+	else if ((prom2 & PROM2_BANK_5) == 0)
+		bank_index = 5;
+	else if ((prom2 & PROM2_BANK_6_OR_7) == 0)
+	{
+		if ((prom2 & PROM2_BANK_7) == 0)
+			bank_index = 7;
+		else
+			bank_index = 6;
+	}
+	else
+		return 0;
+
+	/* find the bank */
+	if (bank_gfx[bpp - 4][bank_index])
+		return bank_gfx[bpp - 4][bank_index];
+
+	/* if the bank is out of range, call it 0 */
+	if (bank_offset[bank_index] >= memory_region_length(REGION_GFX2))
+		return 0;
+
+	/* don't have one? let's make it ... first find any empty slot */
+	for (gfx_index = 0; gfx_index < MAX_GFX_ELEMENTS; gfx_index++)
+		if (Machine->gfx[gfx_index] == NULL)
+			break;
+	if (gfx_index == MAX_GFX_ELEMENTS)
+		return -1;
+
+	/* tweak the structure for the number of bitplanes we have */
+	objlayout.planes = bpp;
+	for (i = 0; i < bpp; i++)
+		objlayout.planeoffset[i] = (bpp - i - 1) * 0x8000 * 8;
+
+	/* decode the graphics */
+	Machine->gfx[gfx_index] = decodegfx(&memory_region(REGION_GFX2)[bank_offset[bank_index]], &objlayout);
+	if (!Machine->gfx[gfx_index])
+		return -1;
+
+	/* set the color information */
+	Machine->gfx[gfx_index]->colortable = &Machine->remapped_colortable[256];
+	Machine->gfx[gfx_index]->total_colors = 48 >> (bpp - 4);
+
+	/* set the entry and return it */
+	return bank_gfx[bpp - 4][bank_index] = gfx_index;
 }

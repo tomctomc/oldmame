@@ -23,15 +23,15 @@ ask.  - Mike Balfour (mab22@po.cwru.edu)
 #include "vidhrdw/generic.h"
 
 /* machine/dominos.c */
-extern int dominos_port_r(int offset);
-extern int dominos_sync_r(int offset);
-extern void dominos_attract_w(int offset, int data);
-extern void dominos_tumble_w(int offset, int data);
-extern void dominos_lamp2_w(int offset, int data);
-extern void dominos_lamp1_w(int offset, int data);
+READ_HANDLER( dominos_port_r );
+READ_HANDLER( dominos_sync_r );
+WRITE_HANDLER( dominos_attract_w );
+WRITE_HANDLER( dominos_tumble_w );
+WRITE_HANDLER( dominos_lamp2_w );
+WRITE_HANDLER( dominos_lamp1_w );
 
 /* vidhrdw/dominos.c */
-extern void dominos_vh_screenrefresh(struct osd_bitmap *bitmap);
+extern void dominos_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
 static struct MemoryReadAddress readmem[] =
 {
@@ -64,14 +64,14 @@ static struct MemoryWriteAddress writemem[] =
 	{ -1 }	/* end of table */
 };
 
-INPUT_PORTS_START( dominos_input_ports )
+INPUT_PORTS_START( dominos )
 		PORT_START		/* DSW - fake port, gets mapped to Dominos ports */
-		PORT_DIPNAME( 0x03, 0x01, "Points To Win", IP_KEY_NONE )
+		PORT_DIPNAME( 0x03, 0x01, "Points To Win" )
 		PORT_DIPSETTING(	0x03, "6" )
 		PORT_DIPSETTING(	0x02, "5" )
 		PORT_DIPSETTING(	0x01, "4" )
 		PORT_DIPSETTING(	0x00, "3" )
-		PORT_DIPNAME( 0x0C, 0x08, "Cost", IP_KEY_NONE )
+		PORT_DIPNAME( 0x0C, 0x08, "Cost" )
 		PORT_DIPSETTING(	0x0C, "2 players/coin" )
 		PORT_DIPSETTING(	0x08, "1 coin/player" )
 		PORT_DIPSETTING(	0x04, "2 coins/player" )
@@ -91,7 +91,7 @@ INPUT_PORTS_START( dominos_input_ports )
 		PORT_BIT (0x08, IP_ACTIVE_LOW, IPT_JOYSTICK_LEFT | IPF_4WAY )
 		PORT_BIT (0x10, IP_ACTIVE_LOW, IPT_START1 )
 		PORT_BIT (0x20, IP_ACTIVE_LOW, IPT_START2 )
-		PORT_BITX(0x40, IP_ACTIVE_LOW, IPT_SERVICE | IPF_TOGGLE, "Self Test", OSD_KEY_F2, IP_JOY_NONE, 0 )
+		PORT_BITX(0x40, IP_ACTIVE_LOW, IPT_SERVICE | IPF_TOGGLE, "Self Test", KEYCODE_F2, IP_JOY_NONE )
 
 		PORT_START		/* IN2 */
 		PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_COIN1 )
@@ -120,7 +120,7 @@ static struct GfxLayout charlayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout, 0x00, 0x02 }, /* offset into colors, # of colors */
+	{ REGION_GFX1, 0, &charlayout, 0x00, 0x02 }, /* offset into colors, # of colors */
 	{ -1 } /* end of array */
 };
 
@@ -131,22 +131,25 @@ static unsigned char palette[] =
 	0xff,0xff,0xff, /* WHITE */
 	0x55,0x55,0x55, /* DK GREY */
 };
-
-static unsigned char colortable[] =
+static unsigned short colortable[] =
 {
 	0x00, 0x01,
 	0x00, 0x02
 };
+static void init_palette(unsigned char *game_palette, unsigned short *game_colortable,const unsigned char *color_prom)
+{
+	memcpy(game_palette,palette,sizeof(palette));
+	memcpy(game_colortable,colortable,sizeof(colortable));
+}
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_dominos =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
 			750000, 	   /* 750 Khz ???? */
-			0,
 			readmem,writemem,0,0,
 			interrupt,1
 		}
@@ -158,8 +161,8 @@ static struct MachineDriver machine_driver =
 	/* video hardware */
 	32*8, 28*8, { 0*8, 32*8-1, 0*8, 28*8-1 },
 	gfxdecodeinfo,
-	sizeof(palette)/3,sizeof(colortable),
-	0,
+	sizeof(palette) / sizeof(palette[0]) / 3, sizeof(colortable) / sizeof(colortable[0]),
+	init_palette,
 
 	VIDEO_TYPE_RASTER,
 	0,
@@ -182,45 +185,17 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( dominos_rom )
-	ROM_REGION(0x10000) /* 64k for code */
-		ROM_LOAD( "7352-02.D1", 0x3000, 0x0800, 0xe1650e85 )
-		ROM_LOAD( "7438-02.E1", 0x3800, 0x0800, 0x780bf86b )
-		ROM_RELOAD( 			0xF800, 0x0800 )
+ROM_START( dominos )
+	ROM_REGION( 0x10000, REGION_CPU1 ) /* 64k for code */
+	ROM_LOAD( "7352-02.d1",   0x3000, 0x0800, 0x738b4413 )
+	ROM_LOAD( "7438-02.e1",   0x3800, 0x0800, 0xc84e54e2 )
+	ROM_RELOAD( 			  0xf800, 0x0800 )
 
-		ROM_REGION(0x800)	  /* 2k for graphics */
-		ROM_LOAD( "7439-01.P4", 0x0000, 0x0200, 0x87d10f0f )
-		ROM_LOAD( "7440-01.R4", 0x0200, 0x0200, 0x84f60e0e )
-
+	ROM_REGION( 0x800, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "7439-01.p4",   0x0000, 0x0200, 0x4f42fdd6 )
+	ROM_LOAD( "7440-01.r4",   0x0200, 0x0200, 0x957dd8df )
 ROM_END
 
-/***************************************************************************
 
-  Hi Score Routines
 
-***************************************************************************/
-
-/***************************************************************************
-
-  Game driver(s)
-
-***************************************************************************/
-
-struct GameDriver dominos_driver =
-{
-	"Dominos",
-	"dominos",
-	"Mike Balfour",
-	&machine_driver,
-
-	dominos_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	dominos_input_ports,
-
-	0, palette, colortable,
-	ORIENTATION_DEFAULT,
-	0,0
-};
+GAMEX( 1977, dominos, 0, dominos, dominos, 0, ROT0, "Atari", "Dominos", GAME_NO_SOUND )

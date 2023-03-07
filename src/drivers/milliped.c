@@ -2,6 +2,8 @@
 
 Millipede memory map (preliminary)
 
+driver by Ivan Mackintosh
+
 0400-040F       POKEY 1
 0800-080F       POKEY 2
 1000-13BF       SCREEN RAM (8x8 TILES, 32x30 SCREEN)
@@ -13,7 +15,7 @@ Millipede memory map (preliminary)
 2000            BIT 1-4 trackball
                 BIT 5 IS P1 FIRE
                 BIT 6 IS P1 START
-                BIT 7 IS SERVICE
+                BIT 7 IS VBLANK
 
 2001            BIT 1-4 trackball
                 BIT 5 IS P2 FIRE
@@ -27,46 +29,99 @@ Millipede memory map (preliminary)
                 BIT 5 IS SLAM, LEFT COIN, AND UTIL COIN
                 BIT 6,7 (?)
                 BIT 8 IS RIGHT COIN
-
+2030            earom read
 2480-249F       COLOR RAM
+2500-2502		Coin counters
+2503-2504		LEDs
+2505-2507		Coin door lights ??
 2600            INTERRUPT ACKNOWLEDGE
 2680            CLEAR WATCHDOG
+2700			earom control
+2780			earom write
 4000-7FFF       GAME CODE
-
-Known issues:
-
-* Color ram isn't emulated. I think it fills 2480-249f.
-
-* The dipswitches under $2000 aren't fully emulated. There must be some sort of
-trick to reading them properly.
 
 *************************************************************************/
 
 #include "driver.h"
 #include "vidhrdw/generic.h"
+#include "machine/atari_vg.h"
 
 
-extern unsigned char *milliped_paletteram;
+WRITE_HANDLER( milliped_paletteram_w );
+void milliped_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
-void milliped_vh_convert_color_prom (unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
-void milliped_paletteram_w(int offset,int data);
-void milliped_vh_screenrefresh(struct osd_bitmap *bitmap);
+/*
+ * This wrapper routine is necessary because Millipede requires a direction bit
+ * to be set or cleared. The direction bit is held until the mouse is moved
+ * again. We still don't understand why the difference between
+ * two consecutive reads must not exceed 7. After all, the input is 4 bits
+ * wide, and we have a fifth bit for the sign...
+ *
+ * The other reason it is necessary is that Millipede uses the same address to
+ * read the dipswitches.
+ */
 
-int milliped_IN0_r(int offset);	/* JB 971220 */
-int milliped_IN1_r(int offset);	/* JB 971220 */
+static UINT8 dsw_select;
+
+static WRITE_HANDLER( milliped_input_select_w )
+{
+	dsw_select = (data == 0);
+}
+
+static READ_HANDLER( milliped_IN0_r )
+{
+	static int oldpos,sign;
+	int newpos;
+
+	if (dsw_select)
+		return (readinputport(0) | sign);
+
+	newpos = readinputport(6);
+	if (newpos != oldpos)
+	{
+		sign = (newpos - oldpos) & 0x80;
+		oldpos = newpos;
+	}
+
+	return ((readinputport(0) & 0x70) | (oldpos & 0x0f) | sign );
+}
+
+static READ_HANDLER( milliped_IN1_r )
+{
+	static int oldpos,sign;
+	int newpos;
+
+	if (dsw_select)
+		return (readinputport(1) | sign);
+
+	newpos = readinputport(7);
+	if (newpos != oldpos)
+	{
+		sign = (newpos - oldpos) & 0x80;
+		oldpos = newpos;
+	}
+
+	return ((readinputport(1) & 0x70) | (oldpos & 0x0f) | sign );
+}
+
+static WRITE_HANDLER( milliped_led_w )
+{
+	osd_led_w (offset, ~(data >> 7));
+}
 
 
 
 static struct MemoryReadAddress readmem[] =
 {
-	{ 0x0000, 0x0200, MRA_RAM },
+	{ 0x0000, 0x03ff, MRA_RAM },
 	{ 0x0400, 0x040f, pokey1_r },
 	{ 0x0800, 0x080f, pokey2_r },
 	{ 0x1000, 0x13ff, MRA_RAM },
-	{ 0x2000, 0x2000, milliped_IN0_r },	/* JB 971220 */
-	{ 0x2001, 0x2001, milliped_IN1_r },	/* JB 971220 */
+	{ 0x2000, 0x2000, milliped_IN0_r },
+	{ 0x2001, 0x2001, milliped_IN1_r },
 	{ 0x2010, 0x2010, input_port_2_r },
 	{ 0x2011, 0x2011, input_port_3_r },
+	{ 0x2030, 0x2030, atari_vg_earom_r },
 	{ 0x4000, 0x7fff, MRA_ROM },
 	{ 0xf000, 0xffff, MRA_ROM },		/* for the reset / interrupt vectors */
 	{ -1 }	/* end of table */
@@ -76,46 +131,59 @@ static struct MemoryReadAddress readmem[] =
 
 static struct MemoryWriteAddress writemem[] =
 {
-	{ 0x0000, 0x0200, MWA_RAM },
+	{ 0x0000, 0x03ff, MWA_RAM },
 	{ 0x0400, 0x040f, pokey1_w },
 	{ 0x0800, 0x080f, pokey2_w },
 	{ 0x1000, 0x13ff, videoram_w, &videoram, &videoram_size },
 	{ 0x13c0, 0x13ff, MWA_RAM, &spriteram },
-	{ 0x2480, 0x249f, milliped_paletteram_w, &milliped_paletteram },
+	{ 0x2480, 0x249f, milliped_paletteram_w, &paletteram },
+	{ 0x2500, 0x2502, coin_counter_w },
+	{ 0x2503, 0x2504, milliped_led_w },
+	{ 0x2505, 0x2505, milliped_input_select_w },
+//	{ 0x2506, 0x2507, MWA_NOP }, /* ? */
+	{ 0x2600, 0x2600, MWA_NOP }, /* IRQ ack */
+	{ 0x2680, 0x2680, watchdog_reset_w },
+	{ 0x2700, 0x2700, atari_vg_earom_ctrl_w },
+	{ 0x2780, 0x27bf, atari_vg_earom_w },
 	{ 0x4000, 0x73ff, MWA_ROM },
 	{ -1 }	/* end of table */
 };
 
 
-INPUT_PORTS_START( input_ports )
+INPUT_PORTS_START( milliped )
 	PORT_START	/* IN0 $2000 */	/* see port 6 for x trackball */
-	PORT_DIPNAME (0x03, 0x00, "Language", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "English" )
-	PORT_DIPSETTING (   0x01, "German" )
-	PORT_DIPSETTING (   0x02, "French" )
-	PORT_DIPSETTING (   0x03, "Spanish" )
-	PORT_DIPNAME (0x0c, 0x04, "Bonus", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "0" )
-	PORT_DIPSETTING (   0x04, "0 1x" )
-	PORT_DIPSETTING (   0x08, "0 1x 2x" )
-	PORT_DIPSETTING (   0x0c, "0 1x 2x 3x" )
+	PORT_DIPNAME(0x03, 0x00, "Language" )
+	PORT_DIPSETTING(   0x00, "English" )
+	PORT_DIPSETTING(   0x01, "German" )
+	PORT_DIPSETTING(   0x02, "French" )
+	PORT_DIPSETTING(   0x03, "Spanish" )
+	PORT_DIPNAME(0x0c, 0x04, "Bonus" )
+	PORT_DIPSETTING(   0x00, "0" )
+	PORT_DIPSETTING(   0x04, "0 1x" )
+	PORT_DIPSETTING(   0x08, "0 1x 2x" )
+	PORT_DIPSETTING(   0x0c, "0 1x 2x 3x" )
 	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 )
 	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_START1 )
-	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_VBLANK )
-	PORT_BIT ( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
+	PORT_BIT ( 0x40, IP_ACTIVE_HIGH, IPT_VBLANK )
+	PORT_BIT ( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )	/* trackball sign bit */
 
 	PORT_START	/* IN1 $2001 */	/* see port 7 for y trackball */
-	PORT_BIT ( 0x03, IP_ACTIVE_HIGH, IPT_UNKNOWN )				/* JB 971220 */
-	PORT_DIPNAME (0x04, 0x00, "Credit Minimum", IP_KEY_NONE )	/* JB 971220 */
-	PORT_DIPSETTING (   0x00, "1" )
-	PORT_DIPSETTING (   0x04, "2" )
-	PORT_DIPNAME (0x08, 0x00, "Coin Counters", IP_KEY_NONE )	/* JB 971220 */
-	PORT_DIPSETTING (   0x00, "1" )
-	PORT_DIPSETTING (   0x08, "2" )
+	PORT_DIPNAME(0x01, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(   0x01, DEF_STR( On ) )
+	PORT_DIPNAME(0x02, 0x00, DEF_STR( Unknown ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(   0x02, DEF_STR( On ) )
+	PORT_DIPNAME(0x04, 0x00, "Credit Minimum" )
+	PORT_DIPSETTING(   0x00, "1" )
+	PORT_DIPSETTING(   0x04, "2" )
+	PORT_DIPNAME(0x08, 0x00, "Coin Counters" )
+	PORT_DIPSETTING(   0x00, "1" )
+	PORT_DIPSETTING(   0x08, "2" )
 	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
 	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_START2 )
 	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_UNKNOWN )
-	PORT_BIT ( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
+	PORT_BIT ( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )	/* trackball sign bit */
 
 	PORT_START	/* IN2 $2010 */
 	PORT_BIT ( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_RIGHT | IPF_8WAY )
@@ -135,62 +203,60 @@ INPUT_PORTS_START( input_ports )
 	PORT_BIT ( 0x10, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT ( 0x20, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_UNKNOWN )
-	PORT_BIT ( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_SERVICE( 0x80, IP_ACTIVE_LOW )
 
 	PORT_START	/* 4 */ /* DSW1 $0408 */
-	PORT_DIPNAME (0x01, 0x00, "Millipede Head", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "Easy" )
-	PORT_DIPSETTING (   0x01, "Hard" )
-	PORT_DIPNAME (0x02, 0x00, "Beetle", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "Easy" )
-	PORT_DIPSETTING (   0x02, "Hard" )
-	PORT_DIPNAME (0x0c, 0x04, "Lives", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "2" )
-	PORT_DIPSETTING (   0x04, "3" )
-	PORT_DIPSETTING (   0x08, "4" )
-	PORT_DIPSETTING (   0x0c, "5" )
-	PORT_DIPNAME (0x30, 0x10, "Bonus Life", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "12000" )
-	PORT_DIPSETTING (   0x10, "15000" )
-	PORT_DIPSETTING (   0x20, "20000" )
-	PORT_DIPSETTING (   0x30, "None" )
-	PORT_DIPNAME (0x40, 0x00, "Spider", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "Easy" )
-	PORT_DIPSETTING (   0x40, "Hard" )
-	PORT_DIPNAME (0x80, 0x00, "Starting Score Select", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "On" )
-	PORT_DIPSETTING (   0x80, "Off" )
+	PORT_DIPNAME(0x01, 0x00, "Millipede Head" )
+	PORT_DIPSETTING(   0x00, "Easy" )
+	PORT_DIPSETTING(   0x01, "Hard" )
+	PORT_DIPNAME(0x02, 0x00, "Beetle" )
+	PORT_DIPSETTING(   0x00, "Easy" )
+	PORT_DIPSETTING(   0x02, "Hard" )
+	PORT_DIPNAME(0x0c, 0x04, DEF_STR( Lives ) )
+	PORT_DIPSETTING(   0x00, "2" )
+	PORT_DIPSETTING(   0x04, "3" )
+	PORT_DIPSETTING(   0x08, "4" )
+	PORT_DIPSETTING(   0x0c, "5" )
+	PORT_DIPNAME(0x30, 0x10, DEF_STR( Bonus_Life ) )
+	PORT_DIPSETTING(   0x00, "12000" )
+	PORT_DIPSETTING(   0x10, "15000" )
+	PORT_DIPSETTING(   0x20, "20000" )
+	PORT_DIPSETTING(   0x30, "None" )
+	PORT_DIPNAME(0x40, 0x00, "Spider" )
+	PORT_DIPSETTING(   0x00, "Easy" )
+	PORT_DIPSETTING(   0x40, "Hard" )
+	PORT_DIPNAME(0x80, 0x00, "Starting Score Select" )
+	PORT_DIPSETTING(   0x80, DEF_STR( Off ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( On ) )
 
 	PORT_START	/* 5 */ /* DSW2 $0808 */
-	PORT_DIPNAME (0x03, 0x02, "Coinage", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "Free Play" )
-	PORT_DIPSETTING (   0x01, "1 Coin/2 Credits" )
-	PORT_DIPSETTING (   0x02, "1 Coin/1 Credit" )
-	PORT_DIPSETTING (   0x03, "2 Coins/1 Credit" )
-	PORT_DIPNAME (0x0c, 0x00, "Right Coin", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "*1" )
-	PORT_DIPSETTING (   0x04, "*4" )
-	PORT_DIPSETTING (   0x08, "*5" )
-	PORT_DIPSETTING (   0x0c, "*6" )
-	PORT_DIPNAME (0x10, 0x00, "Left Coin", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "*1" )
-	PORT_DIPSETTING (   0x10, "*2" )
-	PORT_DIPNAME (0xe0, 0x00, "Bonus Coins", IP_KEY_NONE )
-	PORT_DIPSETTING (   0x00, "None" )
-	PORT_DIPSETTING (   0x20, "3 credits/2 coins" )
-	PORT_DIPSETTING (   0x40, "5 credits/4 coins" )
-	PORT_DIPSETTING (   0x60, "6 credits/4 coins" )
-	PORT_DIPSETTING (   0x80, "6 credits/5 coins" )
-	PORT_DIPSETTING (   0xa0, "4 credits/3 coins" )
-	PORT_DIPSETTING (   0xc0, "Demo mode" )
+	PORT_DIPNAME(0x03, 0x02, DEF_STR( Coinage ) )
+	PORT_DIPSETTING(   0x03, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(   0x02, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(   0x01, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(   0x00, DEF_STR( Free_Play ) )
+	PORT_DIPNAME(0x0c, 0x00, "Right Coin" )
+	PORT_DIPSETTING(   0x00, "*1" )
+	PORT_DIPSETTING(   0x04, "*4" )
+	PORT_DIPSETTING(   0x08, "*5" )
+	PORT_DIPSETTING(   0x0c, "*6" )
+	PORT_DIPNAME(0x10, 0x00, "Left Coin" )
+	PORT_DIPSETTING(   0x00, "*1" )
+	PORT_DIPSETTING(   0x10, "*2" )
+	PORT_DIPNAME(0xe0, 0x00, "Bonus Coins" )
+	PORT_DIPSETTING(   0x00, "None" )
+	PORT_DIPSETTING(   0x20, "3 credits/2 coins" )
+	PORT_DIPSETTING(   0x40, "5 credits/4 coins" )
+	PORT_DIPSETTING(   0x60, "6 credits/4 coins" )
+	PORT_DIPSETTING(   0x80, "6 credits/5 coins" )
+	PORT_DIPSETTING(   0xa0, "4 credits/3 coins" )
+	PORT_DIPSETTING(   0xc0, "Demo mode" )
 
-	/* JB 971220 */
 	PORT_START	/* IN6: FAKE - used for trackball-x at $2000 */
-	PORT_ANALOGX ( 0xff, 0x00, IPT_TRACKBALL_X | IPF_REVERSE | IPF_CENTER, 100, 7, 0, 0, IP_KEY_NONE, IP_KEY_NONE, IP_JOY_NONE, IP_JOY_NONE, 4 )
-//	PORT_BIT ( 0x40, IP_ACTIVE_LOW, IPT_VBLANK )
+	PORT_ANALOGX( 0xff, 0x00, IPT_TRACKBALL_X | IPF_REVERSE, 50, 10, 0, 0, IP_KEY_NONE, IP_KEY_NONE, IP_JOY_NONE, IP_JOY_NONE )
 
 	PORT_START	/* IN7: FAKE - used for trackball-y at $2001 */
-	PORT_ANALOGX ( 0xff, 0x00, IPT_TRACKBALL_Y | IPF_CENTER, 100, 7, 0, 0, IP_KEY_NONE, IP_KEY_NONE, IP_JOY_NONE, IP_JOY_NONE, 4 )
+	PORT_ANALOGX( 0xff, 0x00, IPT_TRACKBALL_Y, 50, 10, 0, 0, IP_KEY_NONE, IP_KEY_NONE, IP_JOY_NONE, IP_JOY_NONE )
 INPUT_PORTS_END
 
 
@@ -220,8 +286,8 @@ static struct GfxLayout spritelayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout,       0, 4 },
-	{ 1, 0x0000, &spritelayout,   4*4, 1 },
+	{ REGION_GFX1, 0, &charlayout,      0, 4 },	/* use colors 0-15 */
+	{ REGION_GFX1, 0, &spritelayout,   16, 1 },	/* use colors 16-19 */
 	{ -1 } /* end of array */
 };
 
@@ -231,9 +297,7 @@ static struct POKEYinterface pokey_interface =
 {
 	2,	/* 2 chips */
 	1500000,	/* 1.5 MHz??? */
-	255,
-	POKEY_DEFAULT_GAIN/4,
-	NO_CLIP,
+	{ 50, 50 },
 	/* The 8 pot handlers */
 	{ 0, 0 },
 	{ 0, 0 },
@@ -249,16 +313,15 @@ static struct POKEYinterface pokey_interface =
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_milliped =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_M6502,
-			1000000,	/* 1 Mhz ???? */
-			0,
+			1500000,	/* 1.5 Mhz ???? */
 			readmem,writemem,0,0,
-			interrupt,2		/* ASG -- 2 per frame, once for VBLANK and once not? */
+			interrupt,4
 		}
 	},
 	60, DEFAULT_REAL_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
@@ -268,8 +331,8 @@ static struct MachineDriver machine_driver =
 	/* video hardware */
 	32*8, 32*8, { 0*8, 32*8-1, 0*8, 30*8-1 },
 	gfxdecodeinfo,
-	32,4*4+4,
-	milliped_vh_convert_color_prom,
+	32, 32,
+	0,
 
 	VIDEO_TYPE_RASTER|VIDEO_SUPPORTS_DIRTY|VIDEO_MODIFIES_PALETTE,
 	0,
@@ -284,7 +347,9 @@ static struct MachineDriver machine_driver =
 			SOUND_POKEY,
 			&pokey_interface
 		}
-	}
+	},
+
+	atari_vg_earom_handler
 };
 
 
@@ -295,74 +360,19 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( milliped_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "milliped.104", 0x4000, 0x1000, 0xd13b2ed1 )
-	ROM_LOAD( "milliped.103", 0x5000, 0x1000, 0x8d016c93 )
-	ROM_LOAD( "milliped.102", 0x6000, 0x1000, 0x0a7b24db )
-	ROM_LOAD( "milliped.101", 0x7000, 0x1000, 0x35374cb3 )
+ROM_START( milliped )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "milliped.104", 0x4000, 0x1000, 0x40711675 )
+	ROM_LOAD( "milliped.103", 0x5000, 0x1000, 0xfb01baf2 )
+	ROM_LOAD( "milliped.102", 0x6000, 0x1000, 0x62e137e0 )
+	ROM_LOAD( "milliped.101", 0x7000, 0x1000, 0x46752c7d )
 	ROM_RELOAD(               0xf000, 0x1000 )	/* for the reset and interrupt vectors */
 
-	ROM_REGION(0x1000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "milliped.106", 0x0000, 0x0800, 0x006170b5 )
-	ROM_LOAD( "milliped.107", 0x0800, 0x0800, 0x7bd67d9e )
+	ROM_REGION( 0x1000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "milliped.106", 0x0000, 0x0800, 0xf4468045 )
+	ROM_LOAD( "milliped.107", 0x0800, 0x0800, 0x68c3437a )
 ROM_END
 
 
 
-static int hiload(void)
-{
-	/* check if the hi score table has already been initialized */
-	if (memcmp(&RAM[0x0064],"\x75\x91\x08",3) == 0 &&
-			memcmp(&RAM[0x0079],"\x16\x19\x04",3) == 0)
-	{
-		void *f;
-
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0x0064],6*8);
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;	/* we can't load the hi scores yet */
-}
-
-
-
-static void hisave(void)
-{
-	void *f;
-
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0x0064],6*8);
-		osd_fclose(f);
-	}
-}
-
-
-
-struct GameDriver milliped_driver =
-{
-	"Millipede",
-	"milliped",
-	"IVAN MACKINTOSH\nNICOLA SALMORIA\nJOHN BUTLER\nAARON GILES\nBERND WIEBELT\nBRAD OLIVER",
-	&machine_driver,
-
-	milliped_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	input_ports,
-
-	0, 0, 0,
-	ORIENTATION_ROTATE_270,
-
-	hiload, hisave
-};
-
+GAME( 1982, milliped, 0, milliped, milliped, 0, ROT270, "Atari", "Millipede" )

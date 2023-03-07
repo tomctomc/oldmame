@@ -8,536 +8,663 @@
 ***************************************************************************/
 
 #include "driver.h"
-#include "M6808/m6808.h"
-#include "M6809/m6809.h"
+#include "vidhrdw/generic.h"
+#include "sndhrdw/williams.h"
+#include "cpu/m6800/m6800.h"
+#include "cpu/m6809/m6809.h"
 #include "6821pia.h"
+#include "machine/ticket.h"
 
 
 /* defined in vidhrdw/williams.c */
-extern unsigned char *williams_videoram;
+extern UINT8 *williams_videoram;
+extern UINT8 *williams2_paletteram;
 
-/* various banking controls */
-unsigned char *williams_bank_base;
-unsigned char *williams_video_counter;
-unsigned char *defender_bank_base;
-unsigned char *blaster_bank2_base;
+void williams_vh_update(int counter);
+WRITE_HANDLER( williams_videoram_w );
+READ_HANDLER( williams_video_counter_r );
+void williams2_vh_update(int counter);
 
-/* pointers to memory locations for speedup optimizations */
-unsigned char *robotron_catch;
-unsigned char *stargate_catch;
-unsigned char *defender_catch;
-unsigned char *splat_catch;
-unsigned char *blaster_catch;
 
-/* internal bank switching tracks */
-int blaster_bank;
-int vram_bank;
+/* banking addresses set by the drivers */
+UINT8 *williams_bank_base;
+UINT8 *defender_bank_base;
+const UINT32 *defender_bank_list;
+UINT8 *mayday_protection;
+
+/* internal bank switching tracking */
+static UINT8 blaster_bank;
+static UINT8 vram_bank;
+UINT8 williams2_bank;
 
 /* switches controlled by $c900 */
-int sinistar_clip;
-int williams_cocktail;
+UINT16 sinistar_clip;
+UINT8 williams_cocktail;
 
-/* video counter offset */
-static int port_select;
-static unsigned char defender_video_counter;
+/* other stuff */
+static UINT16 joust2_current_sound_data;
 
-/* various input port maps */
-int williams_input_port_0_3 (int offset);
-int williams_input_port_1_4 (int offset);
-int stargate_input_port_0_r (int offset);
-int blaster_input_port_0_r (int offset);
-int sinistar_input_port_0_r (int offset);
-int defender_input_port_0_r (int offset);
-int lottofun_input_port_0_r (int offset);
+/* older-Williams routines */
+static void williams_main_irq(int state);
+static void williams_main_firq(int state);
+static void williams_snd_irq(int state);
+static WRITE_HANDLER( williams_snd_cmd_w );
+
+/* input port mapping */
+static UINT8 port_select;
+static WRITE_HANDLER( williams_port_select_w );
+static READ_HANDLER( williams_input_port_0_3_r );
+static READ_HANDLER( williams_input_port_1_4_r );
+static READ_HANDLER( williams_49way_port_0_r );
+
+/* newer-Williams routines */
+WRITE_HANDLER( williams2_bank_select_w );
+static WRITE_HANDLER( williams2_snd_cmd_w );
 
 /* Defender-specific code */
-int defender_io_r (int offset);
-void defender_io_w (int offset,int data);
-void defender_bank_select_w (int offset, int data);
+WRITE_HANDLER( defender_bank_select_w );
+READ_HANDLER( defender_input_port_0_r );
+static READ_HANDLER( defender_io_r );
+static WRITE_HANDLER( defender_io_w );
 
-/* Colony 7-specific code */
-void colony7_bank_select_w (int offset, int data);
+/* Stargate-specific code */
+READ_HANDLER( stargate_input_port_0_r );
 
-/* PIA interface functions */
-static void williams_irq (void);
-static void williams_snd_irq (void);
-static void williams_snd_cmd_w (int offset, int cmd);
-static void williams_port_select_w (int offset, int data);
-static void sinistar_snd_cmd_w (int offset, int cmd);
+/* Turkey Shoot-specific code */
+static READ_HANDLER( tshoot_input_port_0_3_r );
+static WRITE_HANDLER( tshoot_lamp_w );
+static WRITE_HANDLER( tshoot_maxvol_w );
 
-/* external code to modify the palette */
-void williams_palette_w (int offset, int data);
-
-/* external code to update part of the screen */
-void williams_vh_update (int counter);
-
-/* external code for ticket dispenser */
-extern void ticket_dispenser_init(int msec);
-extern int ticket_dispenser_r(int offset);
-extern void ticket_dispenser_w(int offset, int data);
+/* Joust 2-specific code */
+static WRITE_HANDLER( joust2_snd_cmd_w );
+static WRITE_HANDLER( joust2_pia_3_cb1_w );
 
 
 
-/***************************************************************************
+/*************************************
+ *
+ *	Generic old-Williams PIA interfaces
+ *
+ *************************************/
 
-	PIA Interfaces for each game
-
-***************************************************************************/
-
-static pia6821_interface robotron_pia_intf =
+/* Generic PIA 0, maps to input ports 0 and 1 */
+struct pia6821_interface williams_pia_0_intf =
 {
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-	{ input_port_0_r, input_port_2_r, 0 },          /* input port A */
-	{ input_port_1_r, 0, 0 },                       /* input port B */
-	{ 0, 0, DAC_data_w },                           /* output port A */
-	{ 0, williams_snd_cmd_w, 0 },                   /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ 0, 0, 0 },                                    /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
+	/*inputs : A/B,CA/B1,CA/B2 */ input_port_0_r, input_port_1_r, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, 0, 0, 0,
+	/*irqs   : A/B             */ 0, 0
 };
 
-static pia6821_interface joust_pia_intf =
+/* Generic muxing PIA 0, maps to input ports 0/3 and 1; port select is CB2 */
+struct pia6821_interface williams_muxed_pia_0_intf =
 {
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-	{ williams_input_port_0_3, input_port_2_r, 0 }, /* input port A */
-	{ input_port_1_r, 0, 0 },                       /* input port B */
-	{ 0, 0, DAC_data_w },                           /* output port A */
-	{ 0, williams_snd_cmd_w, 0 },                   /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ williams_port_select_w, 0, 0 },               /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
+	/*inputs : A/B,CA/B1,CA/B2 */ williams_input_port_0_3_r, input_port_1_r, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, 0, 0, williams_port_select_w,
+	/*irqs   : A/B             */ 0, 0
 };
 
-static pia6821_interface stargate_pia_intf =
+/* Generic dual muxing PIA 0, maps to input ports 0/3 and 1/4; port select is CB2 */
+struct pia6821_interface williams_dual_muxed_pia_0_intf =
 {
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-	{ stargate_input_port_0_r, input_port_2_r, 0 }, /* input port A */
-	{ input_port_1_r, 0, 0 },                       /* input port B */
-	{ 0, 0, DAC_data_w },                           /* output port A */
-	{ 0, williams_snd_cmd_w, 0 },                   /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ 0, 0, 0 },                                    /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
+	/*inputs : A/B,CA/B1,CA/B2 */ williams_input_port_0_3_r, williams_input_port_1_4_r, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, 0, 0, williams_port_select_w,
+	/*irqs   : A/B             */ 0, 0
 };
 
-static pia6821_interface bubbles_pia_intf =
+/* Generic 49-way joystick PIA 0 for Sinistar/Blaster */
+struct pia6821_interface williams_49way_pia_0_intf =
 {
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-	{ input_port_0_r, input_port_2_r, 0 },          /* input port A */
-	{ input_port_1_r, 0, 0 },                       /* input port B */
-	{ 0, 0, DAC_data_w },                           /* output port A */
-	{ 0, williams_snd_cmd_w, 0 },                   /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ 0, 0, 0 },                                    /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
+	/*inputs : A/B,CA/B1,CA/B2 */ williams_49way_port_0_r, input_port_1_r, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, 0, 0, 0,
+	/*irqs   : A/B             */ 0, 0
 };
 
-static pia6821_interface splat_pia_intf =
+/* Generic PIA 1, maps to input port 2, sound command out, and IRQs */
+struct pia6821_interface williams_pia_1_intf =
 {
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-	{ williams_input_port_0_3, input_port_2_r, 0 }, /* input port A */
-	{ williams_input_port_1_4, 0, 0 },              /* input port B */
-	{ 0, 0, DAC_data_w },                           /* output port A */
-	{ 0, williams_snd_cmd_w, 0 },                   /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ williams_port_select_w, 0, 0 },               /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
+	/*inputs : A/B,CA/B1,CA/B2 */ input_port_2_r, 0, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, williams_snd_cmd_w, 0, 0,
+	/*irqs   : A/B             */ williams_main_irq, williams_main_irq
 };
 
-static pia6821_interface sinistar_pia_intf =
+/* Generic PIA 2, maps to DAC data in and sound IRQs */
+struct pia6821_interface williams_snd_pia_intf =
 {
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-	{ sinistar_input_port_0_r, input_port_2_r, 0 }, /* input port A */
-	{ input_port_1_r, 0, 0 },                       /* input port B */
-	{ 0, 0, DAC_data_w },                           /* output port A */
-	{ 0, sinistar_snd_cmd_w, 0 },                   /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ 0, 0, 0 },                                    /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
-};
-
-static pia6821_interface blaster_pia_intf =
-{
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-	{ blaster_input_port_0_r, input_port_2_r, 0 },  /* input port A */
-	{ input_port_1_r, 0, 0 },                       /* input port B */
-	{ 0, 0, DAC_data_w },                           /* output port A */
-	{ 0, williams_snd_cmd_w, 0 },                   /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ 0, 0, 0 },                                    /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
-};
-
-static pia6821_interface defender_pia_intf =
-{
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-	{ defender_input_port_0_r, input_port_2_r, 0 }, /* input port A */
-	{ input_port_1_r, 0, 0 },                       /* input port B */
-	{ 0, 0, DAC_data_w },                           /* output port A */
-	{ 0, williams_snd_cmd_w, 0 },                   /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ 0, 0, 0 },                                    /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
-};
-
-static pia6821_interface colony7_pia_intf =
-{
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-	{ input_port_0_r, input_port_2_r, 0 },          /* input port A */
-	{ input_port_1_r, 0, 0 },                       /* input port B */
-	{ 0, 0, DAC_data_w },                           /* output port A */
-	{ 0, williams_snd_cmd_w, 0 },                   /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ 0, 0, 0 },                                    /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
-};
-
-static pia6821_interface lottofun_pia_intf =
-{
-	3,                                              /* 3 chips */
-	{ PIA_DDRA, PIA_CTLA, PIA_DDRB, PIA_CTLB },     /* offsets */
-    { lottofun_input_port_0_r, input_port_2_r, 0 }, /* input port A */
-    { input_port_1_r, 0, 0 },                       /* input port B */
-    { 0, 0, DAC_data_w },                           /* output port A */
-    { ticket_dispenser_w, williams_snd_cmd_w, 0 },  /* output port B */
-	{ 0, 0, 0 },                                    /* output CA2 */
-	{ 0, 0, 0 },                                    /* output CB2 */
-	{ 0, williams_irq, williams_snd_irq },          /* IRQ A */
-	{ 0, williams_irq, williams_snd_irq }           /* IRQ B */
+	/*inputs : A/B,CA/B1,CA/B2 */ 0, 0, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ DAC_0_data_w, 0, 0, 0,
+	/*irqs   : A/B             */ williams_snd_irq, williams_snd_irq
 };
 
 
 
-/***************************************************************************
+/*************************************
+ *
+ *	Game-specific old-Williams PIA interfaces
+ *
+ *************************************/
 
-	Common Williams routines
-
-***************************************************************************/
-
-/*
- *  Initialize the machine
- */
-
-void robotron_init_machine (void)
+/* Special PIA 0 for Defender, to handle the controls */
+struct pia6821_interface defender_pia_0_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&robotron_pia_intf);
-}
+	/*inputs : A/B,CA/B1,CA/B2 */ defender_input_port_0_r, input_port_1_r, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, 0, 0, 0,
+	/*irqs   : A/B             */ 0, 0
+};
 
-void joust_init_machine (void)
+/* Special PIA 0 for Stargate, to handle the controls */
+struct pia6821_interface stargate_pia_0_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&joust_pia_intf);
-}
+	/*inputs : A/B,CA/B1,CA/B2 */ stargate_input_port_0_r, input_port_1_r, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, 0, 0, 0,
+	/*irqs   : A/B             */ 0, 0
+};
 
-void stargate_init_machine (void)
+/* Special PIA 2 for Sinistar, to handle the CVSD */
+struct pia6821_interface sinistar_snd_pia_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&stargate_pia_intf);
-}
+	/*inputs : A/B,CA/B1,CA/B2 */ 0, 0, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ DAC_0_data_w, 0, hc55516_0_digit_w, hc55516_0_clock_w,
+	/*irqs   : A/B             */ williams_snd_irq, williams_snd_irq
+};
 
-void bubbles_init_machine (void)
+
+
+/*************************************
+ *
+ *	Generic later-Williams PIA interfaces
+ *
+ *************************************/
+
+/* Generic muxing PIA 0, maps to input ports 0/3 and 1; port select is CA2 */
+struct pia6821_interface williams2_muxed_pia_0_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&bubbles_pia_intf);
-}
+	/*inputs : A/B,CA/B1,CA/B2 */ williams_input_port_0_3_r, input_port_1_r, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, 0, williams_port_select_w, 0,
+	/*irqs   : A/B             */ 0, 0
+};
 
-void splat_init_machine (void)
+/* Generic PIA 1, maps to input port 2, sound command out, and IRQs */
+struct pia6821_interface williams2_pia_1_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&splat_pia_intf);
-}
+	/*inputs : A/B,CA/B1,CA/B2 */ input_port_2_r, 0, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, williams2_snd_cmd_w, 0, pia_2_ca1_w,
+	/*irqs   : A/B             */ williams_main_irq, williams_main_irq
+};
 
-void sinistar_init_machine (void)
+/* Generic PIA 2, maps to DAC data in and sound IRQs */
+struct pia6821_interface williams2_snd_pia_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&sinistar_pia_intf);
-}
+	/*inputs : A/B,CA/B1,CA/B2 */ 0, 0, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ pia_1_portb_w, DAC_0_data_w, pia_1_cb1_w, 0,
+	/*irqs   : A/B             */ williams_snd_irq, williams_snd_irq
+};
 
-void blaster_init_machine (void)
+
+
+/*************************************
+ *
+ *	Game-specific later-Williams PIA interfaces
+ *
+ *************************************/
+
+/* Mystic Marathon PIA 0 */
+struct pia6821_interface mysticm_pia_0_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&blaster_pia_intf);
-}
+	/*inputs : A/B,CA/B1,CA/B2 */ input_port_0_r, input_port_1_r, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, 0, 0, 0,
+	/*irqs   : A/B             */ williams_main_firq, williams_main_irq
+};
 
-void defender_init_machine (void)
+/* Turkey Shoot PIA 0 */
+struct pia6821_interface tshoot_pia_0_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&defender_pia_intf);
-	williams_video_counter = &defender_video_counter;
+	/*inputs : A/B,CA/B1,CA/B2 */ tshoot_input_port_0_3_r, input_port_1_r, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, tshoot_lamp_w, williams_port_select_w, 0,
+	/*irqs   : A/B             */ williams_main_irq, williams_main_irq
+};
 
-	/* initialize the banks */
-	defender_bank_select_w (0, 0);
-}
-
-void colony7_init_machine (void)
+/* Turkey Shoot PIA 2 */
+struct pia6821_interface tshoot_snd_pia_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&colony7_pia_intf);
-	williams_video_counter = &defender_video_counter;
+	/*inputs : A/B,CA/B1,CA/B2 */ 0, 0, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ pia_1_portb_w, DAC_0_data_w, pia_1_cb1_w, tshoot_maxvol_w,
+	/*irqs   : A/B             */ williams_snd_irq, williams_snd_irq
+};
 
-	/* initialize the banks */
-	colony7_bank_select_w (0, 0);
-}
-
-void lottofun_init_machine (void)
+/* Joust 2 PIA 1 */
+struct pia6821_interface joust2_pia_1_intf =
 {
-	m6809_Flags = M6809_FAST_NONE;
-	pia_startup (&lottofun_pia_intf);
-
-	/* Initialize the ticket dispenser to 70 milliseconds */
-	/* (I'm not sure what the correct value really is) */
-	ticket_dispenser_init(70);
-}
+	/*inputs : A/B,CA/B1,CA/B2 */ input_port_2_r, 0, 0, 0, 0, 0,
+	/*outputs: A/B,CA/B2       */ 0, joust2_snd_cmd_w, joust2_pia_3_cb1_w, pia_2_ca1_w,
+	/*irqs   : A/B             */ williams_main_irq, williams_main_irq
+};
 
 
-/*
- *  Generic interrupt routine; interrupts are generated via the PIA, so we merely pulse the
- *  external inputs here; the PIA emulator will generate the interrupt if the proper conditions
- *  are met
- */
 
-int williams_interrupt (void)
+/*************************************
+ *
+ *	Older Williams interrupts
+ *
+ *************************************/
+
+static void williams_va11_callback(int scanline)
 {
-	/* the video counter value is taken from the six bits of VA8-VA13 */
-	*williams_video_counter = ((64 - cpu_getiloops ()) << 2);
-
 	/* the IRQ signal comes into CB1, and is set to VA11 */
-	pia_2_cb1_w (0, *williams_video_counter & 0x20);
+	pia_1_cb1_w(0, scanline & 0x20);
 
+	/* update the screen while we're here */
+	williams_vh_update(scanline);
+
+	/* set a timer for the next update */
+	scanline += 16;
+	if (scanline >= 256) scanline = 0;
+	timer_set(cpu_getscanlinetime(scanline), scanline, williams_va11_callback);
+}
+
+
+static void williams_count240_off_callback(int param)
+{
 	/* the COUNT240 signal comes into CA1, and is set to the logical AND of VA10-VA13 */
-	pia_2_ca1_w (0, (*williams_video_counter & 0xf0) == 0xf0);
-
-	/* update the screen partially */
-	williams_vh_update (*williams_video_counter);
-
-	/* PIA generates interrupts, not us */
-	return ignore_interrupt ();
+	pia_1_ca1_w(0, 0);
 }
 
 
-/*
- *  Read either port 0 or 3, depending on the value in CB2
- */
-
-int williams_input_port_0_3 (int offset)
+static void williams_count240_callback(int param)
 {
-	if (port_select)
-		return input_port_3_r (0);
-	else
-		return input_port_0_r (0);
+	/* the COUNT240 signal comes into CA1, and is set to the logical AND of VA10-VA13 */
+	pia_1_ca1_w(0, 1);
+
+	/* set a timer to turn it off once the scanline counter resets */
+	timer_set(cpu_getscanlinetime(0), 0, williams_count240_off_callback);
+
+	/* set a timer for next frame */
+	timer_set(cpu_getscanlinetime(240), 0, williams_count240_callback);
 }
 
 
-/*
- *  Read either port 2 or 3, depending on the value in CB2
- */
-
-int williams_input_port_1_4 (int offset)
+static void williams_main_irq(int state)
 {
-	if (port_select)
-	   return input_port_4_r (0);
-	else
-	   return input_port_1_r (0);
+	/* IRQ to the main CPU */
+	cpu_set_irq_line(0, M6809_IRQ_LINE, state ? ASSERT_LINE : CLEAR_LINE);
 }
 
 
-/*
- *  Switch between VRAM and ROM
- */
-
-void williams_vram_select_w (int offset, int data)
+static void williams_main_firq(int state)
 {
+	/* FIRQ to the main CPU */
+	cpu_set_irq_line(0, M6809_FIRQ_LINE, state ? ASSERT_LINE : CLEAR_LINE);
+}
+
+
+static void williams_snd_irq(int state)
+{
+	/* IRQ to the sound CPU */
+	cpu_set_irq_line(1, M6800_IRQ_LINE, state ? ASSERT_LINE : CLEAR_LINE);
+}
+
+
+
+/*************************************
+ *
+ *	Older Williams initialization
+ *
+ *************************************/
+
+void williams_init_machine(void)
+{
+	/* reset the PIAs */
+	pia_reset();
+
+	/* set a timer to go off every 16 scanlines, to toggle the VA11 line and update the screen */
+	timer_set(cpu_getscanlinetime(0), 0, williams_va11_callback);
+
+	/* also set a timer to go off on scanline 240 */
+	timer_set(cpu_getscanlinetime(240), 0, williams_count240_callback);
+}
+
+
+
+/*************************************
+ *
+ *	Older Williams VRAM/ROM banking
+ *
+ *************************************/
+
+WRITE_HANDLER( williams_vram_select_w )
+{
+	/* VRAM/ROM banking from bit 0 */
 	vram_bank = data & 0x01;
-	williams_cocktail = data & 0x02;
-	sinistar_clip = data & 0x04;
 
+	/* cocktail flip from bit 1 */
+	williams_cocktail = data & 0x02;
+
+	/* sinistar clipping enable from bit 2 */
+	sinistar_clip = (data & 0x04) ? 0x7400 : 0xffff;
+
+	/* set the bank */
 	if (vram_bank)
 	{
-		cpu_setbank (1, williams_bank_base);
+		cpu_setbank(1, williams_bank_base);
 	}
 	else
 	{
-		cpu_setbank (1, williams_videoram);
+		cpu_setbank(1, williams_videoram);
 	}
 }
 
 
-/*
- *  PIA callback to generate the interrupt to the main CPU
- */
 
-static void williams_irq (void)
+/*************************************
+ *
+ *	Older Williams sound commands
+ *
+ *************************************/
+
+static void williams_deferred_snd_cmd_w(int param)
 {
-	cpu_cause_interrupt (0, M6809_INT_IRQ);
+	pia_2_portb_w(0, param);
+	pia_2_cb1_w(0, (param == 0xff) ? 0 : 1);
 }
 
-
-/*
- *  PIA callback to generate the interrupt to the sound CPU
- */
-
-static void williams_snd_irq (void)
-{
-	cpu_cause_interrupt (1, M6808_INT_IRQ);
-}
-
-
-/*
- *  Handle a write to the PIA which communicates to the sound CPU
- */
-
-static void williams_snd_cmd_real_w (int param)
-{
-	pia_3_portb_w (0, param);
-	pia_3_cb1_w (0, (param == 0xff) ? 0 : 1);
-}
-
-static void williams_snd_cmd_w (int offset, int cmd)
+WRITE_HANDLER( williams_snd_cmd_w )
 {
 	/* the high two bits are set externally, and should be 1 */
-	timer_set (TIME_NOW, cmd | 0xc0, williams_snd_cmd_real_w);
+	timer_set(TIME_NOW, data | 0xc0, williams_deferred_snd_cmd_w);
 }
 
 
-/*
- *  Detect a switch between input port sets
- */
 
-static void williams_port_select_w (int offset, int data)
+/*************************************
+ *
+ *	General input port handlers
+ *
+ *************************************/
+
+WRITE_HANDLER( williams_port_select_w )
 {
 	port_select = data;
 }
 
 
-/***************************************************************************
-
-	Robotron-specific routines
-
-***************************************************************************/
-
-/* JB 970823 - speed up very busy loop in Robotron */
-/*    D19B: LDA   $10    ; dp=98
-      D19D: CMPA  #$02
-      D19F: BCS   $D19B  ; (BLO)   */
-int robotron_catch_loop_r (int offset)
+READ_HANDLER( williams_input_port_0_3_r )
 {
-	unsigned char t = *robotron_catch;
-	if (t < 2 && cpu_getpc () == 0xd19d)
-		cpu_seticount (0);
-	return t;
+	return readinputport(port_select ? 3 : 0);
+}
+
+
+READ_HANDLER( williams_input_port_1_4_r )
+{
+	return readinputport(port_select ? 4 : 1);
+}
+
+
+/*
+ *  Williams 49-way joystick
+ *
+ * The joystick has 48 positions + center.
+ *
+ * I'm not 100% sure but it looks like it's mapped this way:
+ *
+ *	xxxx1000 = up full
+ *	xxxx1100 = up 2/3
+ *	xxxx1110 = up 1/3
+ *	xxxx0111 = center
+ *	xxxx0011 = down 1/3
+ *	xxxx0001 = down 2/3
+ *	xxxx0000 = down full
+ *
+ *	1000xxxx = right full
+ *	1100xxxx = right 2/3
+ *	1110xxxx = right 1/3
+ *	0111xxxx = center
+ *	0011xxxx = left 1/3
+ *	0001xxxx = left 2/3
+ *	0000xxxx = left full
+ *
+ */
+
+READ_HANDLER( williams_49way_port_0_r )
+{
+	int joy_x, joy_y;
+	int bits_x, bits_y;
+
+	joy_x = readinputport(3) >> 4;	/* 0 = left 3 = center 6 = right */
+	joy_y = readinputport(4) >> 4;	/* 0 = down 3 = center 6 = up */
+
+	bits_x = (0x70 >> (7 - joy_x)) & 0x0f;
+	bits_y = (0x70 >> (7 - joy_y)) & 0x0f;
+
+	return (bits_x << 4) | bits_y;
 }
 
 
 
-/***************************************************************************
+/*************************************
+ *
+ *	Newer Williams interrupts
+ *
+ *************************************/
 
-	Stargate-specific routines
-
-***************************************************************************/
-
-int stargate_input_port_0_r(int offset)
+static void williams2_va11_callback(int scanline)
 {
-	int keys, altkeys;
+	/* the IRQ signal comes into CB1, and is set to VA11 */
+	pia_0_cb1_w(0, scanline & 0x20);
+	pia_1_ca1_w(0, scanline & 0x20);
 
-	keys = input_port_0_r (0);
-	altkeys = input_port_3_r (0);
+	/* update the screen while we're here */
+	williams2_vh_update(scanline);
 
-	if (altkeys)
+	/* set a timer for the next update */
+	scanline += 16;
+	if (scanline >= 256) scanline = 0;
+	timer_set(cpu_getscanlinetime(scanline), scanline, williams2_va11_callback);
+}
+
+
+static void williams2_endscreen_off_callback(int param)
+{
+	/* the /ENDSCREEN signal comes into CA1 */
+	pia_0_ca1_w(0, 1);
+}
+
+
+static void williams2_endscreen_callback(int param)
+{
+	/* the /ENDSCREEN signal comes into CA1 */
+	pia_0_ca1_w(0, 0);
+
+	/* set a timer to turn it off once the scanline counter resets */
+	timer_set(cpu_getscanlinetime(8), 0, williams2_endscreen_off_callback);
+
+	/* set a timer for next frame */
+	timer_set(cpu_getscanlinetime(254), 0, williams2_endscreen_callback);
+}
+
+
+
+/*************************************
+ *
+ *	Newer Williams initialization
+ *
+ *************************************/
+
+void williams2_init_machine(void)
+{
+	/* reset the PIAs */
+	pia_reset();
+
+	/* make sure our banking is reset */
+	williams2_bank_select_w(0, 0);
+
+	/* set a timer to go off every 16 scanlines, to toggle the VA11 line and update the screen */
+	timer_set(cpu_getscanlinetime(0), 0, williams2_va11_callback);
+
+	/* also set a timer to go off on scanline 254 */
+	timer_set(cpu_getscanlinetime(254), 0, williams2_endscreen_callback);
+}
+
+
+
+/*************************************
+ *
+ *	Newer Williams ROM banking
+ *
+ *************************************/
+
+WRITE_HANDLER( williams2_bank_select_w )
+{
+	static const UINT32 bank[8] = { 0, 0x10000, 0x20000, 0x10000, 0, 0x30000, 0x40000, 0x30000 };
+
+	/* select bank index (only lower 3 bits used by IC56) */
+	williams2_bank = data & 0x07;
+
+	/* bank 0 references videoram */
+	if (williams2_bank == 0)
 	{
-		keys |= altkeys;
-		if (Machine->memory_region[0][0x9c92] == 0xfd)
+		cpu_setbank(1, williams_videoram);
+		cpu_setbank(2, williams_videoram + 0x8000);
+	}
+
+	/* other banks reference ROM plus either palette RAM or the top of videoram */
+	else
+	{
+		unsigned char *RAM = memory_region(REGION_CPU1);
+
+		cpu_setbank(1, &RAM[bank[williams2_bank]]);
+
+		if ((williams2_bank & 0x03) == 0x03)
 		{
-			if (keys & 0x02)
-				keys = (keys & 0xfd) | 0x40;
-			else if (keys & 0x40)
-				keys = (keys & 0xbf) | 0x02;
+			cpu_setbank(2, williams2_paletteram);
+		}
+		else
+		{
+			cpu_setbank(2, williams_videoram + 0x8000);
 		}
 	}
 
-	return keys;
-}
-
-
-/* JB 970823 - speed up very busy loop in Stargate */
-/*    0011: LDA   $39    ; dp=9c
-      0013: BEQ   $0011   */
-int stargate_catch_loop_r (int offset)
-{
-	unsigned char t = *stargate_catch;
-	if (t == 0 && cpu_getpc () == 0x0013)
-		cpu_seticount (0);
-	return t;
+	/* regardless, the top 2k references videoram */
+	cpu_setbank(3, williams_videoram + 0x8800);
 }
 
 
 
-/***************************************************************************
+/*************************************
+ *
+ *	Newer Williams sound commands
+ *
+ *************************************/
 
-	Defender-specific routines
-
-***************************************************************************/
-
-/*
- *  Defender Select a bank
- *  There is just data in bank 0
- */
-
-void defender_bank_select_w (int offset,int data)
+static void williams2_deferred_snd_cmd_w(int param)
 {
-	static int bank[8] = { 0x0c000, 0x10000, 0x11000, 0x12000, 0x0c000, 0x0c000, 0x0c000, 0x13000 };
+	pia_2_porta_w(0, param);
+}
+
+
+static WRITE_HANDLER( williams2_snd_cmd_w )
+{
+	timer_set(TIME_NOW, data, williams2_deferred_snd_cmd_w);
+}
+
+
+
+/*************************************
+ *
+ *	Newer Williams other stuff
+ *
+ *************************************/
+
+WRITE_HANDLER( williams2_7segment_w )
+{
+	int n;
+	char dot;
+	char buffer[5];
+
+	switch (data & 0x7F)
+	{
+		case 0x40:	n = 0; break;
+		case 0x79:	n = 1; break;
+		case 0x24:	n = 2; break;
+		case 0x30:	n = 3; break;
+		case 0x19:	n = 4; break;
+		case 0x12:	n = 5; break;
+		case 0x02:	n = 6; break;
+		case 0x03:	n = 6; break;
+		case 0x78:	n = 7; break;
+		case 0x00:	n = 8; break;
+		case 0x18:	n = 9; break;
+		case 0x10:	n = 9; break;
+		default:	n =-1; break;
+	}
+
+	if ((data & 0x80) == 0x00)
+		dot = '.';
+	else
+		dot = ' ';
+
+	if (n == -1)
+		sprintf(buffer, "[ %c]\n", dot);
+	else
+		sprintf(buffer, "[%d%c]\n", n, dot);
+
+	logerror(buffer);
+}
+
+
+
+/*************************************
+ *
+ *	Defender-specific routines
+ *
+ *************************************/
+
+void defender_init_machine(void)
+{
+	/* standard init */
+	williams_init_machine();
+
+	/* make sure the banking is reset to 0 */
+	defender_bank_select_w(0, 0);
+	cpu_setbank(1, williams_videoram);
+}
+
+
+
+WRITE_HANDLER( defender_bank_select_w )
+{
+	UINT32 bank_offset = defender_bank_list[data & 7];
 
 	/* set bank address */
-	cpu_setbank (1, &RAM[bank[data & 7]]);
+	cpu_setbank(2, &memory_region(REGION_CPU1)[bank_offset]);
 
-	if (bank[data] < 0x10000)
+	/* if the bank maps into normal RAM, it represents I/O space */
+	if (bank_offset < 0x10000)
 	{
-		/* i/o area map */
-		cpu_setbankhandler_r (1, defender_io_r);
-		cpu_setbankhandler_w (1, defender_io_w);
+		cpu_setbankhandler_r(2, defender_io_r);
+		cpu_setbankhandler_w(2, defender_io_w);
 	}
+
+	/* otherwise, it's ROM space */
 	else
 	{
-		/* bank rom map */
-		cpu_setbankhandler_r (1, MRA_BANK1);
-		cpu_setbankhandler_w (1, MWA_ROM);
+		cpu_setbankhandler_r(2, MRA_BANK2);
+		cpu_setbankhandler_w(2, MWA_ROM);
 	}
 }
 
 
-/*
- *   Defender Read at C000-CFFF
- */
-
-int defender_input_port_0_r(int offset)
+READ_HANDLER( defender_input_port_0_r )
 {
 	int keys, altkeys;
 
+	/* read the standard keys and the cheat keys */
 	keys = readinputport(0);
 	altkeys = readinputport(3);
 
+	/* modify the standard keys with the cheat keys */
 	if (altkeys)
 	{
 		keys |= altkeys;
-		if (Machine->memory_region[0][0xa0bb] == 0xfd)
+		if (memory_region(REGION_CPU1)[0xa0bb] == 0xfd)
 		{
 			if (keys & 0x02)
 				keys = (keys & 0xfd) | 0x40;
@@ -549,276 +676,234 @@ int defender_input_port_0_r(int offset)
 	return keys;
 }
 
-int defender_io_r (int offset)
+
+READ_HANDLER( defender_io_r )
 {
 	/* PIAs */
 	if (offset >= 0x0c00 && offset < 0x0c04)
-		return pia_2_r (offset - 0x0c00);
+		return pia_1_r(offset & 3);
 	else if (offset >= 0x0c04 && offset < 0x0c08)
-		return pia_1_r (offset - 0x0c04);
+		return pia_0_r(offset & 3);
 
 	/* video counter */
 	else if (offset == 0x800)
-		return *williams_video_counter;
+		return williams_video_counter_r(offset);
 
 	/* If not bank 0 then return banked RAM */
 	return defender_bank_base[offset];
 }
 
 
-/*
- *  Defender Write at C000-CFFF
- */
-
-void defender_io_w (int offset,int data)
+WRITE_HANDLER( defender_io_w )
 {
+	/* write the data through */
 	defender_bank_base[offset] = data;
 
-	/* WatchDog */
+	/* watchdog */
 	if (offset == 0x03fc)
-		watchdog_reset_w (offset, data);
+		watchdog_reset_w(offset, data);
 
-	/* Palette */
+	/* palette */
 	else if (offset < 0x10)
-		williams_palette_w (offset, data);
+		paletteram_BBGGGRRR_w(offset, data);
 
 	/* PIAs */
 	else if (offset >= 0x0c00 && offset < 0x0c04)
-		pia_2_w (offset - 0x0c00, data);
+		pia_1_w(offset & 3, data);
 	else if (offset >= 0x0c04 && offset < 0x0c08)
-		pia_1_w (offset - 0x0c04, data);
-}
-
-
-/* JB 970823 - speed up very busy loop in Defender */
-/*    E7C3: LDA   $5D    ; dp=a0
-      E7C5: BEQ   $E7C3   */
-int defender_catch_loop_r(int offset)
-{
-	unsigned char t = *defender_catch;
-	if (t == 0 && cpu_getpc () == 0xe7c5)
-		cpu_seticount (0);
-	return t;
+		pia_0_w(offset & 3, data);
 }
 
 
 
-/***************************************************************************
+/*************************************
+ *
+ *	Mayday-specific routines
+ *
+ *************************************/
 
-	Colony 7-specific routines
-
-***************************************************************************/
-
-/*
- *  Colony7 Select a bank
- *  There is just data in bank 0
- */
-void colony7_bank_select_w (int offset,int data)
+READ_HANDLER( mayday_protection_r )
 {
-	static int bank[8] = { 0x0c000, 0x10000, 0x11000, 0x12000, 0x0c000, 0x0c000, 0x0c000, 0xc000 };
+	/* Mayday does some kind of protection check that is not currently understood  */
+	/* However, the results of that protection check are stored at $a190 and $a191 */
+	/* These are compared against $a193 and $a194, respectively. Thus, to prevent  */
+	/* the protection from resetting the machine, we just return $a193 for $a190,  */
+	/* and $a194 for $a191. */
+	return mayday_protection[offset + 3];
+}
 
-	/* set bank address */
-	cpu_setbank (1, &RAM[bank[data & 7]]);
-	if (bank[data] < 0x10000)
+
+
+/*************************************
+ *
+ *	Stargate-specific routines
+ *
+ *************************************/
+
+READ_HANDLER( stargate_input_port_0_r )
+{
+	int keys, altkeys;
+
+	/* read the standard keys and the cheat keys */
+	keys = input_port_0_r(0);
+	altkeys = input_port_3_r(0);
+
+	/* modify the standard keys with the cheat keys */
+	if (altkeys)
 	{
-		/* i/o area map */
-		cpu_setbankhandler_r (1, defender_io_r);
-		cpu_setbankhandler_w (1, defender_io_w);
-	}
-	else
-	{
-		/* bank rom map */
-		cpu_setbankhandler_r (1, MRA_BANK1);
-		cpu_setbankhandler_w (1, MWA_ROM);
-	}
-}
-
-
-
-/***************************************************************************
-
-	Splat!-specific routines
-
-***************************************************************************/
-
-/* JB 970823 - speed up very busy loop in Splat */
-/*    D04F: LDA   $4B    ; dp=98
-      D051: BEQ   $D04F   */
-int splat_catch_loop_r(int offset)
-{
-	unsigned char t = *splat_catch;
-	if (t == 0 && cpu_getpc () == 0xd051)
-		cpu_seticount (0);
-	return t;
-}
-
-
-/***************************************************************************
-
-	Sinistar-specific routines
-
-***************************************************************************/
-
-/*
- *  Sinistar Joystick
- */
-int sinistar_input_port_0_r (int offset)
-{
-	int i;
-	int keys;
-
-
-/*~~~~~ make it incremental */
-	keys = input_port_0_r (0);
-
-	if (keys & 0x04)
-		i = 0x40;
-	else if (keys & 0x08)
-		i = 0xC0;
-	else
-		i = 0x20;
-
-	if (keys&0x02)
-		i += 0x04;
-	else if (keys&0x01)
-		i += 0x0C;
-	else
-		i += 0x02;
-
-	return i;
-}
-
-
-static void sinistar_snd_cmd_w (int offset, int cmd)
-{
-/*	if (errorlog) fprintf (errorlog, "snd command: %02x %d\n", cmd, cmd); */
-
-	switch (cmd)
-	{
-		case 0x31: /* beware i live */
-			sample_start (0,0,0);
-			break;
-		case 0x30: /* coin sound "I Hunger"*/
-			sample_start (0,1,0);
-			break;
-		case 0x3d: /* roar */
-			sample_start (0,2,0);
-			break;
-		case 0x32: /* i am sinistar */
-			sample_start (0,4,0);
-			break;
-		case 0x34: /* Run Run Run (may be wrong) */
-			sample_start (0,3,0);
-			break;
-		case 0x2c: /* Run coward (may be wrong) */
-			sample_start (0,5,0);
-			break;
-		case 0x39: /* Run coward (may be wrong) */
-			sample_start (0,7,0);
-			break;
-		case 0x22: /* I hunger coward (may be wrong) */
-			sample_start (0,6,0);
-			break;
+		keys |= altkeys;
+		if (memory_region(REGION_CPU1)[0x9c92] == 0xfd)
+		{
+			if (keys & 0x02)
+				keys = (keys & 0xfd) | 0x40;
+			else if (keys & 0x40)
+				keys = (keys & 0xbf) | 0x02;
+		}
 	}
 
-	timer_set (TIME_NOW, cmd | 0xc0, williams_snd_cmd_real_w);
+	return keys;
 }
 
 
-/***************************************************************************
 
-	Blaster-specific routines
+/*************************************
+ *
+ *	Blaster-specific routines
+ *
+ *************************************/
 
-***************************************************************************/
-
-/*
- *  Blaster Joystick
- */
-int blaster_input_port_0_r (int offset)
+static const UINT32 blaster_bank_offset[16] =
 {
-	int i;
-	int keys;
-
-	keys = input_port_0_r (0);
-
-	if (keys & 0x04)
-		i = 0x00;
-	else if (keys & 0x08)
-		i = 0x80;
-	else
-		i = 0x40;
-
-	if (keys&0x02)
-		i += 0x00;
-	else if (keys&0x01)
-		i += 0x08;
-	else
-		i += 0x04;
-
-	return i;
-}
+	0x00000, 0x10000, 0x14000, 0x18000, 0x1c000, 0x20000, 0x24000, 0x28000,
+	0x2c000, 0x30000, 0x34000, 0x38000, 0x2c000, 0x30000, 0x34000, 0x38000
+};
 
 
-/*
- *  Blaster bank select
- */
-
-static int bank[16] = { 0x00000, 0x10000, 0x14000, 0x18000, 0x1c000, 0x20000, 0x24000, 0x28000,
-                        0x2c000, 0x30000, 0x34000, 0x38000, 0x2c000, 0x30000, 0x34000, 0x38000 };
-
-void blaster_vram_select_w (int offset, int data)
+WRITE_HANDLER( blaster_vram_select_w )
 {
+	unsigned char *RAM = memory_region(REGION_CPU1);
+
 	vram_bank = data;
+
+	/* non-zero banks map to RAM and the currently-selected bank */
 	if (vram_bank)
 	{
-		cpu_setbank (1, &RAM[bank[blaster_bank]]);
-		cpu_setbank (2, blaster_bank2_base);
+		cpu_setbank(1, &RAM[blaster_bank_offset[blaster_bank]]);
+		cpu_setbank(2, williams_bank_base + 0x4000);
 	}
+
+	/* bank 0 maps to videoram */
 	else
 	{
-		cpu_setbank (1, williams_videoram);
-		cpu_setbank (2, williams_videoram + 0x4000);
+		cpu_setbank(1, williams_videoram);
+		cpu_setbank(2, williams_videoram + 0x4000);
 	}
 }
 
 
-void blaster_bank_select_w (int offset, int data)
+WRITE_HANDLER( blaster_bank_select_w )
 {
+	unsigned char *RAM = memory_region(REGION_CPU1);
+
 	blaster_bank = data & 15;
+
+	/* only need to change anything if we're not pointing to VRAM */
 	if (vram_bank)
 	{
-		cpu_setbank (1, &RAM[bank[blaster_bank]]);
+		cpu_setbank(1, &RAM[blaster_bank_offset[blaster_bank]]);
 	}
+}
+
+
+
+/*************************************
+ *
+ *	Turkey Shoot-specific routines
+ *
+ *************************************/
+
+static READ_HANDLER( tshoot_input_port_0_3_r )
+{
+	/* merge in the gun inputs with the standard data */
+	int data = williams_input_port_0_3_r(offset);
+	int gun = (data & 0x3f) ^ ((data & 0x3f) >> 1);
+	return (data & 0xc0) | gun;
+}
+
+
+static WRITE_HANDLER( tshoot_maxvol_w )
+{
+	/* something to do with the sound volume */
+	logerror("tshoot maxvol = %d (pc:%x)\n", data, cpu_get_pc());
+}
+
+
+static WRITE_HANDLER( tshoot_lamp_w )
+{
+	/* set the grenade lamp */
+	if (data & 0x04)
+		osd_led_w(0, 1);
 	else
-	{
-		cpu_setbank (1, williams_videoram);
-	}
-}
+		osd_led_w(0, 0);
 
+	/* set the gun lamp */
+	if (data & 0x08)
+		osd_led_w(1, 1);
+	else
+		osd_led_w(1, 0);
 
-#if 0 /* the fix for Blaster is more expensive than the loop */
-/* JB 970823 - speed up very busy loop in Blaster */
-/*    D184: LDA   $00    ; dp=97
-      D186: CMPA  #$02
-      D188: BCS   $D184  ; (BLO)   */
-int blaster_catch_loop_r(int offset)
-{
-	unsigned char t = *blaster_catch;
-	if (t < 2 && cpu_getpc () == 0xd186)
-		cpu_seticount (0);
-	return t;
-}
+#if 0
+	/* gun coil */
+	if (data & 0x10)
+		printf("[gun coil] ");
+	else
+		printf("           ");
+
+	/* feather coil */
+	if (data & 0x20)
+		printf("[feather coil] ");
+	else
+		printf("               ");
+
+	printf("\n");
 #endif
-
-
-/***************************************************************************
-
-	Lotto Fun-specific routines
-
-***************************************************************************/
-
-int lottofun_input_port_0_r(int offset)
-{
-	return input_port_0_r(offset) | ticket_dispenser_r(offset);
 }
 
+
+
+/*************************************
+ *
+ *	Joust 2-specific routines
+ *
+ *************************************/
+
+void joust2_init_machine(void)
+{
+	/* standard init */
+	williams2_init_machine();
+
+	/* make sure sound board starts out in the reset state */
+	williams_cvsd_init(2, 3);
+	pia_reset();
+}
+
+
+static void joust2_deferred_snd_cmd_w(int param)
+{
+	pia_2_porta_w(0, param & 0xff);
+}
+
+
+static WRITE_HANDLER( joust2_pia_3_cb1_w )
+{
+	joust2_current_sound_data = (joust2_current_sound_data & ~0x100) | ((data << 8) & 0x100);
+	pia_3_cb1_w(offset, data);
+}
+
+
+static WRITE_HANDLER( joust2_snd_cmd_w )
+{
+	joust2_current_sound_data = (joust2_current_sound_data & ~0xff) | (data & 0xff);
+	williams_cvsd_data_w(0, joust2_current_sound_data);
+	timer_set(TIME_NOW, joust2_current_sound_data, joust2_deferred_snd_cmd_w);
+}

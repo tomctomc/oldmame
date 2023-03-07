@@ -10,14 +10,15 @@
 #include "vidhrdw/generic.h"
 
 
+/* from sndhrdw/pleiads.c */
+WRITE_HANDLER( pleiads_sound_control_c_w );
 
 unsigned char *naughtyb_videoram2;
 
+int videoreg;
+
 /* use these to draw charset B */
 unsigned char *naughtyb_scrollreg;
-
-/* video/control register 1  */
-static unsigned char videoctlreg;
 
 /* use this to select palette */
 static unsigned char palreg;
@@ -28,20 +29,20 @@ static int bankreg;
 
 static struct rectangle scrollvisiblearea =
 {
-	0*8, 28*8-1,
-	2*8, 34*8-1
+	2*8, 34*8-1,
+	0*8, 28*8-1
 };
 
-static struct rectangle topvisiblearea =
+static struct rectangle leftvisiblearea =
 {
-	0*8, 28*8-1,
-	0*8, 2*8-1
+	0*8, 2*8-1,
+	0*8, 28*8-1
 };
 
-static struct rectangle bottomvisiblearea =
+static struct rectangle rightvisiblearea =
 {
-	0*8, 28*8-1,
-	34*8, 36*8-1
+	34*8, 36*8-1,
+	0*8, 28*8-1
 };
 
 
@@ -67,7 +68,7 @@ static struct rectangle bottomvisiblearea =
   plus 270 ohm pullup and pulldown resistors on all lines
 
 ***************************************************************************/
-void naughtyb_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void naughtyb_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -132,16 +133,14 @@ void naughtyb_vh_convert_color_prom(unsigned char *palette, unsigned char *color
 ***************************************************************************/
 int naughtyb_vh_start(void)
 {
-	palreg    = 0;
-	bankreg   = 0;
-	videoctlreg = 0;
+	videoreg = palreg = bankreg = 0;
 
 	/* Naughty Boy has a virtual screen twice as large as the visible screen */
 	if ((dirtybuffer = malloc(videoram_size)) == 0)
 		return 1;
-	memset(dirtybuffer,1,videoram_size);
+	memset(dirtybuffer, 1, videoram_size);
 
-	if ((tmpbitmap = osd_create_bitmap(28*8,68*8)) == 0)
+	if ((tmpbitmap = bitmap_alloc(68*8,28*8)) == 0)
 	{
 		free(dirtybuffer);
 		return 1;
@@ -159,13 +158,13 @@ int naughtyb_vh_start(void)
 ***************************************************************************/
 void naughtyb_vh_stop(void)
 {
-	osd_free_bitmap(tmpbitmap);
+	bitmap_free(tmpbitmap);
 	free(dirtybuffer);
 }
 
 
 
-void naughtyb_videoram2_w(int offset,int data)
+WRITE_HANDLER( naughtyb_videoram2_w )
 {
 	if (naughtyb_videoram2[offset] != data)
 	{
@@ -177,21 +176,36 @@ void naughtyb_videoram2_w(int offset,int data)
 
 
 
-void naughtyb_videoreg_w (int offset,int data)
+WRITE_HANDLER( naughtyb_videoreg_w )
 {
-//        if (videoctlreg != data) {
+	/* bits 4+5 control the sound circuit */
+	pleiads_sound_control_c_w(offset,data);
 
-           videoctlreg = data;
+    if ((videoreg & 0x0f) != (data & 0x0f))
+	{
+		videoreg = data;
 
-  	   /*   REMEMBER - both bits 1&2 are used to set the pallette
-   	    *   Don't forget to add in bit 2, which doubles as the bank
-    	    *   select
-            */
+		palreg  = (data >> 1) & 0x03;	/* pallette sel is bit 1 & 2 */
+		bankreg = (data >> 2) & 0x01;	/* banksel is just bit 2 */
 
-	   palreg  = (videoctlreg >> 1) & 0x01;       /* pallette sel is bit 1 */
-	   bankreg = ((videoctlreg >> 2) & 0x01); /* banksel is bit 2      */
+		memset (dirtybuffer, 1, videoram_size);
+	}
+}
 
-//        }
+WRITE_HANDLER( popflame_videoreg_w )
+{
+	/* bits 4+5 control the sound circuit */
+	pleiads_sound_control_c_w(offset,data);
+
+    if ((videoreg & 0x0f) != (data & 0x0f))
+	{
+		videoreg = data;
+
+		palreg  = (data >> 1) & 0x03;	/* pallette sel is bit 1 & 2 */
+		bankreg = (data >> 3) & 0x01;	/* banksel is just bit 3 */
+
+		memset (dirtybuffer, 1, videoram_size);
+	}
 }
 
 
@@ -244,7 +258,7 @@ void naughtyb_videoreg_w (int offset,int data)
 
 
 ***************************************************************************/
-void naughtyb_vh_screenrefresh(struct osd_bitmap *bitmap)
+void naughtyb_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -262,25 +276,25 @@ void naughtyb_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 			if (offs < 0x700)
 			{
-				sx = 27 - offs / 64;
-				sy = offs % 64;
+				sx = offs % 64;
+				sy = offs / 64;
 			}
 			else
 			{
-				sx = 27 - (offs - 0x700) / 4;
-				sy = 64 + (offs - 0x700) % 4;
+				sx = 64 + (offs - 0x700) % 4;
+				sy = (offs - 0x700) / 4;
 			}
 
 			drawgfx(tmpbitmap,Machine->gfx[0],
-					naughtyb_videoram2[offs] + 256*bankreg,
-					(naughtyb_videoram2[offs] >> 5) + 8*palreg + 16*bankreg,
+					naughtyb_videoram2[offs] + 256 * bankreg,
+					(naughtyb_videoram2[offs] >> 5) + 8 * palreg,
 					0,0,
 					8*sx,8*sy,
 					0,TRANSPARENCY_NONE,0);
 
 			drawgfx(tmpbitmap,Machine->gfx[1],
 					videoram[offs] + 256*bankreg,
-					(videoram[offs] >> 5) + 8*palreg + 16*bankreg,
+					(videoram[offs] >> 5) + 8 * palreg,
 					0,0,
 					8*sx,8*sy,
 					0,TRANSPARENCY_PEN,0);
@@ -290,13 +304,13 @@ void naughtyb_vh_screenrefresh(struct osd_bitmap *bitmap)
 
 	/* copy the temporary bitmap to the screen */
 	{
-		int scrolly;
+		int scrollx;
 
 
-		copybitmap(bitmap,tmpbitmap,0,0,0,-66*8,&topvisiblearea,TRANSPARENCY_NONE,0);
-		copybitmap(bitmap,tmpbitmap,0,0,0,-30*8,&bottomvisiblearea,TRANSPARENCY_NONE,0);
+		copybitmap(bitmap,tmpbitmap,0,0,-66*8,0,&leftvisiblearea,TRANSPARENCY_NONE,0);
+		copybitmap(bitmap,tmpbitmap,0,0,-30*8,0,&rightvisiblearea,TRANSPARENCY_NONE,0);
 
-		scrolly = -*naughtyb_scrollreg + 16;
-		copyscrollbitmap(bitmap,tmpbitmap,0,0,1,&scrolly,&scrollvisiblearea,TRANSPARENCY_NONE,0);
+		scrollx = -*naughtyb_scrollreg + 16;
+		copyscrollbitmap(bitmap,tmpbitmap,1,&scrollx,0,0,&scrollvisiblearea,TRANSPARENCY_NONE,0);
 	}
 }

@@ -1,392 +1,313 @@
 /***************************************************************************
 
-
-  vidhrdw.c
-
-  Functions to emulate the video hardware of the machine.
+	Ninja Gaiden / Tecmo Knights Video Hardware
 
 ***************************************************************************/
 
 #include "driver.h"
 #include "vidhrdw/generic.h"
 
-unsigned char *gaiden_videoram;    /* 4 KB for video RAM */
-unsigned char *gaiden_spriteram;   /* 8 KB for sprite RAM */
-unsigned char *gaiden_paletteram;  /* 8 KB for palette RAM */
-unsigned char *gaiden_videoram3;   /*16 KB for video RAM */
+unsigned char *gaiden_videoram;
+unsigned char *gaiden_videoram2;
+unsigned char *gaiden_videoram3;
 
-void gaiden_vh_stop (void);
+static struct tilemap *text_layer,*foreground,*background;
 
-int gaiden_videoram_size;
-int gaiden_spriteram_size;
-int gaiden_paletteram_size;
-int gaiden_videoram3_size;
 
-static struct osd_bitmap *tmpbitmap1;
-static struct osd_bitmap *tmpbitmap2;
-static struct osd_bitmap *tmpbitmap3;
+/***************************************************************************
 
-static unsigned char *gaiden_dirty;
-static unsigned char *gaiden_dirty2;
-static unsigned char *gaiden_dirty3;
-static unsigned char gaiden_dirtypal[0x100];
-static unsigned char gaiden_dirty_bgcol;
+  Callbacks for the TileMap code
 
-unsigned char *gaiden_scrolla;
-unsigned char *gaiden_scrollb;
-static unsigned int col_test;
+***************************************************************************/
 
-/*
- *   video system start
- */
-
-int gaiden_vh_start (void)
+static void get_bg_tile_info(int tile_index)
 {
-	/* Allocate a video RAM */
-        gaiden_dirty = malloc ( gaiden_videoram_size / 2);
-	gaiden_dirty3 = malloc ( gaiden_videoram3_size/2);
+	UINT16 *videoram1 = (UINT16 *)&gaiden_videoram3[0x1000];
+	UINT16 *videoram2 = (UINT16 *)gaiden_videoram3;
+	SET_TILE_INFO(1,videoram1[tile_index] & 0xfff,(videoram2[tile_index] & 0xf0) >> 4)
+}
 
-	if (!gaiden_dirty)
+static void get_fg_tile_info(int tile_index)
+{
+	UINT16 *videoram1 = (UINT16 *)&gaiden_videoram2[0x1000];
+	UINT16 *videoram2 = (UINT16 *)gaiden_videoram2;
+	SET_TILE_INFO(2,videoram1[tile_index] & 0xfff,(videoram2[tile_index] & 0xf0) >> 4)
+}
 
-	{
-                gaiden_vh_stop ();
-		return 1;
-	}
-	if (!gaiden_dirty3)
-	{
-                gaiden_vh_stop ();
-		return 1;
-	}
+static void get_tx_tile_info(int tile_index)
+{
+	UINT16 *videoram1 = (UINT16 *)&gaiden_videoram[0x0800];
+	UINT16 *videoram2 = (UINT16 *)gaiden_videoram;
+	SET_TILE_INFO(0,videoram1[tile_index] & 0x7ff,(videoram2[tile_index] & 0xf0) >> 4)
+}
 
-	/* Allocate temporary bitmaps */
-	if ((tmpbitmap1 = osd_new_bitmap (Machine->drv->screen_width, Machine->drv->screen_height, Machine->scrbitmap->depth)) == 0)
-	{
-                gaiden_vh_stop ();
+
+/***************************************************************************
+
+  Start the video hardware emulation.
+
+***************************************************************************/
+
+int gaiden_vh_start(void)
+{
+	background = tilemap_create(get_bg_tile_info,tilemap_scan_rows,TILEMAP_TRANSPARENT,16,16,64,32);
+	foreground = tilemap_create(get_fg_tile_info,tilemap_scan_rows,TILEMAP_TRANSPARENT,16,16,64,32);
+	text_layer = tilemap_create(get_tx_tile_info,tilemap_scan_rows,TILEMAP_TRANSPARENT, 8, 8,32,32);
+
+	if (!text_layer || !foreground || !background)
 		return 1;
-	}
- 	if ((tmpbitmap2 = osd_new_bitmap (1024 , 512, Machine->scrbitmap->depth)) == 0)
-	{
-                gaiden_vh_stop ();
-		return 1;
-	}
-	if ((tmpbitmap3 = osd_new_bitmap (1024 , 512, Machine->scrbitmap->depth)) == 0)
-	{
-                gaiden_vh_stop ();
-		return 1;
-	}
-	if (Machine->scrbitmap->depth==8) col_test=2; else col_test = 1;
+
+	background->transparent_pen = 0;
+	foreground->transparent_pen = 0;
+	text_layer->transparent_pen = 0;
+	palette_transparent_color = 0x200; /* background color */
 	return 0;
 }
 
 
-/*
- *   video system shutdown; we also bring down the system memory as well here
- */
 
-void gaiden_vh_stop (void)
+/***************************************************************************
+
+  Memory handlers
+
+***************************************************************************/
+
+WRITE_HANDLER( gaiden_txscrollx_w )
 {
-	/* Free temporary bitmaps */
-	if (tmpbitmap3)
-		osd_free_bitmap (tmpbitmap3);
-	tmpbitmap3 = 0;
-	if (tmpbitmap2)
-		osd_free_bitmap (tmpbitmap2);
-	tmpbitmap2 = 0;
-	if (tmpbitmap1)
-		osd_free_bitmap (tmpbitmap1);
-	tmpbitmap = 0;
-
-	/* Free video RAM */
-	if (gaiden_dirty)
-		free (gaiden_dirty);
-	if (gaiden_dirty2)
-	        free (gaiden_dirty2);
-	if (gaiden_dirty3)
-	        free (gaiden_dirty3);
-	gaiden_dirty = gaiden_dirty2 = gaiden_dirty3 = 0;
+	static UINT16 oldword;
+	oldword = COMBINE_WORD(oldword,data);
+	tilemap_set_scrollx(text_layer,0,oldword);
 }
 
-
-
-/*
- *   scroll write handlers
- */
-
-void gaiden_scrolla_w (int offset, int data)
+WRITE_HANDLER( gaiden_txscrolly_w )
 {
-	COMBINE_WORD_MEM (&gaiden_scrolla[offset], data);
+	static UINT16 oldword;
+	oldword = COMBINE_WORD(oldword,data);
+	tilemap_set_scrolly(text_layer,0,oldword);
 }
 
-void gaiden_scrollb_w (int offset, int data)
+WRITE_HANDLER( gaiden_fgscrollx_w )
 {
-	COMBINE_WORD_MEM (&gaiden_scrollb[offset], data);
+	static UINT16 oldword;
+	oldword = COMBINE_WORD(oldword,data);
+	tilemap_set_scrollx(foreground,0,oldword);
 }
 
-
-
-/*
- *   palette RAM read/write handlers
- */
-void gaiden_paletteram_w(int offset,int data)
+WRITE_HANDLER( gaiden_fgscrolly_w )
 {
-	int oldword = READ_WORD(&gaiden_paletteram[offset]);
-	int newword = COMBINE_WORD(oldword,data);
-
-
-	if (oldword != newword)
-	{
-		WRITE_WORD(&gaiden_paletteram[offset],newword);
-                /* set the entire palette to dirty */
-	        /* palette is offset/0x20          */
-		gaiden_dirtypal[offset>>5] = 1;
-		if (offset==0x0400) gaiden_dirty_bgcol=1;
-	}
-}
-int gaiden_paletteram_r(int offset)
-{
-	return READ_WORD (&gaiden_paletteram[offset]);
+	static UINT16 oldword;
+	oldword = COMBINE_WORD(oldword,data);
+	tilemap_set_scrolly(foreground,0,oldword);
 }
 
-/*
- *   video RAM 3 read/write handlers
- */
-void gaiden_videoram3_w (int offset, int data)
+WRITE_HANDLER( gaiden_bgscrollx_w )
+{
+	static UINT16 oldword;
+	oldword = COMBINE_WORD(oldword,data);
+	tilemap_set_scrollx(background,0,oldword);
+}
+
+WRITE_HANDLER( gaiden_bgscrolly_w )
+{
+	static UINT16 oldword;
+	oldword = COMBINE_WORD(oldword,data);
+	tilemap_set_scrolly(background,0,oldword);
+}
+
+WRITE_HANDLER( gaiden_videoram3_w )
 {
 	int oldword = READ_WORD(&gaiden_videoram3[offset]);
 	int newword = COMBINE_WORD(oldword,data);
 
+	if (oldword != newword)
+	{
+		int tile_index = (offset/2)&0x7ff;
+		WRITE_WORD(&gaiden_videoram3[offset],newword);
+		tilemap_mark_tile_dirty(background,tile_index);
+	}
+}
+
+READ_HANDLER( gaiden_videoram3_r )
+{
+   return READ_WORD(&gaiden_videoram3[offset]);
+}
+
+WRITE_HANDLER( gaiden_videoram2_w )
+{
+	int oldword = READ_WORD(&gaiden_videoram2[offset]);
+	int newword = COMBINE_WORD(oldword,data);
 
 	if (oldword != newword)
 	{
-		WRITE_WORD(&gaiden_videoram3[offset],newword);
-		gaiden_dirty3[offset / 2] = 1;
+		int tile_index = (offset/2)&0x7ff;
+		WRITE_WORD(&gaiden_videoram2[offset],newword);
+		tilemap_mark_tile_dirty(foreground,tile_index);
 	}
 }
-int gaiden_videoram3_r (int offset)
+
+READ_HANDLER( gaiden_videoram2_r )
 {
-   return READ_WORD (&gaiden_videoram3[offset]);
+   return READ_WORD(&gaiden_videoram2[offset]);
 }
 
-void gaiden_videoram_w (int offset, int data)
+WRITE_HANDLER( gaiden_videoram_w )
 {
 	int oldword = READ_WORD(&gaiden_videoram[offset]);
 	int newword = COMBINE_WORD(oldword,data);
 
-
 	if (oldword != newword)
 	{
+		int tile_index = (offset/2)&0x3ff;
 		WRITE_WORD(&gaiden_videoram[offset],newword);
-		gaiden_dirty[offset / 2] = 1;
+		tilemap_mark_tile_dirty(text_layer,tile_index);
 	}
 }
 
-int gaiden_videoram_r (int offset)
+READ_HANDLER( gaiden_videoram_r )
 {
-   return READ_WORD (&gaiden_videoram[offset]);
+	return READ_WORD(&gaiden_videoram[offset]);
 }
 
-void gaiden_spriteram_w (int offset, int data)
-{
-	COMBINE_WORD_MEM (&gaiden_spriteram[offset], data);
-}
 
-int gaiden_spriteram_r (int offset)
-{
-   return READ_WORD (&gaiden_spriteram[offset]);
-}
 
 /***************************************************************************
 
-  Draw the game screen in the given osd_bitmap.
-  Do NOT call osd_update_display() from this function, it will be called by
-  the main emulation engine.
+  Display refresh
 
 ***************************************************************************/
-/*
- *  some ideas from tecmo.c
- *  (sprites in separate function and handling of 16x16 sprites)
+
+/* sprite format:
+ *
+ *	word		bit					usage
+ * --------+-fedcba9876543210-+----------------
+ *    0    | ---------------x | flip x
+ *         | --------------x- | flip y
+ *         | -------------x-- | enable
+ *         | ----------x----- | flicker
+ *         | --------xx------ | sprite-tile priority
+ *    1    | xxxxxxxxxxxxxxxx | number
+ *    2    | --------xxxx---- | palette
+ *         | --------------xx | size: 8x8, 16x16, 32x32, 64x64
+ *    3    | xxxxxxxxxxxxxxxx | y position
+ *    4    | xxxxxxxxxxxxxxxx | x position
+ *    5,6,7|                  | unused
  */
 
-void gaiden_drawsprites(struct osd_bitmap *bitmap, int priority)
+#define NUM_SPRITES 128
+
+static void mark_sprite_colors(void)
 {
-    /*
-     * Sprite Format
-     * ------------------
-     *
-     * Byte(s) | Bit(s)   | Use
-     * --------+-76543210-+----------------
-     *    0    | -------- | unknown
-     *    1    | -------x | flip x
-     *    1    | ------x- | flip y
-     *    1    | -----x-- | active (show this sprite)
-     *    1    | x------- | occluded (sprite is behind front background layer
-     *    2    | xxxxxxxx | Sprite Number (High 8 bits)
-     *    3    | xxxx---- | Sprite Number (Low 4 bits)
-     *    3    | ----xx-- | Additional Index (for small sprites)
-     *    4    | -------- | unknown
-     *    5    | ------xx | size 1=16x16, 2=32x32;
-     *    5    | xxxx---- | palette
-     *    6    | xxxxxxxx | y position (high 8 bits)
-     *    7    | xxxxxxxx | y position (low 8 bits)
-     *    8    | xxxxxxxx | x position (negative of high 8 bits)
-     *    9    | -------- | x position (low 8 bits)
-     */
-        int offs;
-	for (offs = 0; offs<0x800 ; offs += 16)
+	const UINT16 *source = (UINT16 *)spriteram;
+	const struct GfxElement *gfx = Machine->gfx[3];
+	int i;
+	for (i = 0;i < NUM_SPRITES;i++)
 	{
-		int sx,sy,col,spr_pri;
-		int num,bank,flip,size;
-//		sx = -(READ_WORD(&gaiden_spriteram[offs+8])&0xff00)
-//		     + (READ_WORD(&gaiden_spriteram[offs+8])&0x00ff);
-		sx = READ_WORD(&gaiden_spriteram[offs+8]) & 0x1ff;
-		if (sx >= 256) sx -= 512;
-		sy = READ_WORD(&gaiden_spriteram[offs+6]) & 0x1ff;
-		if (sy >= 256) sy -= 512;
-		num = READ_WORD(&gaiden_spriteram[offs+2])>>4;
-		spr_pri=(READ_WORD(&gaiden_spriteram[offs])&0x0080)>>7;
-		if ( (READ_WORD(&gaiden_spriteram[offs])&0x0004) && sx>=(-31) && sx < 256 && sy < 256 && (spr_pri==priority))
+		UINT32 attributes = source[0];
+		if (attributes & 0x04)	/* visible */
 		{
-		        num &= 0x7ff;
-                        bank=num/0x200;
-			size = READ_WORD(&gaiden_spriteram[offs+4])&0x0003;
-			flip = READ_WORD(&gaiden_spriteram[offs])&0x0003;
-			col = ((READ_WORD(&gaiden_spriteram[offs+4])&0x00f0)>>4);
-			if (size==1)
+			UINT32 pen_usage = 0xfffe;
+			UINT32 color = (source[2] >> 4) & 0xf;
+			const UINT16 *pal_data = &gfx->colortable[gfx->color_granularity * color];
+			int indx = pal_data - Machine->remapped_colortable;
+			while (pen_usage)
 			{
-			        num=(num<<2)+((READ_WORD(&gaiden_spriteram[offs+2])&0x000c)>>2);
-				bank+=4;
+				if (pen_usage & 1) palette_used_colors[indx] = PALETTE_COLOR_USED;
+				pen_usage >>= 1;
+				indx++;
 			}
-			drawgfx(bitmap, Machine->gfx[3+bank],
-				num,
-				col,
-				flip&0x01,flip&0x02,
-				sx,sy,
-				&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
-
 		}
-
+		source += 8;
 	}
-
-
 }
 
-void gaiden_vh_screenrefresh(struct osd_bitmap *bitmap)
+static void draw_sprites( struct osd_bitmap *bitmap )
 {
-	int offs,pom;
-	int scrollx,scrolly;
-	int i,col,value;
-	int abc,red,green,blue;
-
-	/* update palette */
-	for (pom = 0x0 ; pom < 0x100 ; pom++)
+	const UINT8 layout[8][8] =
 	{
-	        if (gaiden_dirtypal[pom])
+		{0,1,4,5,16,17,20,21},
+		{2,3,6,7,18,19,22,23},
+		{8,9,12,13,24,25,28,29},
+		{10,11,14,15,26,27,30,31},
+		{32,33,36,37,48,49,52,53},
+		{34,35,38,39,50,51,54,55},
+		{40,41,44,45,56,57,60,61},
+		{42,43,46,47,58,59,62,63}
+	};
+
+	const struct rectangle *clip = &Machine->visible_area;
+	const struct GfxElement *gfx = Machine->gfx[3];
+	const UINT16 *source = (NUM_SPRITES-1)*8 + (UINT16 *)spriteram;
+	int count = NUM_SPRITES;
+
+	/* draw all sprites from front to back */
+	while( count-- )
+	{
+		UINT32 attributes = source[0];
+		if ( (attributes&0x04) && ((attributes&0x20)==0 || (cpu_getcurrentframe() & 1)) )
 		{
-		        for (i=1;i<16;i++)
+			UINT32 priority = (attributes>>6)&3;
+			UINT32 number = (source[1]&0x7fff);
+			UINT32 color = source[2];
+			UINT32 size = 1<<(color&0x3); // 1,2,4,8
+			UINT32 flipx = (attributes&1);
+			UINT32 flipy = (attributes&2);
+			UINT32 priority_mask;
+			int ypos = source[3] & 0x1ff;
+			int xpos = source[4] & 0x1ff;
+			int col,row;
+			color = (color>>4)&0xf;
+
+			/* wraparound */
+			if( xpos >= 256) xpos -= 512;
+			if( ypos >= 256) ypos -= 512;
+
+			/* bg: 1; fg:2; text: 4 */
+			switch( priority )
 			{
-			        abc = READ_WORD(&gaiden_paletteram[(pom<<5)+i*2]);
-				blue  = (abc&0x0f00)>>8;
-				green = (abc&0x00f0)>>4;
-				red   = (abc&0x000f);
-				if ((red<=col_test) && (green<=col_test) && (blue<=(col_test<<1)) && (i%16!=0)) red = col_test;
-				setgfxcolorentry (Machine->gfx[0], (pom<<4)+i, (red<<4)+red, (green<<4)+green, (blue<<4)+blue);
+				default:
+				case 0x0: priority_mask = 0; break;
+				case 0x1: priority_mask = 0xf0; break; /* obscured by text layer */
+				case 0x2: priority_mask = 0xf0|0xcc; break;	/* obscured by foreground */
+				case 0x3: priority_mask = 0xf0|0xcc|0xaa; break; /* obscured by bg and fg */
 			}
-			setgfxcolorentry (Machine->gfx[0], (pom<<4), 0, 0, 0); /* hack */
+
+			for( row=0; row<size; row++ )
+			{
+				for( col=0; col<size; col++ )
+				{
+					int sx = xpos + 8*(flipx?(size-1-col):col);
+					int sy = ypos + 8*(flipy?(size-1-row):row);
+					pdrawgfx(bitmap,gfx,
+						number + layout[row][col],
+						color,
+						flipx,flipy,
+						sx,sy,
+						clip,TRANSPARENCY_PEN,0,
+						priority_mask);
+				}
+			}
 		}
+		source -= 8;
 	}
-	if (gaiden_dirty_bgcol)
-	{
-	        abc = READ_WORD(&gaiden_paletteram[0x400]);
-		blue  = (abc&0x0f00)>>8;
-		green = (abc&0x00f0)>>4;
-		red   = (abc&0x000f);
-		for (pom = 0x30;pom<0x40;pom++)
-		{
-		        setgfxcolorentry (Machine->gfx[0], (pom<<4), (red<<4)+red, (green<<4)+green, (blue<<4)+blue);
-			gaiden_dirtypal[pom]=1;
-		}
-		gaiden_dirty_bgcol=0;
-	}
-
-	/* update text tiles */
-	for (pom = 0x0 ; pom < 0x1000/2 ; pom +=2)
-	{
-		int sx,sy;
-		col = ((READ_WORD(&gaiden_videoram[pom])&0x00f0)>>4)+0x10;
-		offs=pom/2;
-		if (gaiden_dirty[offs] || gaiden_dirty[offs+0x400] || gaiden_dirtypal[col] )
-		{
-			gaiden_dirty[offs] = gaiden_dirty[offs+0x400] = 0;
-			sx = 8 * (offs % 32);
-			sy = 8 * (offs / 32);
-			value=READ_WORD(&gaiden_videoram[pom+0x800]);
-			i=(value&0x7FF);
-			drawgfx(tmpbitmap1, Machine->gfx[0],
-					i,
-					col,   /* color */
-					0,0, /* no flip */
-					sx,sy, /* x,y */
-					0,TRANSPARENCY_NONE,0);
-
-		}
-	}
-	/* update graphics tiles */
-	for (pom = 0x0 ; pom < 0x1000 ; pom+=2)
-	{
-	        int sx,sy,offs;
-		offs=pom/2;
-		col = ((READ_WORD(&gaiden_videoram3[pom])&0x00f0)>>4)+0x20;
-		if ( gaiden_dirty3[offs] || gaiden_dirty3[offs+0x0800] || gaiden_dirtypal[col])
-		{
-			gaiden_dirty3[offs]=gaiden_dirty3[offs+0x0800]=0;
-		        sx = 16 * (offs % 64);
-			sy = 16 * (offs / 64);
-			i = READ_WORD(&gaiden_videoram3[pom+0x1000])&0x0fff;
-			drawgfx(tmpbitmap2, Machine->gfx[2],
-				        i,
-				        col,  /* color */
-					0,0, /* no flip */
-					sx,sy, /* x,y */
-					0,TRANSPARENCY_NONE,0);
-		}
-		offs=(0x2000+pom)/2;
-		col = ((READ_WORD(&gaiden_videoram3[pom+0x2000])&0x00f0)>>4)+0x30;
-		if ( gaiden_dirty3[offs] || gaiden_dirty3[offs+0x0800] || gaiden_dirtypal[col])
-		{
-			gaiden_dirty3[offs]=gaiden_dirty3[offs+0x0800]=0;
-		        offs=pom/2;
-		        sx = 16 * (offs % 64);
-			sy = 16 * (offs / 64);
-			i = READ_WORD(&gaiden_videoram3[pom+0x3000])&0x0fff;
-			drawgfx(tmpbitmap3, Machine->gfx[1],
-				i,
-				col,  /* color */
-				0,0, /* no flip */
-				sx,sy, /* x,y */
-				0,TRANSPARENCY_NONE,0);
-		}
-
-
-	}
-
-	scrollx = (-(READ_WORD(&gaiden_scrollb[0x0c]))%1024);
-	scrolly = -(READ_WORD(&gaiden_scrollb[0x04]));
-	copyscrollbitmap(bitmap,tmpbitmap3,1,&scrollx,1,&scrolly,&Machine->drv->visible_area, TRANSPARENCY_NONE,0);
-	scrollx = (-(READ_WORD(&gaiden_scrolla[0x0c]))%1024);
-	scrolly = -(READ_WORD(&gaiden_scrolla[0x04]));
-
-	/* draw occluded sprites */
-	gaiden_drawsprites(bitmap,1);
-
-	copyscrollbitmap(bitmap,tmpbitmap2,1,&scrollx,1,&scrolly,&Machine->drv->visible_area, TRANSPARENCY_COLOR,0);
-
-	/* draw non-occluded sprites */
-	gaiden_drawsprites(bitmap,0);
-
-	copybitmap(bitmap,tmpbitmap1,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_COLOR,0);
-
-
-	memset(gaiden_dirtypal,0,0x100);
-	return;
 }
 
+void gaiden_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	tilemap_update(ALL_TILEMAPS);
+
+	palette_init_used_colors();
+	mark_sprite_colors();
+	palette_used_colors[0x200] = PALETTE_COLOR_USED;
+
+	if (palette_recalc()) tilemap_mark_all_pixels_dirty(ALL_TILEMAPS);
+
+	tilemap_render(ALL_TILEMAPS);
+
+	fillbitmap(priority_bitmap,0,NULL);
+	fillbitmap(bitmap,Machine->pens[0x200],&Machine->visible_area);
+	tilemap_draw(bitmap,background,1<<16);
+	tilemap_draw(bitmap,foreground,2<<16);
+	tilemap_draw(bitmap,text_layer,4<<16);
+
+	draw_sprites( bitmap );
+}

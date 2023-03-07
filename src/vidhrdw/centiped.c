@@ -11,9 +11,6 @@
 
 
 
-unsigned char *centiped_paletteram;
-static int flipscreen;
-
 static struct rectangle spritevisiblearea =
 {
 	1*8, 31*8-1,
@@ -24,76 +21,81 @@ static struct rectangle spritevisiblearea =
 
 /***************************************************************************
 
-  Convert the color PROMs into a more useable format.
-
-  Actually, Centipede doesn't have a color PROM. Eight RAM locations control
+  Centipede doesn't have a color PROM. Eight RAM locations control
   the color of characters and sprites. The meanings of the four bits are
   (all bits are inverted):
 
-  bit 3 luminance
+  bit 3 alternate
         blue
         green
   bit 0 red
 
+  The alternate bit affects blue and green, not red. The way I weighted its
+  effect might not be perfectly accurate, but is reasonably close.
+
 ***************************************************************************/
-void centiped_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
-{
-	int i;
-	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
-	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
-
-
-	/* the palette will be initialized by the game. We just set it to some */
-	/* pre-cooked values so the startup copyright notice can be displayed. */
-	for (i = 0;i < Machine->drv->total_colors;i++)
-	{
-		*(palette++) = ((i & 1) >> 0) * 0xff;
-		*(palette++) = ((i & 2) >> 1) * 0xff;
-		*(palette++) = ((i & 4) >> 2) * 0xff;
-	}
-
-	/* characters use colors 4-7 */
-	for (i = 0;i < TOTAL_COLORS(0);i++)
-		COLOR(0,i) = i + 4;
-
-	/* sprites use colors 12-15 */
-	for (i = 0;i < TOTAL_COLORS(1);i++)
-		COLOR(1,i) = i + 12;
-}
-
-
-
-void centiped_paletteram_w(int offset,int data)
+static void setcolor(int pen,int data)
 {
 	int r,g,b;
 
 
-	centiped_paletteram[offset] = data;
+	r = 0xff * ((~data >> 0) & 1);
+	g = 0xff * ((~data >> 1) & 1);
+	b = 0xff * ((~data >> 2) & 1);
 
-	if ((~data & 0x08) == 0) /* luminance = 0 */
+	if (~data & 0x08) /* alternate = 1 */
 	{
-		r = 0xc0 * ((~data >> 0) & 1);
-		g = 0xc0 * ((~data >> 1) & 1);
-		b = 0xc0 * ((~data >> 2) & 1);
-	}
-	else	/* luminance = 1 */
-	{
-		r = 0xff * ((~data >> 0) & 1);
-		g = 0xff * ((~data >> 1) & 1);
-		b = 0xff * ((~data >> 2) & 1);
+		/* when blue component is not 0, decrease it. When blue component is 0, */
+		/* decrease green component. */
+		if (b) b = 0xc0;
+		else if (g) g = 0xc0;
 	}
 
-	osd_modify_pen(Machine->pens[offset],r,g,b);
+	palette_change_color(pen,r,g,b);
 }
 
-
-
-void centiped_vh_flipscreen_w (int offset,int data)
+WRITE_HANDLER( centiped_paletteram_w )
 {
-	if (flipscreen != (data & 0x80))
+	paletteram[offset] = data;
+
+	/* the char palette will be effectively updated by the next interrupt handler */
+
+	if (offset >= 12 && offset < 16)	/* sprites palette */
 	{
-		flipscreen = data & 0x80;
-		memset(dirtybuffer,1,videoram_size);
+		int start = Machine->drv->gfxdecodeinfo[1].color_codes_start;
+
+		setcolor(start + (offset - 12),data);
+	}
+}
+
+static int powerup_counter;
+
+void centiped_init_machine(void)
+{
+	powerup_counter = 10;
+}
+
+int centiped_interrupt(void)
+{
+	int offset;
+	int slice = 3 - cpu_getiloops();
+	int start = Machine->drv->gfxdecodeinfo[0].color_codes_start;
+
+
+	/* set the palette for the previous screen slice to properly support */
+	/* midframe palette changes in test mode */
+	for (offset = 4;offset < 8;offset++)
+		setcolor(4 * slice + start + (offset - 4),paletteram[offset]);
+
+	/* Centipede doesn't like to receive interrupts just after a reset. */
+	/* The only workaround I've found is to wait a little before starting */
+	/* to generate them. */
+	if (powerup_counter == 0)
+		return interrupt();
+	else
+	{
+		powerup_counter--;
+		return ignore_interrupt();
 	}
 }
 
@@ -106,10 +108,12 @@ void centiped_vh_flipscreen_w (int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void centiped_vh_screenrefresh(struct osd_bitmap *bitmap)
+void centiped_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
+	if (palette_recalc() || full_refresh)
+		memset (dirtybuffer, 1, videoram_size);
 
 	for (offs = videoram_size - 1;offs >= 0;offs--)
 	{
@@ -123,32 +127,36 @@ void centiped_vh_screenrefresh(struct osd_bitmap *bitmap)
 			sx = offs % 32;
 			sy = offs / 32;
 
-			drawgfx(tmpbitmap,Machine->gfx[0],
+			drawgfx(bitmap,Machine->gfx[0],
 					(videoram[offs] & 0x3f) + 0x40,
-					0,
-					flipscreen,flipscreen,
+					(sy + 1) / 8,	/* support midframe palette changes in test mode */
+					flip_screen,flip_screen,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
-
-
-	/* copy the temporary bitmap to the screen */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
-
 
 	/* Draw the sprites */
 	for (offs = 0;offs < 0x10;offs++)
 	{
 		int spritenum,color;
 		int flipx;
+		int x, y;
+		int sx, sy;
 
 
 		spritenum = spriteram[offs] & 0x3f;
 		if (spritenum & 1) spritenum = spritenum / 2 + 64;
 		else spritenum = spritenum / 2;
 
-		flipx = (spriteram[offs] & 0x80) ^ flipscreen;
+		flipx = (spriteram[offs] & 0x80);
+		x = spriteram[offs + 0x20];
+		y = 240 - spriteram[offs + 0x10];
+
+		if (flip_screen)
+		{
+			flipx = !flipx;
+		}
 
 		/* Centipede is unusual because the sprite color code specifies the */
 		/* colors to use one by one, instead of a combination code. */
@@ -158,16 +166,39 @@ void centiped_vh_screenrefresh(struct osd_bitmap *bitmap)
 		/* pen 00 is transparent */
 		color = spriteram[offs+0x30];
 		Machine->gfx[1]->colortable[3] =
-				Machine->pens[12 + ((color >> 4) & 3)];
+				Machine->pens[Machine->drv->gfxdecodeinfo[1].color_codes_start + ((color >> 4) & 3)];
 		Machine->gfx[1]->colortable[2] =
-				Machine->pens[12 + ((color >> 2) & 3)];
+				Machine->pens[Machine->drv->gfxdecodeinfo[1].color_codes_start + ((color >> 2) & 3)];
 		Machine->gfx[1]->colortable[1] =
-				Machine->pens[12 + ((color >> 0) & 3)];
+				Machine->pens[Machine->drv->gfxdecodeinfo[1].color_codes_start + ((color >> 0) & 3)];
 
 		drawgfx(bitmap,Machine->gfx[1],
 				spritenum,0,
-				flipscreen,flipx,
-				spriteram[offs + 0x20],240 - spriteram[offs + 0x10],
+				flip_screen,flipx,
+				x,y,
 				&spritevisiblearea,TRANSPARENCY_PEN,0);
+
+		/* mark tiles underneath as dirty */
+		sx = x >> 3;
+		sy = y >> 3;
+
+		{
+			int max_x = 1;
+			int max_y = 2;
+			int x2, y2;
+
+			if (x & 0x07) max_x ++;
+			if (y & 0x0f) max_y ++;
+
+			for (y2 = sy; y2 < sy + max_y; y2 ++)
+			{
+				for (x2 = sx; x2 < sx + max_x; x2 ++)
+				{
+					if ((x2 < 32) && (y2 < 30) && (x2 >= 0) && (y2 >= 0))
+						dirtybuffer[x2 + 32*y2] = 1;
+				}
+			}
+		}
+
 	}
 }

@@ -10,8 +10,8 @@
 #include "vidhrdw/generic.h"
 
 
-
-static int gfx_bank,palette_bank;
+static int flipscreen;
+static int gfx_bank,palette_bank,grid_on;
 static const unsigned char *color_codes;
 
 
@@ -36,27 +36,27 @@ static const unsigned char *color_codes;
   bit 0 -- 470 ohm resistor -- inverter  -- BLUE
 
 ***************************************************************************/
-void dkong_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void dkong_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
 	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
 
 
-	for (i = 0;i < Machine->drv->total_colors;i++)
+	for (i = 0;i < 256;i++)
 	{
 		int bit0,bit1,bit2;
 
 
 		/* red component */
-		bit0 = (color_prom[Machine->drv->total_colors] >> 1) & 1;
-		bit1 = (color_prom[Machine->drv->total_colors] >> 2) & 1;
-		bit2 = (color_prom[Machine->drv->total_colors] >> 3) & 1;
+		bit0 = (color_prom[256] >> 1) & 1;
+		bit1 = (color_prom[256] >> 2) & 1;
+		bit2 = (color_prom[256] >> 3) & 1;
 		*(palette++) = 255 - (0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2);
 		/* green component */
 		bit0 = (color_prom[0] >> 2) & 1;
 		bit1 = (color_prom[0] >> 3) & 1;
-		bit2 = (color_prom[Machine->drv->total_colors] >> 0) & 1;
+		bit2 = (color_prom[256] >> 0) & 1;
 		*(palette++) = 255 - (0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2);
 		/* blue component */
 		bit0 = (color_prom[0] >> 0) & 1;
@@ -66,13 +66,9 @@ void dkong_vh_convert_color_prom(unsigned char *palette, unsigned char *colortab
 		color_prom++;
 	}
 
-	color_prom += Machine->drv->total_colors;
+	color_prom += 256;
 	/* color_prom now points to the beginning of the character color codes */
 	color_codes = color_prom;	/* we'll need it later */
-
-	/* sprites use the same palette as characters */
-	for (i = 0;i < TOTAL_COLORS(0);i++)
-		COLOR(0,i) = i;
 }
 
 /***************************************************************************
@@ -105,14 +101,14 @@ void dkong_vh_convert_color_prom(unsigned char *palette, unsigned char *colortab
   bit 0 -- 2.2kohm resistor -- inverter  -- BLUE
 
 ***************************************************************************/
-void dkong3_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void dkong3_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
 	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
 
 
-	for (i = 0;i < Machine->drv->total_colors;i++)
+	for (i = 0;i < 256;i++)
 	{
 		int bit0,bit1,bit2,bit3;
 
@@ -130,22 +126,18 @@ void dkong3_vh_convert_color_prom(unsigned char *palette, unsigned char *colorta
 		bit3 = (color_prom[0] >> 3) & 0x01;
 		*(palette++) = 255 - (0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3);
 		/* blue component */
-		bit0 = (color_prom[Machine->drv->total_colors] >> 0) & 0x01;
-		bit1 = (color_prom[Machine->drv->total_colors] >> 1) & 0x01;
-		bit2 = (color_prom[Machine->drv->total_colors] >> 2) & 0x01;
-		bit3 = (color_prom[Machine->drv->total_colors] >> 3) & 0x01;
+		bit0 = (color_prom[256] >> 0) & 0x01;
+		bit1 = (color_prom[256] >> 1) & 0x01;
+		bit2 = (color_prom[256] >> 2) & 0x01;
+		bit3 = (color_prom[256] >> 3) & 0x01;
 		*(palette++) = 255 - (0x0e * bit0 + 0x1f * bit1 + 0x43 * bit2 + 0x8f * bit3);
 
 		color_prom++;
 	}
 
-	color_prom += Machine->drv->total_colors;
+	color_prom += 256;
 	/* color_prom now points to the beginning of the character color codes */
 	color_codes = color_prom;	/* we'll need it later */
-
-	/* sprites use the same palette as characters */
-	for (i = 0;i < TOTAL_COLORS(0);i++)
-		COLOR(0,i) = i;
 }
 
 
@@ -160,7 +152,7 @@ int dkong_vh_start(void)
 
 
 
-void dkongjr_gfxbank_w(int offset,int data)
+WRITE_HANDLER( dkongjr_gfxbank_w )
 {
 	if (gfx_bank != (data & 1))
 	{
@@ -169,7 +161,7 @@ void dkongjr_gfxbank_w(int offset,int data)
 	}
 }
 
-void dkong3_gfxbank_w(int offset,int data)
+WRITE_HANDLER( dkong3_gfxbank_w )
 {
 	if (gfx_bank != (~data & 1))
 	{
@@ -180,7 +172,7 @@ void dkong3_gfxbank_w(int offset,int data)
 
 
 
-void dkong_palettebank_w(int offset,int data)
+WRITE_HANDLER( dkong_palettebank_w )
 {
 	int newbank;
 
@@ -198,7 +190,30 @@ void dkong_palettebank_w(int offset,int data)
 	}
 }
 
+WRITE_HANDLER( radarscp_grid_enable_w )
+{
+	grid_on = data & 1;
+}
 
+WRITE_HANDLER( radarscp_grid_color_w )
+{
+	int r,g,b;
+
+	r = ((~data >> 0) & 0x01) * 0xff;
+	g = ((~data >> 1) & 0x01) * 0xff;
+	b = ((~data >> 2) & 0x01) * 0xff;
+//	palette_change_color(257,r,g,b);
+	palette_change_color(257,0x00,0x00,0xff);
+}
+
+WRITE_HANDLER( dkong_flipscreen_w )
+{
+	if (flipscreen != (~data & 1))
+	{
+		flipscreen = ~data & 1;
+		memset(dirtybuffer,1,videoram_size);
+	}
+}
 
 /***************************************************************************
 
@@ -207,10 +222,10 @@ void dkong_palettebank_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void dkong_vh_screenrefresh(struct osd_bitmap *bitmap)
+
+static void draw_tiles(struct osd_bitmap *bitmap)
 {
 	int offs;
-
 
 	/* for every character in the Video RAM, check if it has been modified */
 	/* since last time and update it accordingly. */
@@ -231,18 +246,28 @@ void dkong_vh_screenrefresh(struct osd_bitmap *bitmap)
 			/* retrieve the character color from the PROM */
 			color = (color_codes[offs % 32 + 32 * (offs / 32 / 4)] & 0x0f) + 0x10 * palette_bank;
 
+			if (flipscreen)
+			{
+				sx = 31 - sx;
+				sy = 31 - sy;
+			}
+
 			drawgfx(tmpbitmap,Machine->gfx[0],
 					charcode,color,
-					0,0,
+					flipscreen,flipscreen,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
 	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
+}
 
+static void draw_sprites(struct osd_bitmap *bitmap)
+{
+	int offs;
 
 	/* Draw the sprites. */
 	for (offs = 0;offs < spriteram_size;offs += 4)
@@ -254,12 +279,98 @@ void dkong_vh_screenrefresh(struct osd_bitmap *bitmap)
 			/* probably not part of the color code, since Mario Bros, which */
 			/* has similar hardware, uses a memory mapped port to change */
 			/* palette bank, so it's limited to 16 color codes) */
-			drawgfx(bitmap,Machine->gfx[1],
-					(spriteram[offs + 1] & 0x7f) + 2 * (spriteram[offs + 2] & 0x40),
-					(spriteram[offs + 2] & 0x0f) + 16 * palette_bank,
-					spriteram[offs + 2] & 0x80,spriteram[offs + 1] & 0x80,
-					spriteram[offs + 3] - 8,240 - spriteram[offs] + 7,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+
+			int x,y;
+
+			x = spriteram[offs + 3] - 8;
+			y = 240 - spriteram[offs] + 7;
+
+			if (flipscreen)
+			{
+				x = 240 - x;
+				y = 240 - y;
+
+				drawgfx(bitmap,Machine->gfx[1],
+						(spriteram[offs + 1] & 0x7f) + 2 * (spriteram[offs + 2] & 0x40),
+						(spriteram[offs + 2] & 0x0f) + 16 * palette_bank,
+						!(spriteram[offs + 2] & 0x80),!(spriteram[offs + 1] & 0x80),
+						x,y,
+						&Machine->visible_area,TRANSPARENCY_PEN,0);
+
+				/* draw with wrap around - this fixes the 'beheading' bug */
+				drawgfx(bitmap,Machine->gfx[1],
+						(spriteram[offs + 1] & 0x7f) + 2 * (spriteram[offs + 2] & 0x40),
+						(spriteram[offs + 2] & 0x0f) + 16 * palette_bank,
+						(spriteram[offs + 2] & 0x80),(spriteram[offs + 1] & 0x80),
+						x-256,y,
+						&Machine->visible_area,TRANSPARENCY_PEN,0);
+			}
+			else
+			{
+				drawgfx(bitmap,Machine->gfx[1],
+						(spriteram[offs + 1] & 0x7f) + 2 * (spriteram[offs + 2] & 0x40),
+						(spriteram[offs + 2] & 0x0f) + 16 * palette_bank,
+						(spriteram[offs + 2] & 0x80),(spriteram[offs + 1] & 0x80),
+						x,y,
+						&Machine->visible_area,TRANSPARENCY_PEN,0);
+
+				/* draw with wrap around - this fixes the 'beheading' bug */
+				drawgfx(bitmap,Machine->gfx[1],
+						(spriteram[offs + 1] & 0x7f) + 2 * (spriteram[offs + 2] & 0x40),
+						(spriteram[offs + 2] & 0x0f) + 16 * palette_bank,
+						(spriteram[offs + 2] & 0x80),(spriteram[offs + 1] & 0x80),
+						x+256,y,
+						&Machine->visible_area,TRANSPARENCY_PEN,0);
+			}
 		}
 	}
+}
+
+static void draw_grid(struct osd_bitmap *bitmap)
+{
+	const unsigned char *table = memory_region(REGION_GFX3);
+	int x,y,counter;
+
+	counter = flipscreen ? 0x000 : 0x400;
+
+	x = Machine->visible_area.min_x;
+	y = Machine->visible_area.min_y;
+	while (y <= Machine->visible_area.max_y)
+	{
+		x = 4 * (table[counter] & 0x7f);
+		if (x >= Machine->visible_area.min_x &&
+				x <= Machine->visible_area.max_x)
+		{
+			if (table[counter] & 0x80)	/* star */
+			{
+				if (rand() & 1)	/* noise coming from sound board */
+					plot_pixel(bitmap,x,y,Machine->pens[256]);
+			}
+			else if (grid_on)			/* radar */
+				plot_pixel(bitmap,x,y,Machine->pens[257]);
+		}
+
+		counter++;
+
+		if (x >= 4 * (table[counter] & 0x7f))
+			y++;
+	}
+}
+
+void radarscp_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	palette_change_color(256,0xff,0x00,0x00);	/* stars */
+
+	if (palette_recalc())
+		memset(dirtybuffer,1,videoram_size);
+
+	draw_tiles(bitmap);
+	draw_grid(bitmap);
+	draw_sprites(bitmap);
+}
+
+void dkong_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	draw_tiles(bitmap);
+	draw_sprites(bitmap);
 }

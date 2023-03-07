@@ -38,7 +38,7 @@ static unsigned char sc1map[9][9][2];
   bit 0 -- 2.2kohm resistor  -- RED/GREEN/BLUE
 
 ***************************************************************************/
-void c1943_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void c1943_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -112,19 +112,19 @@ void c1943_vh_convert_color_prom(unsigned char *palette, unsigned char *colortab
 
 int c1943_vh_start(void)
 {
-	if ((sc2bitmap = osd_create_bitmap(8*32,9*32)) == 0)
+	if ((sc2bitmap = bitmap_alloc(9*32,8*32)) == 0)
 		return 1;
 
-	if ((sc1bitmap = osd_create_bitmap(9*32,9*32)) == 0)
+	if ((sc1bitmap = bitmap_alloc(9*32,9*32)) == 0)
 	{
-		osd_free_bitmap(sc2bitmap);
+		bitmap_free(sc2bitmap);
 		return 1;
 	}
 
 	if (generic_vh_start() == 1)
 	{
-		osd_free_bitmap(sc2bitmap);
-		osd_free_bitmap(sc1bitmap);
+		bitmap_free(sc2bitmap);
+		bitmap_free(sc1bitmap);
 		return 1;
 	}
 
@@ -137,18 +137,21 @@ int c1943_vh_start(void)
 
 void c1943_vh_stop(void)
 {
-	osd_free_bitmap(sc2bitmap);
-	osd_free_bitmap(sc1bitmap);
+	bitmap_free(sc2bitmap);
+	bitmap_free(sc1bitmap);
 }
 
 
 
-void c1943_c804_w(int offset,int data)
+WRITE_HANDLER( c1943_c804_w )
 {
 	int bankaddress;
+	unsigned char *RAM = memory_region(REGION_CPU1);
 
 
-	/* bits 0 and 1 are for coin counters - we ignore them */
+	/* bits 0 and 1 are coin counters */
+	coin_counter_w(0,data & 1);
+	coin_counter_w(1,data & 2);
 
 	/* bits 2, 3 and 4 select the ROM bank */
 	bankaddress = 0x10000 + (data & 0x1c) * 0x1000;
@@ -169,7 +172,7 @@ void c1943_c804_w(int offset,int data)
 
 
 
-void c1943_d806_w(int offset,int data)
+WRITE_HANDLER( c1943_d806_w )
 {
 	/* bit 4 enables bg 1 */
 	sc1on = data & 0x10;
@@ -190,7 +193,7 @@ void c1943_d806_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
+void c1943_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs,sx,sy;
 	int bg_scrolly, bg_scrollx;
@@ -200,7 +203,7 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 /* TODO: support flipscreen */
 	if (sc2on)
 	{
-		p=Machine->memory_region[3]+0x8000;
+		p=memory_region(REGION_GFX5)+0x8000;
 		bg_scrolly = c1943_bgscrolly[0] + 256 * c1943_bgscrolly[1];
 		offs = 16 * ((bg_scrolly>>5)+8);
 
@@ -229,8 +232,8 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 					drawgfx(sc2bitmap,Machine->gfx[2],
 							tile,
 							(attr & 0x3c) >> 2,
-							attr&0x80, attr&0x40,
-							sx*32, ty*32,
+							attr&0x40, attr&0x80,
+							(8-ty)*32, sx*32,
 							0,
 							TRANSPARENCY_NONE,0);
 				}
@@ -239,15 +242,15 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 			offs-=0x10;
 		}
 
-		xscroll = 0;
-		yscroll = -(top*32+32-bg_scrolly);
+		xscroll = (top*32-bg_scrolly);
+		yscroll = 0;
 		copyscrollbitmap(bitmap,sc2bitmap,
 			1,&xscroll,
 			1,&yscroll,
-			&Machine->drv->visible_area,
+			&Machine->visible_area,
 			TRANSPARENCY_NONE,0);
 	}
-	else fillbitmap(bitmap,Machine->pens[0],&Machine->drv->visible_area);
+	else fillbitmap(bitmap,Machine->pens[0],&Machine->visible_area);
 
 
 	if (objon)
@@ -262,8 +265,8 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 			if (color == 0x0a || color == 0x0b)	/* the priority is actually selected by */
 												/* bit 3 of BMPROM.07 */
 			{
-				sx = spriteram[offs + 2];
-				sy = 240 - spriteram[offs + 3] + ((spriteram[offs + 1] & 0x10) << 4);
+				sx = spriteram[offs + 3] - ((spriteram[offs + 1] & 0x10) << 4);
+				sy = spriteram[offs + 2];
 				if (flipscreen)
 				{
 					sx = 240 - sx;
@@ -275,7 +278,7 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 						color,
 						flipscreen,flipscreen,
 						sx,sy,
-						&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+						&Machine->visible_area,TRANSPARENCY_PEN,0);
 			}
 		}
 	}
@@ -284,7 +287,7 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 /* TODO: support flipscreen */
 	if (sc1on)
 	{
-		p=Machine->memory_region[3];
+		p=memory_region(REGION_GFX5);
 
 		bg_scrolly = c1943_scrolly[0] + 256 * c1943_scrolly[1];
 		bg_scrollx = c1943_scrollx[0];
@@ -320,8 +323,8 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 					drawgfx(sc1bitmap,Machine->gfx[1],
 							tile,
 							(attr & 0x3c) >> 2,
-							attr & 0x80,attr & 0x40,
-							tx*32, ty*32,
+							attr & 0x40,attr & 0x80,
+							(8-ty)*32, tx*32,
 							0,
 							TRANSPARENCY_NONE,0);
 				}
@@ -329,12 +332,12 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 			offs-=0x10;
 		}
 
-		xscroll = -(left*32+bg_scrollx);
-		yscroll = -(top*32+32-bg_scrolly);
+		xscroll = (top*32-bg_scrolly);
+		yscroll = -(left*32+bg_scrollx);
 		copyscrollbitmap(bitmap,sc1bitmap,
 			1,&xscroll,
 			1,&yscroll,
-			&Machine->drv->visible_area,
+			&Machine->visible_area,
 			TRANSPARENCY_COLOR,0);
 	}
 
@@ -351,8 +354,8 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 			if (color != 0x0a && color != 0x0b)	/* the priority is actually selected by */
 												/* bit 3 of BMPROM.07 */
 			{
-				sx = spriteram[offs + 2];
-				sy = 240 - spriteram[offs + 3] + ((spriteram[offs + 1] & 0x10) << 4);
+				sx = spriteram[offs + 3] - ((spriteram[offs + 1] & 0x10) << 4);
+				sy = spriteram[offs + 2];
 				if (flipscreen)
 				{
 					sx = 240 - sx;
@@ -364,7 +367,7 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 						color,
 						flipscreen,flipscreen,
 						sx,sy,
-						&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+						&Machine->visible_area,TRANSPARENCY_PEN,0);
 			}
 		}
 	}
@@ -375,11 +378,8 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 		/* draw the frontmost playfield. They are characters, but draw them as sprites */
 		for (offs = videoram_size - 1;offs >= 0;offs--)
 		{
-			int sx,sy;
-
-
-			sx = offs / 32;
-			sy = 31 - offs % 32;
+			sx = offs % 32;
+			sy = offs / 32;
 			if (flipscreen)
 			{
 				sx = 31 - sx;
@@ -391,7 +391,7 @@ void c1943_vh_screenrefresh(struct osd_bitmap *bitmap)
 					colorram[offs] & 0x1f,
 					flipscreen,flipscreen,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_COLOR,79);
+					&Machine->visible_area,TRANSPARENCY_COLOR,79);
 		}
 	}
 }

@@ -42,7 +42,7 @@ typedef struct {
   bit 0 -- 1  kohm resistor  -- RED
 
 ***************************************************************************/
-void gyruss_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
+void gyruss_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom)
 {
 	int i;
 	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
@@ -89,19 +89,19 @@ void gyruss_vh_convert_color_prom(unsigned char *palette, unsigned char *colorta
 /* convert sprite coordinates from polar to cartesian */
 static int SprTrans(Sprites *u)
 {
-#define YTABLE_START (0x0000)
-#define SINTABLE_START (0x0400)
-#define COSTABLE_START (0x0600)
+#define YTABLE_START (0xe000)
+#define SINTABLE_START (0xe400)
+#define COSTABLE_START (0xe600)
 	int ro;
 	int theta2;
 	unsigned char *table;
 
 
-	ro = Machine->memory_region[3][YTABLE_START + u->y];
+	ro = memory_region(REGION_CPU4)[YTABLE_START + u->y];
 	theta2 = 2 * u->x;
 
 	/* cosine table */
-	table = &Machine->memory_region[3][COSTABLE_START];
+	table = &memory_region(REGION_CPU4)[COSTABLE_START];
 
 	u->y = (table[theta2+1] * ro) >> 8;
 	if (u->y >= 0x80)
@@ -120,7 +120,7 @@ static int SprTrans(Sprites *u)
 	}
 
 	/* sine table */
-	table = &Machine->memory_region[3][SINTABLE_START];
+	table = &memory_region(REGION_CPU4)[SINTABLE_START];
 
 	u->x = (table[theta2+1] * ro) >> 8;
 	if (u->x >= 0x80)
@@ -162,7 +162,7 @@ static int SprTrans(Sprites *u)
            A7FF is not 0 or FF), 6809 waits for Z80 to store a 1 in
            A701 and draw currently queued sprites
 	*/
-void gyruss_queuereg_w (int offset,int data)
+WRITE_HANDLER( gyruss_queuereg_w )
 {
 	if (data == 1)
 	{
@@ -235,13 +235,21 @@ void gyruss_queuereg_w (int offset,int data)
 
 
 
-void gyruss_flipscreen_w(int offset,int data)
+WRITE_HANDLER( gyruss_flipscreen_w )
 {
 	if (flipscreen != (data & 1))
 	{
 		flipscreen = data & 1;
 		memset(dirtybuffer,1,videoram_size);
 	}
+}
+
+
+
+/* Return the current video scan line */
+READ_HANDLER( gyruss_scanline_r )
+{
+	return cpu_scalebyfcount(256);
 }
 
 
@@ -253,7 +261,7 @@ void gyruss_flipscreen_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void gyruss_vh_screenrefresh(struct osd_bitmap *bitmap)
+void gyruss_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
 	int offs;
 
@@ -286,13 +294,13 @@ void gyruss_vh_screenrefresh(struct osd_bitmap *bitmap)
 					colorram[offs] & 0x0f,
 					flipx,flipy,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 		}
 	}
 
 
 	/* copy the character mapped graphics */
-	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
 
 
 	/*
@@ -328,7 +336,7 @@ void gyruss_vh_screenrefresh(struct osd_bitmap *bitmap)
 							sr[offs + 2] & 0x0f,
 							!(sr[offs + 2] & 0x40),sr[offs + 2] & 0x80,
 							sr[offs + 0],240-sr[offs + 3]+1,
-							&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+							&Machine->visible_area,TRANSPARENCY_PEN,0);
 			}
 			else	/* single height */
 			{
@@ -338,7 +346,7 @@ void gyruss_vh_screenrefresh(struct osd_bitmap *bitmap)
 							sr[offs + 2] & 0x0f,
 							!(sr[offs + 2] & 0x40),sr[offs + 2] & 0x80,
 							sr[offs + 0],240-sr[offs + 3]+1,
-							&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+							&Machine->visible_area,TRANSPARENCY_PEN,0);
 
 				if (sr[offs + 4] != 0)
 					drawgfx(bitmap,Machine->gfx[1 + (sr[offs + 5] & 1)],
@@ -346,7 +354,7 @@ void gyruss_vh_screenrefresh(struct osd_bitmap *bitmap)
 							sr[offs + 6] & 0x0f,
 							!(sr[offs + 6] & 0x40),sr[offs + 6] & 0x80,
 							sr[offs + 4],240-sr[offs + 7]+1,
-							&Machine->drv->visible_area,TRANSPARENCY_PEN,0);
+							&Machine->visible_area,TRANSPARENCY_PEN,0);
 			}
 		}
 	}
@@ -376,6 +384,91 @@ void gyruss_vh_screenrefresh(struct osd_bitmap *bitmap)
 					colorram[offs] & 0x0f,
 					flipx,flipy,
 					8*sx,8*sy,
-					&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
+	}
+}
+
+void gyruss_6809_vh_screenrefresh(struct osd_bitmap *bitmap)
+{
+	int offs;
+
+
+	/* for every character in the Video RAM, check if it has been modified */
+	/* since last time and update it accordingly. */
+	for (offs = videoram_size - 1;offs >= 0;offs--)
+	{
+		if (dirtybuffer[offs])
+		{
+			int sx,sy,flipx,flipy;
+
+
+			dirtybuffer[offs] = 0;
+
+			sx = offs % 32;
+			sy = offs / 32;
+			flipx = colorram[offs] & 0x40;
+			flipy = colorram[offs] & 0x80;
+			if (flipscreen)
+			{
+				sx = 31 - sx;
+				sy = 31 - sy;
+				flipx = !flipx;
+				flipy = !flipy;
+			}
+
+			drawgfx(tmpbitmap,Machine->gfx[0],
+					videoram[offs] + 8 * (colorram[offs] & 0x20),
+					colorram[offs] & 0x0f,
+					flipx,flipy,
+					8*sx,8*sy,
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
+		}
+	}
+
+
+	/* copy the character mapped graphics */
+	copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->visible_area,TRANSPARENCY_NONE,0);
+
+
+	/* Draw the sprites. Note that it is important to draw them exactly in this */
+	/* order, to have the correct priorities. */
+	{
+		for (offs = spriteram_size - 4;offs >= 0;offs -= 4)
+		{
+			drawgfx(bitmap,Machine->gfx[1 + (spriteram[offs + 1] & 1)],
+					spriteram[offs + 1]/2 + 4*(spriteram[offs + 2] & 0x20),
+					spriteram[offs + 2] & 0x0f,
+					!(spriteram[offs + 2] & 0x40),spriteram[offs + 2] & 0x80,
+					spriteram[offs],240-spriteram[offs + 3]+1,
+					&Machine->visible_area,TRANSPARENCY_PEN,0);
+		}
+	}
+
+
+	/* redraw the characters which have priority over sprites */
+	for (offs = videoram_size - 1;offs >= 0;offs--)
+	{
+		int sx,sy,flipx,flipy;
+
+
+		sx = offs % 32;
+		sy = offs / 32;
+		flipx = colorram[offs] & 0x40;
+		flipy = colorram[offs] & 0x80;
+		if (flipscreen)
+		{
+			sx = 31 - sx;
+			sy = 31 - sy;
+			flipx = !flipx;
+			flipy = !flipy;
+		}
+
+		if ((colorram[offs] & 0x10) != 0)
+			drawgfx(bitmap,Machine->gfx[0],
+					videoram[offs] + 8 * (colorram[offs] & 0x20),
+					colorram[offs] & 0x0f,
+					flipx,flipy,
+					8*sx,8*sy,
+					&Machine->visible_area,TRANSPARENCY_NONE,0);
 	}
 }

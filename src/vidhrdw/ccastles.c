@@ -9,16 +9,15 @@
 #include "vidhrdw/generic.h"
 
 
-struct osd_bitmap *sprite_bm;
-struct osd_bitmap *maskbitmap;
+static struct osd_bitmap *sprite_bm;
+static struct osd_bitmap *maskbitmap;
 
-static int ax;
-static int ay;
-static unsigned char xcoor;
-static unsigned char ycoor;
-static int flipscreen;
-
-
+unsigned char *ccastles_screen_addr;
+unsigned char *ccastles_screen_inc;
+unsigned char *ccastles_screen_inc_enable;
+unsigned char *ccastles_sprite_bank;
+unsigned char *ccastles_scrollx;
+unsigned char *ccastles_scrolly;
 
 /***************************************************************************
 
@@ -45,34 +44,7 @@ static int flipscreen;
   bit 0 -- inverter -- 1  kohm resistor  -- GREEN
 
 ***************************************************************************/
-void ccastles_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom)
-{
-	int i;
-	#define TOTAL_COLORS(gfxn) (Machine->gfx[gfxn]->total_colors * Machine->gfx[gfxn]->color_granularity)
-	#define COLOR(gfxn,offs) (colortable[Machine->drv->gfxdecodeinfo[gfxn].color_codes_start + offs])
-
-
-	/* the palette will be initialized by the game. We just set it to some */
-	/* pre-cooked values so the startup copyright notice can be displayed. */
-	for (i = 0;i < Machine->drv->total_colors;i++)
-	{
-		*(palette++) = ((i & 1) >> 0) * 0xff;
-		*(palette++) = ((i & 2) >> 1) * 0xff;
-		*(palette++) = ((i & 4) >> 2) * 0xff;
-	}
-
-
-	/* sprites */
-	for (i = 0;i < TOTAL_COLORS(0);i++)
-		COLOR(0,i) = i;
-	/* background */
-	for (i = 0;i < TOTAL_COLORS(1);i++)
-		COLOR(1,i) = i + 16;
-}
-
-
-
-void ccastles_paletteram_w(int offset,int data)
+WRITE_HANDLER( ccastles_paletteram_w )
 {
 	int r,g,b;
 	int bit0,bit1,bit2;
@@ -102,7 +74,7 @@ void ccastles_paletteram_w(int offset,int data)
 	bit2 = (b >> 2) & 0x01;
 	b = 0x21 * bit0 + 0x47 * bit1 + 0x97 * bit2;
 
-	osd_modify_pen(Machine->pens[offset & 0x1f],r,g,b);
+	palette_change_color(offset & 0x1f,r,g,b);
 }
 
 
@@ -114,19 +86,19 @@ void ccastles_paletteram_w(int offset,int data)
 ***************************************************************************/
 int ccastles_vh_start(void)
 {
-	if ((tmpbitmap = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
+	if ((tmpbitmap = bitmap_alloc(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 		return 1;
 
-	if ((maskbitmap = osd_create_bitmap(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
+	if ((maskbitmap = bitmap_alloc(Machine->drv->screen_width,Machine->drv->screen_height)) == 0)
 	{
-		osd_free_bitmap(tmpbitmap);
+		bitmap_free(tmpbitmap);
 		return 1;
 	}
 
-	if ((sprite_bm = osd_create_bitmap(8,16)) == 0)
+	if ((sprite_bm = bitmap_alloc(16,16)) == 0)
 	{
-		osd_free_bitmap(maskbitmap);
-		osd_free_bitmap(tmpbitmap);
+		bitmap_free(maskbitmap);
+		bitmap_free(tmpbitmap);
 		return 1;
 	}
 
@@ -142,151 +114,127 @@ int ccastles_vh_start(void)
 ***************************************************************************/
 void ccastles_vh_stop(void)
 {
-	osd_free_bitmap(sprite_bm);
-	osd_free_bitmap(maskbitmap);
-	osd_free_bitmap(tmpbitmap);
+	bitmap_free(sprite_bm);
+	bitmap_free(maskbitmap);
+	bitmap_free(tmpbitmap);
 }
 
 
 
-int ccastles_bitmode_r(int offset) {
-  int addr;
+READ_HANDLER( ccastles_bitmode_r )
+{
+	int addr;
 
-  addr = (ycoor<<7) | (xcoor>>1);
+	addr = (ccastles_screen_addr[1]<<7) | (ccastles_screen_addr[0]>>1);
 
-  if(!ax) {
-    if(!RAM[0x9F02]) {
-      xcoor++;
-    } else {
-      xcoor--;
-    }
-  }
+	/* is the address in videoram? */
+	if ((addr >= 0x0c00) && (addr < 0x8000))
+	{
+		/* auto increment in the x-direction if it's enabled */
+		if (!ccastles_screen_inc_enable[0])
+		{
+			if (!ccastles_screen_inc[0])
+				ccastles_screen_addr[0] ++;
+			else
+				ccastles_screen_addr[0] --;
+		}
 
-  if(!ay) {
-    if(!RAM[0x9F03]) {
-      ycoor++;
-    } else {
-      ycoor--;
-    }
-  }
+		/* auto increment in the y-direction if it's enabled */
+		if (!ccastles_screen_inc_enable[1])
+		{
+			if (!ccastles_screen_inc[1])
+				ccastles_screen_addr[1] ++;
+			else
+				ccastles_screen_addr[1] --;
+		}
 
-  if(xcoor & 0x01) {
-    return((RAM[addr] & 0x0F) << 4);
-  } else {
-    return(RAM[addr] & 0xF0);
-  }
+		addr -= 0xc00;
+		if (ccastles_screen_addr[0] & 0x01)
+			return ((videoram[addr] & 0x0f) << 4);
+		else
+			return (videoram[addr] & 0xf0);
+	}
+
+	return 0;
 }
 
-void ccastles_xy_w(int offset, int data) {
-  RAM[offset] = data;
-
-  if(offset == 0x0000) {
-    xcoor = data;
-  } else {
-    ycoor = data;
-  }
-}
-
-void ccastles_axy_w(int offset, int data) {
-  RAM[0x9F00+offset] = data;
-
-  if(offset == 0x0000) {
-    if(data) {
-      ax = data;
-    } else {
-      ax = 0x00;
-    }
-  } else {
-    if(data) {
-      ay = data;
-    } else {
-      ay = 0x00;
-    }
-  }
-}
-
-void ccastles_bitmode_w(int offset, int data) {
-  int addr;
-  int mode;
-
-  RAM[0x0002] = data;
-  if(xcoor & 0x01) {
-    mode = (data >> 4) & 0x0F;
-  } else {
-    mode = (data & 0xF0);
-  }
-
-  addr = (ycoor<<7) | (xcoor>>1);
-
-  if((addr>0x0BFF) && (addr<0x8000))
-  {
-    if(xcoor & 0x01) {
-      RAM[addr] = (RAM[addr] & 0xF0) | mode;
-    } else {
-      RAM[addr] = (RAM[addr] & 0x0F) | mode;
-    }
+WRITE_HANDLER( ccastles_bitmode_w )
+{
+	int addr;
 
 
+	addr = (ccastles_screen_addr[1] << 7) | (ccastles_screen_addr[0] >> 1);
+
+	/* is the address in videoram? */
+	if ((addr >= 0x0c00) && (addr < 0x8000))
 	{
 		int x,y,j;
+		int mode;
 
+		addr -= 0xc00;
 
-		j = 2*(addr - 0xc00);
+		if (ccastles_screen_addr[0] & 0x01)
+		{
+			mode = (data >> 4) & 0x0f;
+			videoram[addr] = (videoram[addr] & 0xf0) | mode;
+		}
+		else
+		{
+			mode = (data & 0xf0);
+			videoram[addr] = (videoram[addr] & 0x0f) | mode;
+		}
+
+		j = 2*addr;
 		x = j%256;
 		y = j/256;
-		if (!flipscreen) {
-			tmpbitmap->line[y][x] = Machine->gfx[1]->colortable[(RAM[addr] & 0xF0) >> 4];
-			tmpbitmap->line[y][x+1] = Machine->gfx[1]->colortable[RAM[addr] & 0x0F];
+		if (!flip_screen)
+		{
+			plot_pixel(tmpbitmap, x  , y, Machine->pens[16 + ((videoram[addr] & 0xf0) >> 4)]);
+			plot_pixel(tmpbitmap, x+1, y, Machine->pens[16 +  (videoram[addr] & 0x0f)      ]);
 
 			/* if bit 3 of the pixel is set, background has priority over sprites when */
 			/* the sprite has the priority bit set. We use a second bitmap to remember */
 			/* which pixels have priority. */
-			maskbitmap->line[y][x] = RAM[addr] & 0x80;
-			maskbitmap->line[y][x+1] = RAM[addr] & 0x08;
-			}
-		else {
+			plot_pixel(maskbitmap, x  , y, videoram[addr] & 0x80);
+			plot_pixel(maskbitmap, x+1, y, videoram[addr] & 0x08);
+		}
+		else
+		{
 			y = 231-y;
 			x = 254-x;
-			if (y >= 0) {
-				tmpbitmap->line[y][x+1] = Machine->gfx[1]->colortable[(RAM[addr] & 0xF0) >> 4];
-				tmpbitmap->line[y][x] = Machine->gfx[1]->colortable[RAM[addr] & 0x0F];
+			if (y >= 0)
+			{
+				plot_pixel(tmpbitmap, x+1, y, Machine->pens[16 + ((videoram[addr] & 0xf0) >> 4)]);
+				plot_pixel(tmpbitmap, x  , y, Machine->pens[16 +  (videoram[addr] & 0x0f)      ]);
 
 				/* if bit 3 of the pixel is set, background has priority over sprites when */
 				/* the sprite has the priority bit set. We use a second bitmap to remember */
 				/* which pixels have priority. */
-				maskbitmap->line[y][x+1] = RAM[addr] & 0x80;
-				maskbitmap->line[y][x] = RAM[addr] & 0x08;
-				}
+				plot_pixel(maskbitmap, x+1, y, videoram[addr] & 0x80);
+				plot_pixel(maskbitmap, x  , y, videoram[addr] & 0x08);
 			}
+		}
 	}
-  }
 
-
-  if(!ax) {
-    if(!RAM[0x9F02]) {
-      xcoor++;
-    } else {
-      xcoor--;
-    }
-  }
-
-  if(!ay) {
-    if(!RAM[0x9F03]) {
-      ycoor++;
-    } else {
-      ycoor--;
-    }
-  }
-}
-
-void ccastles_flipscreen_w(int offset,int data)
-{
-	if (flipscreen != (data & 1))
+	/* auto increment in the x-direction if it's enabled */
+	if (!ccastles_screen_inc_enable[0])
 	{
-		flipscreen = data & 1;
+		if (!ccastles_screen_inc[0])
+			ccastles_screen_addr[0] ++;
+		else
+			ccastles_screen_addr[0] --;
 	}
-}
 
+	/* auto increment in the y-direction if it's enabled */
+	if (!ccastles_screen_inc_enable[1])
+	{
+		if (!ccastles_screen_inc[1])
+			ccastles_screen_addr[1] ++;
+		else
+			ccastles_screen_addr[1] --;
+	}
+
+}
 
 
 /***************************************************************************
@@ -296,48 +244,94 @@ void ccastles_flipscreen_w(int offset,int data)
   the main emulation engine.
 
 ***************************************************************************/
-void ccastles_vh_screenrefresh(struct osd_bitmap *bitmap)
+static void redraw_bitmap(void)
 {
-	int offs;
-	int i,j;
-	int x,y;
-	int spriteaddr;
-	int scrollx,scrolly;
+	int x, y;
+	int screen_addr0_save, screen_addr1_save, screen_inc_enable0_save, screen_inc_enable1_save;
 
 
-	scrollx = 256 - RAM[0x9c80];
-	scrolly = 256 - RAM[0x9d00];
+	/* save out registers */
+	screen_addr0_save = ccastles_screen_addr[0];
+	screen_addr1_save = ccastles_screen_addr[1];
 
-	if (flipscreen) {
-		scrollx = 254 - scrollx;
-		scrolly = 231 - scrolly;
+	screen_inc_enable0_save = ccastles_screen_inc_enable[0];
+	screen_inc_enable1_save = ccastles_screen_inc_enable[1];
+
+	ccastles_screen_inc_enable[0] = ccastles_screen_inc_enable[1] = 1;
+
+
+	/* redraw bitmap */
+	for (y = 0; y < 256; y++)
+	{
+		ccastles_screen_addr[1] = y;
+
+		for (x = 0; x < 256; x++)
+		{
+			ccastles_screen_addr[0] = x;
+
+			ccastles_bitmode_w(0, ccastles_bitmode_r(0));
 		}
-
-	copyscrollbitmap (bitmap,tmpbitmap,1,&scrollx,1,&scrolly,
-		   &Machine->drv->visible_area,
-		   TRANSPARENCY_NONE,0);
-
-
-	if(RAM[0x9F07]) {
-	spriteaddr = 0x8F00;
-	} else {
-	spriteaddr = 0x8E00;
 	}
 
 
-	/* Draw the sprites */
-	for (offs = 0x00;offs < 0x100;offs += 0x04)
-	{
-		/* Get the X and Y coordinates from the MOB RAM */
-		x = RAM[spriteaddr+offs+3];
-		y = 216 - RAM[spriteaddr+offs+1];
+	/* restore registers */
+	ccastles_screen_addr[0] = screen_addr0_save;
+	ccastles_screen_addr[1] = screen_addr1_save;
 
-		if (RAM[spriteaddr+offs+2] & 0x80)	/* background can have priority over the sprite */
+	ccastles_screen_inc_enable[0] = screen_inc_enable0_save;
+	ccastles_screen_inc_enable[1] = screen_inc_enable1_save;
+}
+
+
+void ccastles_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	int offs;
+	unsigned char *spriteaddr;
+	int scrollx,scrolly;
+
+
+	if (palette_recalc() || full_refresh)
+	{
+		redraw_bitmap();
+	}
+
+
+	scrollx = 255 - *ccastles_scrollx;
+	scrolly = 255 - *ccastles_scrolly;
+
+	if (flip_screen)
+	{
+		scrollx = 254 - scrollx;
+		scrolly = 231 - scrolly;
+	}
+
+	copyscrollbitmap(bitmap,tmpbitmap,1,&scrollx,1,&scrolly,
+				     &Machine->visible_area,
+		   			 TRANSPARENCY_NONE,0);
+
+
+	if (*ccastles_sprite_bank)
+		spriteaddr = spriteram;
+	else
+		spriteaddr = spriteram_2;
+
+
+	/* Draw the sprites */
+	for (offs = 0; offs < spriteram_size; offs += 4)
+	{
+		int i,j;
+		int x,y;
+
+		/* Get the X and Y coordinates from the MOB RAM */
+		x = spriteaddr[offs+3];
+		y = 216 - spriteaddr[offs+1];
+
+		if (spriteaddr[offs+2] & 0x80)	/* background can have priority over the sprite */
 		{
 			fillbitmap(sprite_bm,Machine->gfx[0]->colortable[7],0);
 			drawgfx(sprite_bm,Machine->gfx[0],
-					RAM[spriteaddr+offs],1,
-					flipscreen,flipscreen,
+					spriteaddr[offs],1,
+					flip_screen,flip_screen,
 					0,0,
 					0,TRANSPARENCY_PEN,7);
 
@@ -347,28 +341,28 @@ void ccastles_vh_screenrefresh(struct osd_bitmap *bitmap)
 				{
 					for (i = 0;i < 8;i++)
 					{
-						unsigned char pixa,pixb;
+						int pixa,pixb;
 
-						pixa = sprite_bm->line[j][i];
-						pixb = maskbitmap->line[(y+scrolly+j)%232][(x+scrollx+i)%256];
+						pixa = read_pixel(sprite_bm, i, j);
+						pixb = read_pixel(maskbitmap, (x+scrollx+i)%256, (y+scrolly+j)%232);
 
 						/* if background has priority over sprite, make the */
 						/* temporary bitmap transparent */
 						if (pixb != 0 && (pixa != Machine->gfx[0]->colortable[0]))
-							sprite_bm->line[j][i] = Machine->gfx[0]->colortable[7];
+							plot_pixel(sprite_bm, i, j, Machine->gfx[0]->colortable[7]);
 					}
 				}
 			}
 
-			copybitmap(bitmap,sprite_bm,0,0,x,y,&Machine->drv->visible_area,TRANSPARENCY_PEN,Machine->gfx[0]->colortable[7]);
+			copybitmap(bitmap,sprite_bm,0,0,x,y,&Machine->visible_area,TRANSPARENCY_PEN,Machine->gfx[0]->colortable[7]);
 		}
 		else
 		{
 			drawgfx(bitmap,Machine->gfx[0],
-					RAM[spriteaddr+offs],1,
-					flipscreen,flipscreen,
+					spriteaddr[offs],1,
+					flip_screen,flip_screen,
 					x,y,
-					&Machine->drv->visible_area,TRANSPARENCY_PEN,7);
+					&Machine->visible_area,TRANSPARENCY_PEN,7);
 		}
 	}
 }

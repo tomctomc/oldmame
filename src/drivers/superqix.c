@@ -2,9 +2,15 @@
 
 Super QIX memory map (preliminary)
 
+driver by Mirko Buffoni
+
 CPU:
 0000-7fff ROM
 8000-bfff BANK 0-1-2-3	(All banks except 2 contain code)
+
+Notes:
+- the original doesn't work due to protection. There is an unknown ROM: code
+  for a mcu?
 
 ***************************************************************************/
 
@@ -13,17 +19,14 @@ CPU:
 
 
 
-void superqix_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
 int superqix_vh_start(void);
 void superqix_vh_stop(void);
-int superqix_palette_r(int offset);
-void superqix_palette_w(int offset,int data);
-int superqix_bitmapram_r(int offset);
-void superqix_bitmapram_w(int offset,int data);
-int superqix_bitmapram2_r(int offset);
-void superqix_bitmapram2_w(int offset,int data);
-void superqix_0410_w(int offset,int data);
-void superqix_vh_screenrefresh(struct osd_bitmap *bitmap);
+READ_HANDLER( superqix_bitmapram_r );
+WRITE_HANDLER( superqix_bitmapram_w );
+READ_HANDLER( superqix_bitmapram2_r );
+WRITE_HANDLER( superqix_bitmapram2_w );
+WRITE_HANDLER( superqix_0410_w );
+void superqix_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
 
 
@@ -48,7 +51,7 @@ static struct MemoryWriteAddress writemem[] =
 
 static struct IOReadPort readport[] =
 {
-	{ 0x0000, 0x00ff, superqix_palette_r },
+	{ 0x0000, 0x00ff, paletteram_r },
 	{ 0x0401, 0x0401, AY8910_read_port_0_r },
 	{ 0x0405, 0x0405, AY8910_read_port_1_r },
 	{ 0x0418, 0x0418, input_port_4_r },
@@ -59,7 +62,7 @@ static struct IOReadPort readport[] =
 
 static struct IOWritePort writeport[] =
 {
-	{ 0x0000, 0x00ff, superqix_palette_w },
+	{ 0x0000, 0x00ff, paletteram_BBGGRRII_w },
 	{ 0x0402, 0x0402, AY8910_write_port_0_w },
 	{ 0x0403, 0x0403, AY8910_control_port_0_w },
 	{ 0x0406, 0x0406, AY8910_write_port_1_w },
@@ -72,7 +75,7 @@ static struct IOWritePort writeport[] =
 
 
 
-INPUT_PORTS_START( input_ports )
+INPUT_PORTS_START( superqix )
 	PORT_START	/* IN0 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_4WAY )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_JOYSTICK_DOWN | IPF_4WAY )
@@ -81,9 +84,7 @@ INPUT_PORTS_START( input_ports )
 	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 )
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_VBLANK )	/* ??? */
-	PORT_BITX(    0x80, 0x80, IPT_DIPSWITCH_NAME | IPF_TOGGLE, "Service Mode", OSD_KEY_F2, IP_JOY_NONE, 0 )
-	PORT_DIPSETTING(    0x80, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
+	PORT_SERVICE( 0x80, IP_ACTIVE_LOW )
 
 	PORT_START	/* IN1 */
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_JOYSTICK_UP | IPF_4WAY | IPF_COCKTAIL )
@@ -93,51 +94,51 @@ INPUT_PORTS_START( input_ports )
 	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON1 | IPF_COCKTAIL )
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_UNKNOWN )
-	PORT_BITX(    0x80, 0x00, IPT_DIPSWITCH_NAME, "Freeze???", IP_KEY_NONE, IP_JOY_NONE, 0 )
-	PORT_DIPSETTING(    0x00, "Off" )
-	PORT_DIPSETTING(    0x80, "On" )
+	PORT_BITX(    0x80, 0x00, IPT_DIPSWITCH_NAME, "Freeze???", IP_KEY_NONE, IP_JOY_NONE )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( On ) )
 
 	PORT_START	/* DSW1 */
-	PORT_DIPNAME( 0x03, 0x03, "Coin B", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x02, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x03, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x00, "2 Coins/3 Credit")
-	PORT_DIPSETTING(    0x01, "1 Coin/2 Credit" )
-	PORT_DIPNAME( 0x0c, 0x0c, "Coin A", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x08, "2 Coins/1 Credit" )
-	PORT_DIPSETTING(    0x0c, "1 Coin/1 Credit" )
-	PORT_DIPSETTING(    0x00, "2 Coins/3 Credit")
-	PORT_DIPSETTING(    0x04, "1 Coin/2 Credit" )
-	PORT_DIPNAME( 0x10, 0x00, "Allow Continue", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x10, "No" )
-	PORT_DIPSETTING(    0x00, "Yes" )
-	PORT_DIPNAME( 0x20, 0x20, "Freeze", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x20, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x40, 0x40, "Flip Screen", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x40, "Off" )
-	PORT_DIPSETTING(    0x00, "On" )
-	PORT_DIPNAME( 0x80, 0x00, "Cabinet", IP_KEY_NONE )
-	PORT_DIPSETTING(    0x00, "Upright" )
-	PORT_DIPSETTING(    0x80, "Cocktail" )
+	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Coin_B ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x03, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 2C_3C ))
+	PORT_DIPSETTING(    0x01, DEF_STR( 1C_2C ) )
+	PORT_DIPNAME( 0x0c, 0x0c, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 2C_3C ))
+	PORT_DIPSETTING(    0x04, DEF_STR( 1C_2C ) )
+	PORT_DIPNAME( 0x10, 0x00, "Allow Continue" )
+	PORT_DIPSETTING(    0x10, DEF_STR( No ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Yes ) )
+	PORT_DIPNAME( 0x20, 0x20, "Freeze" )
+	PORT_DIPSETTING(    0x20, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x40, 0x40, DEF_STR( Flip_Screen ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x80, 0x00, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( Upright ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( Cocktail ) )
 
 	PORT_START	/* DSW2 */
-	PORT_DIPNAME( 0x03, 0x03, "Difficulty", IP_KEY_NONE )
+	PORT_DIPNAME( 0x03, 0x03, DEF_STR( Difficulty ) )
 	PORT_DIPSETTING(    0x02, "Easy" )
 	PORT_DIPSETTING(    0x03, "Normal" )
 	PORT_DIPSETTING(    0x01, "Hard" )
 	PORT_DIPSETTING(    0x00, "Hardest" )
-	PORT_DIPNAME( 0x0c, 0x0c, "Bonus Life", IP_KEY_NONE )
+	PORT_DIPNAME( 0x0c, 0x0c, DEF_STR( Bonus_Life ) )
+	PORT_DIPSETTING(    0x08, "20000 50000" )
 	PORT_DIPSETTING(    0x0c, "30000 100000" )
-	PORT_DIPSETTING(    0x08, "30000 50000" )
 	PORT_DIPSETTING(    0x04, "50000 100000" )
 	PORT_DIPSETTING(    0x00, "None" )
-	PORT_DIPNAME( 0x30, 0x30, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0x30, 0x30, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x20, "2" )
 	PORT_DIPSETTING(    0x30, "3" )
 	PORT_DIPSETTING(    0x10, "4" )
 	PORT_DIPSETTING(    0x00, "5" )
-	PORT_DIPNAME( 0xc0, 0xc0, "Fill Area", IP_KEY_NONE )
+	PORT_DIPNAME( 0xc0, 0xc0, "Fill Area" )
 	PORT_DIPSETTING(    0x80, "70%" )
 	PORT_DIPSETTING(    0xc0, "75%" )
 	PORT_DIPSETTING(    0x40, "80%" )
@@ -182,12 +183,12 @@ static struct GfxLayout spritelayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x00000, &charlayout,   0, 16 },	/* Chars */
-	{ 1, 0x08000, &charlayout,   0, 16 },	/* Background tiles */
-	{ 1, 0x10000, &charlayout,   0, 16 },
-	{ 1, 0x18000, &charlayout,   0, 16 },
-	{ 1, 0x20000, &charlayout,   0, 16 },
-	{ 1, 0x28000, &spritelayout, 0, 16 },	/* Sprites */
+	{ REGION_GFX1, 0x00000, &charlayout,   0, 16 },	/* Chars */
+	{ REGION_GFX2, 0x00000, &charlayout,   0, 16 },	/* Background tiles */
+	{ REGION_GFX2, 0x08000, &charlayout,   0, 16 },
+	{ REGION_GFX2, 0x10000, &charlayout,   0, 16 },
+	{ REGION_GFX2, 0x18000, &charlayout,   0, 16 },
+	{ REGION_GFX3, 0x00000, &spritelayout, 0, 16 },	/* Sprites */
 	{ -1 } /* end of array */
 };
 
@@ -197,25 +198,38 @@ static struct AY8910interface ay8910_interface =
 {
 	2,	/* 2 chips */
 	1500000,	/* 1.5 MHz??? */
-	{ 255, 255 },
+	{ 25, 25 },
 	{ input_port_0_r, input_port_3_r },		/* port Aread */
 	{ input_port_1_r, input_port_2_r },		/* port Bread */
 	{ 0 },	/* port Awrite */
 	{ 0 }	/* port Bwrite */
 };
 
+int sqix_interrupt(void)
+{
+	static int loop=0;
 
+	loop++;
 
-static struct MachineDriver machine_driver =
+	if(loop>2) {
+		if(loop==6) loop=0;
+		return nmi_interrupt();
+	}
+	else
+		return 0;
+}
+
+static struct MachineDriver machine_driver_superqix =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80 | CPU_16BIT_PORT,
+//			10000000,	/* 10 Mhz ? */
 			6000000,	/* 6 Mhz ? */
-			0,
 			readmem,writemem,readport,writeport,
-			nmi_interrupt,2	/* ??? */
+//			nmi_interrupt,3	/* ??? */
+			sqix_interrupt,6	/* ??? */
 		}
 	},
 	60, DEFAULT_REAL_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
@@ -226,9 +240,9 @@ static struct MachineDriver machine_driver =
 	32*8, 32*8, { 0*8, 32*8-1, 2*8, 30*8-1 },
 	gfxdecodeinfo,
 	256, 256,
-	superqix_vh_convert_color_prom,
+	0,
 
-	VIDEO_TYPE_RASTER,// | VIDEO_SUPPORTS_DIRTY,
+	VIDEO_TYPE_RASTER | VIDEO_MODIFIES_PALETTE,// | VIDEO_SUPPORTS_DIRTY,
 	0,
 	superqix_vh_start,
 	superqix_vh_stop,
@@ -252,71 +266,42 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( superqix_rom )
-	ROM_REGION(0x20000)	/* 64k for code */
-	ROM_LOAD( "sq01.97",  0x00000, 0x08000, 0x1a65d6a9 )
-	ROM_LOAD( "sq02.96",  0x10000, 0x10000, 0x25dd66f5 )
+ROM_START( superqix )
+	ROM_REGION( 0x20000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "sq01.97",      0x00000, 0x08000, 0x0888b7de )
+	ROM_LOAD( "sq02.96",      0x10000, 0x10000, 0x9c23cb64 )
 
-	ROM_REGION(0x38000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "sq04.2",  0x00000, 0x08000, 0x165430fc )
-	ROM_LOAD( "sq03.3",  0x08000, 0x10000, 0xfa8039c6 )
-	ROM_LOAD( "sq06.14", 0x18000, 0x10000, 0xfbb4714c )
-	ROM_LOAD( "sq05.1",  0x28000, 0x10000, 0x03c81564 )
+	ROM_REGION( 0x08000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "sq04.2",       0x00000, 0x08000, 0xf815ef45 )
 
-	ROM_REGION(0x1000)	/* Unknown (protection related?) */
-	ROM_LOAD( "sq07.108",  0x00000, 0x1000, 0x708cf304 )
+	ROM_REGION( 0x20000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "sq03.3",       0x00000, 0x10000, 0x6e8b6a67 )
+	ROM_LOAD( "sq06.14",      0x10000, 0x10000, 0x38154517 )
+
+	ROM_REGION( 0x10000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "sq05.1",       0x00000, 0x10000, 0xdf326540 )
+
+	ROM_REGION( 0x1000, REGION_USER1 )	/* Unknown (protection related?) */
+	ROM_LOAD( "sq07.108",     0x00000, 0x1000, 0x071a598c )
 ROM_END
 
-ROM_START( sqixbl_rom )
-	ROM_REGION(0x20000)	/* 64k for code */
-	ROM_LOAD( "CPU.2",  0x00000, 0x08000, 0x8cf43590 )
-	ROM_LOAD( "CPU.1",  0x10000, 0x10000, 0x25dd66f5 )
+ROM_START( sqixbl )
+	ROM_REGION( 0x20000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "cpu.2",        0x00000, 0x08000, 0x682e28e3 )
+	ROM_LOAD( "sq02.96",      0x10000, 0x10000, 0x9c23cb64 )
 
-	ROM_REGION(0x38000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "4",  0x00000, 0x08000, 0x165430fc )
-	ROM_LOAD( "5",  0x08000, 0x10000, 0xfa8039c6 )
-	ROM_LOAD( "6",  0x18000, 0x10000, 0xfbb4714c )
-	ROM_LOAD( "3",  0x28000, 0x10000, 0x03c81564 )
+	ROM_REGION( 0x08000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "sq04.2",       0x00000, 0x08000, 0xf815ef45 )
+
+	ROM_REGION( 0x20000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "sq03.3",       0x00000, 0x10000, 0x6e8b6a67 )
+	ROM_LOAD( "sq06.14",      0x10000, 0x10000, 0x38154517 )
+
+	ROM_REGION( 0x10000, REGION_GFX3 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "sq05.1",       0x00000, 0x10000, 0xdf326540 )
 ROM_END
 
 
 
-struct GameDriver superqix_driver =
-{
-	"Super Qix",
-	"superqix",
-	"Mirko Buffoni\nNicola Salmoria",
-	&machine_driver,
-
-	superqix_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	input_ports,
-
-	0, 0, 0,
-	ORIENTATION_ROTATE_90,
-
-	0, 0
-};
-
-struct GameDriver sqixbl_driver =
-{
-	"Super Qix (bootleg)",
-	"sqixbl",
-	"Mirko Buffoni\nNicola Salmoria",
-	&machine_driver,
-
-	sqixbl_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	input_ports,
-
-	0, 0, 0,
-	ORIENTATION_ROTATE_90,
-
-	0, 0
-};
+GAMEX( 1987, superqix, 0,        superqix, superqix, 0, ROT90, "Taito", "Super Qix", GAME_NOT_WORKING | GAME_NO_COCKTAIL )
+GAMEX( 1987, sqixbl,   superqix, superqix, superqix, 0, ROT90, "bootleg", "Super Qix (bootleg)", GAME_NO_COCKTAIL )

@@ -9,7 +9,7 @@
 
 
 
-unsigned char KonamiDecode( unsigned char opcode, unsigned short address )
+unsigned char decodebyte( unsigned char opcode, unsigned short address )
 {
 /*
 >
@@ -38,21 +38,29 @@ unsigned char KonamiDecode( unsigned char opcode, unsigned short address )
 	return opcode ^ xormask;
 }
 
-/* handle fake button for speed cheat */
-int konami_IN1_r(int offset)
+
+
+static void decode(int cpu)
 {
-	int res;
-	static int cheat = 0;
-	static int bits[] = { 0xee, 0xff, 0xbb, 0xaa };
+	unsigned char *rom = memory_region(REGION_CPU1+cpu);
+	int diff = memory_region_length(REGION_CPU1+cpu) / 2;
+	int A;
 
-	res = readinputport(1);
 
-	if ((res & 0x80) == 0)
+	memory_set_opcode_base(cpu,rom+diff);
+
+	for (A = 0;A < diff;A++)
 	{
-		res |= 0x55;
-		res &= bits[cheat];
-		cheat = (++cheat)%4;
+		rom[A+diff] = decodebyte(rom[A],A);
 	}
-	return res;
 }
 
+void konami1_decode(void)
+{
+	decode(0);
+}
+
+void konami1_decode_cpu4(void)
+{
+	decode(3);
+}

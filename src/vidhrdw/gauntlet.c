@@ -1,439 +1,529 @@
 /***************************************************************************
 
-  vidhrdw.c
+	Atari Gauntlet hardware
 
-  Functions to emulate the video hardware of the machine.
+****************************************************************************/
 
-***************************************************************************/
 
 #include "driver.h"
+#include "machine/atarigen.h"
 #include "vidhrdw/generic.h"
 
-#define XDIM 42
-#define YDIM 30
+#define XCHARS 42
+#define YCHARS 30
+
+#define XDIM (XCHARS*8)
+#define YDIM (YCHARS*8)
 
 
-/*
- *		Globals we own
- */
 
-unsigned char *gauntlet_playfieldram;
-unsigned char *gauntlet_spriteram;
-unsigned char *gauntlet_alpharam;
-unsigned char *gauntlet_paletteram;
-unsigned char *gauntlet_vscroll;
-unsigned char *gauntlet_hscroll;
-unsigned char *gauntlet_bank3;
+/*************************************
+ *
+ *	Globals we own
+ *
+ *************************************/
 
-int gauntlet_playfieldram_size;
-int gauntlet_spriteram_size;
-int gauntlet_alpharam_size;
-int gauntlet_paletteram_size;
+UINT8 vindctr2_screen_refresh;
 
 
-/*
- *		Statics
- */
 
-static unsigned char *playfielddirty;
-static unsigned char *colordirty;
-static unsigned char *spritevisit;
+/*************************************
+ *
+ *	Statics
+ *
+ *************************************/
 
-static struct osd_bitmap *playfieldbitmap;
+struct mo_data
+{
+	struct osd_bitmap *bitmap;
+	UINT8 color_xor;
+};
 
-static unsigned char trans_count_col[XDIM];
-static unsigned char trans_count_row[YDIM];
+static struct atarigen_pf_state pf_state;
 
-static int current_head;
-static int current_head_link;
-
-
-/*
- *		Prototypes from other modules
- */
-
-int gauntlet_system_start (void);
-int gauntlet_system_stop (void);
-
-void gauntlet_vh_stop (void);
+static UINT8 playfield_color_base;
 
 
-/*
- *   video system start; we also initialize the system memory as well here
- */
+
+/*************************************
+ *
+ *	Prototypes
+ *
+ *************************************/
+
+static const UINT8 *update_palette(void);
+
+static void pf_color_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *data);
+static void pf_render_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *data);
+static void pf_overrender_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *param);
+
+static void mo_color_callback(const UINT16 *data, const struct rectangle *clip, void *param);
+static void mo_render_callback(const UINT16 *data, const struct rectangle *clip, void *param);
+
+
+
+/*************************************
+ *
+ *	Video system start
+ *
+ *************************************/
 
 int gauntlet_vh_start(void)
 {
-	/* allocate dirty buffers */
-	if (!playfielddirty)
-		playfielddirty = calloc (gauntlet_playfieldram_size/2 + gauntlet_paletteram_size/2 +
-		                         gauntlet_spriteram_size/8, 1);
-	if (!playfielddirty)
+	static struct atarigen_mo_desc mo_desc =
 	{
-		gauntlet_vh_stop ();
+		1024,                /* maximum number of MO's */
+		2,                   /* number of bytes per MO entry */
+		0x800,               /* number of bytes between MO words */
+		3,                   /* ignore an entry if this word == 0xffff */
+		3, 0, 0x3ff,         /* link = (data[linkword] >> linkshift) & linkmask */
+		0                    /* render in reverse link order */
+	};
+
+	static struct atarigen_pf_desc pf_desc =
+	{
+		8, 8,				/* width/height of each tile */
+		64, 64				/* number of tiles in each direction */
+	};
+
+	/* reset statics */
+	memset(&pf_state, 0, sizeof(pf_state));
+	playfield_color_base = vindctr2_screen_refresh ? 0x10 : 0x18;
+
+	/* initialize the playfield */
+	if (atarigen_pf_init(&pf_desc))
+		return 1;
+
+	/* initialize the motion objects */
+	if (atarigen_mo_init(&mo_desc))
+	{
+		atarigen_pf_free();
 		return 1;
 	}
-	colordirty = playfielddirty + gauntlet_playfieldram_size/2;
-	spritevisit = colordirty + gauntlet_paletteram_size/2;
-
-	/* allocate bitmaps */
-	if (!playfieldbitmap)
-		playfieldbitmap = osd_new_bitmap (64*8, 64*8, Machine->scrbitmap->depth);
-	if (!playfieldbitmap)
-	{
-		gauntlet_vh_stop ();
-		return 1;
-	}
-
-	/* initialize the transparency trackers */
-	memset (trans_count_col, YDIM, sizeof (trans_count_col));
-	memset (trans_count_row, XDIM, sizeof (trans_count_row));
-
-	current_head = current_head_link = 0;
 
 	return 0;
 }
 
 
-/*
- *   video system shutdown; we also bring down the system memory as well here
- */
+
+/*************************************
+ *
+ *	Video system shutdown
+ *
+ *************************************/
 
 void gauntlet_vh_stop(void)
 {
-	/* free bitmaps */
-	if (playfieldbitmap)
-		osd_free_bitmap (playfieldbitmap);
-	playfieldbitmap = 0;
-
-	/* free dirty buffers */
-	if (playfielddirty)
-		free (playfielddirty);
-	playfielddirty = colordirty = spritevisit = 0;
+	atarigen_pf_free();
+	atarigen_mo_free();
 }
 
 
-/*
- *   vertical scroll read/write handlers
- */
 
-int gauntlet_vscroll_r (int offset)
+/*************************************
+ *
+ *	Horizontal scroll register
+ *
+ *************************************/
+
+WRITE_HANDLER( gauntlet_hscroll_w )
 {
-	return READ_WORD (&gauntlet_vscroll[offset]);
+	/* update memory */
+	int oldword = READ_WORD(&atarigen_hscroll[offset]);
+	int newword = COMBINE_WORD(oldword, data);
+	WRITE_WORD(&atarigen_hscroll[offset], newword);
+
+	/* update parameters */
+	pf_state.hscroll = newword & 0x1ff;
+	atarigen_pf_update(&pf_state, cpu_getscanline());
 }
 
-void gauntlet_vscroll_w (int offset, int data)
-{
-	int oldword = READ_WORD (&gauntlet_vscroll[offset]);
-	int newword = COMBINE_WORD (oldword, data);
-	WRITE_WORD (&gauntlet_vscroll[offset], newword);
 
-	/* invalidate the entire playfield if we're switching ROM banks */
-	if (offset == 2 && (oldword & 3) != (newword & 3))
-		memset (playfielddirty, 1, gauntlet_playfieldram_size / 2);
+
+/*************************************
+ *
+ *	Vertical scroll/PF bank register
+ *
+ *************************************/
+
+WRITE_HANDLER( gauntlet_vscroll_w )
+{
+	/* update memory */
+	int oldword = READ_WORD(&atarigen_vscroll[offset]);
+	int newword = COMBINE_WORD(oldword, data);
+	WRITE_WORD(&atarigen_vscroll[offset], newword);
+
+	/* update parameters */
+	pf_state.vscroll = (newword >> 7) & 0x1ff;
+	pf_state.param[0] = newword & 3;
+	atarigen_pf_update(&pf_state, cpu_getscanline());
 }
 
 
-/*
- *   playfield RAM read/write handlers
- */
 
-int gauntlet_playfieldram_r (int offset)
+/*************************************
+ *
+ *	Playfield RAM write handler
+ *
+ *************************************/
+
+WRITE_HANDLER( gauntlet_playfieldram_w )
 {
-	return READ_WORD (&gauntlet_playfieldram[offset]);
-}
-
-void gauntlet_playfieldram_w (int offset, int data)
-{
-	int oldword = READ_WORD (&gauntlet_playfieldram[offset]);
-	int newword = COMBINE_WORD (oldword, data);
-
+	int oldword = READ_WORD(&atarigen_playfieldram[offset]);
+	int newword = COMBINE_WORD(oldword, data);
 	if (oldword != newword)
 	{
-		WRITE_WORD (&gauntlet_playfieldram[offset], newword);
-		playfielddirty[offset / 2] = 1;
-	}
-}
-
-
-/*
- *   alpha RAM read/write handlers
- */
-
-int gauntlet_alpharam_r (int offset)
-{
-	return READ_WORD (&gauntlet_alpharam[offset]);
-}
-
-void gauntlet_alpharam_w (int offset, int data)
-{
-	int oldword = READ_WORD (&gauntlet_alpharam[offset]);
-	int newword = COMBINE_WORD (oldword, data);
-	WRITE_WORD (&gauntlet_alpharam[offset], newword);
-
-	/* track opacity of rows & columns */
-	if ((oldword ^ newword) & 0x8000)
-	{
-		int sx,sy;
-
-		sx = (offset/2) % 64;
-		sy = (offset/2) / 64;
-
-		if (sx < XDIM && sy < YDIM)
-		{
-			if (newword & 0x8000)
-				trans_count_col[sx]--, trans_count_row[sy]--;
-			else
-				trans_count_col[sx]++, trans_count_row[sy]++;
-		}
-	}
-}
-
-
-/*
- *   palette RAM read/write handlers
- */
-
-int gauntlet_paletteram_r (int offset)
-{
-	return READ_WORD (&gauntlet_paletteram[offset]);
-}
-
-void gauntlet_paletteram_w (int offset, int data)
-{
-	int oldword = READ_WORD (&gauntlet_paletteram[offset]);
-	int newword = COMBINE_WORD (oldword, data);
-
-	if (oldword != newword)
-	{
-		WRITE_WORD (&gauntlet_paletteram[offset], newword);
-		colordirty[offset / 2] = 1;
+		WRITE_WORD(&atarigen_playfieldram[offset], newword);
+		atarigen_pf_dirty[offset / 2] = 0xff;
 	}
 }
 
 
 
-/***************************************************************************
+/*************************************
+ *
+ *	Periodic scanline updater
+ *
+ *************************************/
 
-  Draw the game screen in the given osd_bitmap.
-  Do NOT call osd_update_display() from this function, it will be called by
-  the main emulation engine.
-
-***************************************************************************/
-
-void gauntlet_vh_screenrefresh(struct osd_bitmap *bitmap)
+void gauntlet_scanline_update(int scanline)
 {
-	unsigned char smalldirty[64];
-	struct rectangle clip;
-	int xscroll, yscroll;
-	int offs, bank, link;
-	int x, y, sx, sy, xoffs, yoffs;
+	atarigen_mo_update_slip_512(atarigen_spriteram, pf_state.vscroll, scanline, &atarigen_alpharam[0xf80]);
+}
 
 
-	/* clip out any rows and columns that are completely covered by characters */
-	for (x = 0; x < XDIM; x++)
-		if (trans_count_col[x]) break;
-	clip.min_x = x*8;
 
-	for (x = XDIM-1; x > 0; x--)
-		if (trans_count_col[x]) break;
-	clip.max_x = x*8+7;
+/*************************************
+ *
+ *	Main refresh
+ *
+ *************************************/
 
-	for (y = 0; y < YDIM; y++)
-		if (trans_count_row[y]) break;
-	clip.min_y = y*8;
+void gauntlet_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+{
+	/* update the palette, and mark things dirty */
+	if (update_palette())
+		memset(atarigen_pf_dirty, 0xff, atarigen_playfieldram_size / 2);
 
-	for (y = YDIM-1; y > 0; y--)
-		if (trans_count_row[y]) break;
-	clip.max_y = y*8+7;
+	/* draw the playfield */
+	memset(atarigen_pf_visit, 0, 64*64);
+	atarigen_pf_process(pf_render_callback, bitmap, &Machine->visible_area);
 
+	/* draw the motion objects */
+	atarigen_mo_process(mo_render_callback, bitmap);
 
-	/* update the colors */
-	memset (smalldirty, 0, sizeof (smalldirty));
-	for (offs = gauntlet_paletteram_size - 2; offs >= 0; offs -= 2)
+	/* draw the alphanumerics */
 	{
-		if (colordirty[offs / 2])
-		{
-			int palette = READ_WORD (&gauntlet_paletteram[offs]);
-			int inten = (palette >> 12) & 15;
-			int red = ((palette >> 8) & 15) * inten + inten;
-			int green = ((palette >> 4) & 15) * inten + inten;
-			int blue = (palette & 15) * inten + inten;
+		const struct GfxElement *gfx = Machine->gfx[1];
+		int x, y, offs;
 
-			int index = offs / 2;
-			smalldirty[index >> 4] = 1;
-
-			setgfxcolorentry (Machine, index, red, green, blue);
-
-			colordirty[offs / 2] = 0;
-		}
-	}
-
-
-	/* mark any tiles containing dirty colors dirty now */
-	for (offs = gauntlet_playfieldram_size - 2; offs >= 0; offs -= 2)
-	{
-		int color = ((READ_WORD (&gauntlet_playfieldram[offs]) >> 12) & 7) + 0x18;
-		if (smalldirty[color+16])
-			playfielddirty[offs/2] = 1;
-	}
-
-
-	/* compute scrolling so we know what to update */
-	xscroll = READ_WORD (&gauntlet_hscroll[0]);
-	yscroll = READ_WORD (&gauntlet_vscroll[2]);
-	xscroll = -(xscroll & 0x1ff);
-	yscroll = -((yscroll >> 7) & 0x1ff);
-
-
-	/* update only the portion of the playfield that's visible. */
-	bank = (READ_WORD (&gauntlet_vscroll[2]) & 3) << 12;
-	xoffs = (-xscroll/8) + (clip.min_x/8);
-	yoffs = (-yscroll/8) + (clip.min_y/8);
-	for (y = yoffs + (clip.max_y-clip.min_y)/8 + 1; y >= yoffs; y--)
-	{
-		sy = y & 63;
-		for (x = xoffs + clip.max_x/8 + 1; x >= xoffs; x--)
-		{
-			int data, color;
-
-			sx = x & 63;
-			offs = sx * 64 + sy;
-
-			data = READ_WORD (&gauntlet_playfieldram[offs*2]);
-			color = ((data >> 12) & 7) + 0x18;
-
-			if (playfielddirty[offs])
+		for (y = 0; y < YCHARS; y++)
+			for (x = 0, offs = y * 64; x < XCHARS; x++, offs++)
 			{
-				int hflip = (data >> 15) & 1;
-				int pict = bank + (data & 0xfff);
+				int data = READ_WORD(&atarigen_alpharam[offs * 2]);
+				int code = data & 0x3ff;
+				int opaque = data & 0x8000;
 
-				playfielddirty[offs] = 0;
-
-				drawgfx (playfieldbitmap, Machine->gfx[1],
-						pict ^ 0x800, color,
-						hflip, 0,
-						8*sx, 8*sy,
-						0,
-						TRANSPARENCY_NONE, 0);
-			}
-		}
-	}
-
-
-	/* copy the playfield to the destination */
-	copyscrollbitmap (bitmap, playfieldbitmap,
-			1, &xscroll,
-			1, &yscroll,
-			&clip,
-			TRANSPARENCY_NONE, 0);
-
-
-	/* motion objects -- attempt to simulate the real hardware behavior as closely as possible */
-	yoffs = (-yscroll/8) % 64;
-	memset (spritevisit, 0, gauntlet_spriteram_size/8);
-	for (y = 0; y <= YDIM; y++, yoffs = (yoffs + 1) % 64)
-	{
-		/* compute the address of the link list start */
-		offs = 0xf80 + yoffs*2;
-		link = (READ_WORD (&gauntlet_alpharam[offs]) & 0x3ff) * 2;
-
-		/* loop over motion objects until one is clipped */
-		while (!spritevisit[link/2])
-		{
-			int data1 = READ_WORD (&gauntlet_spriteram[link + 0x0000]);
-			int data2 = READ_WORD (&gauntlet_spriteram[link + 0x0800]);
-			int data3 = READ_WORD (&gauntlet_spriteram[link + 0x1000]);
-			int data4 = READ_WORD (&gauntlet_spriteram[link + 0x1800]);
-
-			/* extract data from the various words */
-			int pict = data1 & 0x7fff;
-			int color = (data2 & 0x0f);
-			int xpos = xscroll + (data2 >> 7);
-			int vsize = (data3 & 7) + 1;
-			int hsize = ((data3 >> 3) & 7) + 1;
-			int hflip = ((data3 >> 6) & 1);
-			int ypos = yscroll - (data3 >> 7) - vsize * 8;
-			int x, y;
-
-			/* h-flip case is handled differently */
-			if (hflip)
-			{
-				for (y = 0; y < vsize; y++)
+				if (code || opaque)
 				{
-					/* wrap and clip the Y coordinate */
-					int ty = (ypos + y*8) & 0x1ff;
-					if (ty > 0x1f8) ty -= 0x200;
-					if (ty <= -8 || ty >= YDIM*8)
-					{
-						pict += hsize;
-						continue;
-					}
-
-					for (x = 0; x < hsize; x++, pict++)
-					{
-						/* wrap and clip the X coordinate */
-						int tx = (xpos + (hsize-x-1)*8) & 0x1ff;
-						if (tx > 0x1f8) tx -= 0x200;
-						if (tx <= -8 || tx >= XDIM*8) continue;
-
-						drawgfx (bitmap, Machine->gfx[1],
-								pict ^ 0x800, color, 1, 0, tx, ty, &clip, TRANSPARENCY_PEN, 0);
-					}
+					int color = ((data >> 10) & 0xf) | ((data >> 9) & 0x20);
+					drawgfx(bitmap, gfx, code, color, 0, 0, 8 * x, 8 * y, 0, opaque ? TRANSPARENCY_NONE : TRANSPARENCY_PEN, 0);
 				}
 			}
-			else
-			{
-				for (y = 0; y < vsize; y++)
-				{
-					/* wrap and clip the Y coordinate */
-					int ty = (ypos + y*8) & 0x1ff;
-					if (ty > 0x1f8) ty -= 0x200;
-					if (ty <= -8 || ty >= YDIM*8)
-					{
-						pict += hsize;
-						continue;
-					}
-
-					for (x = 0; x < hsize; x++, pict++)
-					{
-						/* wrap and clip the X coordinate */
-						int tx = (xpos + x*8) & 0x1ff;
-						if (tx > 0x1f8) tx -= 0x200;
-						if (tx <= -8 || tx >= XDIM*8) continue;
-
-						drawgfx (bitmap, Machine->gfx[1],
-								pict ^ 0x800, color, 0, 0, tx, ty, &clip, TRANSPARENCY_PEN, 0);
-					}
-				}
-			}
-
-			/* get a link to the next sprite */
-			spritevisit[link/2] = 1;
-			link = (data4 & 0x3ff) * 2;
-		}
 	}
 
+	/* update onscreen messages */
+	atarigen_update_messages();
+}
 
-	/* redraw the alpha layer completely */
-	for (sy = 0; sy < YDIM; sy++)
+
+
+/*************************************
+ *
+ *	Palette management
+ *
+ *************************************/
+
+static const UINT8 *update_palette(void)
+{
+	UINT16 pf_map[32], al_map[64], mo_map[16];
+	int i, j;
+
+	/* reset color tracking */
+	memset(mo_map, 0, sizeof(mo_map));
+	memset(pf_map, 0, sizeof(pf_map));
+	memset(al_map, 0, sizeof(al_map));
+	palette_init_used_colors();
+
+	/* update color usage for the playfield */
+	atarigen_pf_process(pf_color_callback, pf_map, &Machine->visible_area);
+
+	/* update color usage for the mo's */
+	atarigen_mo_process(mo_color_callback, mo_map);
+
+	/* update color usage for the alphanumerics */
 	{
-		for (sx = 0, offs = sy*64; sx < XDIM; sx++, offs++)
-		{
-			int data = READ_WORD (&gauntlet_alpharam[offs*2]);
-			int pict = (data & 0x3ff);
+		const unsigned int *usage = Machine->gfx[1]->pen_usage;
+		int x, y, offs;
 
-			if (pict || (data & 0x8000))
+		for (y = 0; y < YCHARS; y++)
+			for (x = 0, offs = y * 64; x < XCHARS; x++, offs++)
 			{
+				int data = READ_WORD(&atarigen_alpharam[offs * 2]);
+				int code = data & 0x3ff;
 				int color = ((data >> 10) & 0xf) | ((data >> 9) & 0x20);
-
-				drawgfx (bitmap, Machine->gfx[0],
-						pict, color,
-						0, 0,
-						8*sx, 8*sy,
-						0,
-						(data & 0x8000) ? TRANSPARENCY_NONE : TRANSPARENCY_PEN, 0);
+				al_map[color] |= usage[code];
 			}
+	}
+
+	/* rebuild the playfield palette */
+	for (i = 0; i < 16; i++)
+	{
+		UINT16 used = pf_map[i + 16];
+		if (used)
+			for (j = 0; j < 16; j++)
+				if (used & (1 << j))
+					palette_used_colors[0x200 + i * 16 + j] = PALETTE_COLOR_USED;
+	}
+
+	/* rebuild the motion object palette */
+	for (i = 0; i < 16; i++)
+	{
+		UINT16 used = mo_map[i];
+		if (used)
+		{
+			palette_used_colors[0x100 + i * 16 + 0] = PALETTE_COLOR_TRANSPARENT;
+			palette_used_colors[0x100 + i * 16 + 1] = PALETTE_COLOR_TRANSPARENT;
+			for (j = 2; j < 16; j++)
+				if (used & (1 << j))
+					palette_used_colors[0x100 + i * 16 + j] = PALETTE_COLOR_USED;
 		}
+	}
+
+	/* rebuild the alphanumerics palette */
+	for (i = 0; i < 64; i++)
+	{
+		UINT16 used = al_map[i];
+		if (used)
+			for (j = 0; j < 4; j++)
+				if (used & (1 << j))
+					palette_used_colors[0x000 + i * 4 + j] = PALETTE_COLOR_USED;
+	}
+
+	/* recalc */
+	return palette_recalc();
+}
+
+
+
+/*************************************
+ *
+ *	Playfield palette
+ *
+ *************************************/
+
+static void pf_color_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *param)
+{
+	const unsigned int *usage = &Machine->gfx[0]->pen_usage[state->param[0] * 0x1000];
+	UINT16 *colormap = (UINT16 *)param;
+	int x, y;
+
+	for (y = tiles->min_y; y != tiles->max_y; y = (y + 1) & 63)
+		for (x = tiles->min_x; x != tiles->max_x; x = (x + 1) & 63)
+		{
+			int offs = x * 64 + y;
+			int data = READ_WORD(&atarigen_playfieldram[offs * 2]);
+			int code = (data & 0xfff) ^ 0x800;
+			int color = playfield_color_base + ((data >> 12) & 7);
+			colormap[color] |= usage[code];
+			colormap[color ^ 8] |= usage[code];
+
+			/* also mark unvisited tiles dirty */
+			if (!atarigen_pf_visit[offs]) atarigen_pf_dirty[offs] = 0xff;
+		}
+}
+
+
+
+/*************************************
+ *
+ *	Playfield rendering
+ *
+ *************************************/
+
+static void pf_render_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *param)
+{
+	const struct GfxElement *gfx = Machine->gfx[0];
+	struct osd_bitmap *bitmap = param;
+	int bank = state->param[0];
+	int x, y;
+
+	/* first update any tiles whose color is out of date */
+	for (y = tiles->min_y; y != tiles->max_y; y = (y + 1) & 63)
+		for (x = tiles->min_x; x != tiles->max_x; x = (x + 1) & 63)
+		{
+			int offs = x * 64 + y;
+			int data = READ_WORD(&atarigen_playfieldram[offs * 2]);
+
+			if (atarigen_pf_dirty[offs] != bank)
+			{
+				int color = playfield_color_base + ((data >> 12) & 7);
+				int code = bank * 0x1000 + ((data & 0xfff) ^ 0x800);
+				int hflip = data & 0x8000;
+
+				drawgfx(atarigen_pf_bitmap, gfx, code, color, hflip, 0, 8 * x, 8 * y, 0, TRANSPARENCY_NONE, 0);
+				atarigen_pf_dirty[offs] = bank;
+			}
+
+			/* track the tiles we've visited */
+			atarigen_pf_visit[offs] = 1;
+		}
+
+	/* then blast the result */
+	x = -state->hscroll;
+	y = -state->vscroll;
+	copyscrollbitmap(bitmap, atarigen_pf_bitmap, 1, &x, 1, &y, clip, TRANSPARENCY_NONE, 0);
+}
+
+
+
+/*************************************
+ *
+ *	Playfield overrendering
+ *
+ *************************************/
+
+static void pf_overrender_callback(const struct rectangle *clip, const struct rectangle *tiles, const struct atarigen_pf_state *state, void *param)
+{
+	const struct GfxElement *gfx = Machine->gfx[0];
+	const struct mo_data *modata = param;
+	struct osd_bitmap *bitmap = modata->bitmap;
+	int color_xor = modata->color_xor;
+	int bank = state->param[0];
+	int x, y;
+
+	/* first update any tiles whose color is out of date */
+	for (y = tiles->min_y; y != tiles->max_y; y = (y + 1) & 63)
+	{
+		int sy = (8 * y - state->vscroll) & 0x1ff;
+		if (sy >= YDIM) sy -= 0x200;
+
+		for (x = tiles->min_x; x != tiles->max_x; x = (x + 1) & 63)
+		{
+			int offs = x * 64 + y;
+			int data = READ_WORD(&atarigen_playfieldram[offs * 2]);
+			int color = playfield_color_base + ((data >> 12) & 7);
+			int code = bank * 0x1000 + ((data & 0xfff) ^ 0x800);
+			int hflip = data & 0x8000;
+			int sx = (8 * x - state->hscroll) & 0x1ff;
+			if (sx >= XDIM) sx -= 0x200;
+
+			drawgfx(bitmap, gfx, code, color ^ color_xor, hflip, 0, sx, sy, 0, TRANSPARENCY_THROUGH, palette_transparent_pen);
+		}
+	}
+}
+
+
+
+/*************************************
+ *
+ *	Motion object palette
+ *
+ *************************************/
+
+static void mo_color_callback(const UINT16 *data, const struct rectangle *clip, void *param)
+{
+	const unsigned int *usage = Machine->gfx[0]->pen_usage;
+	UINT16 *colormap = param;
+	int code = (data[0] & 0x7fff) ^ 0x800;
+	int hsize = ((data[2] >> 3) & 7) + 1;
+	int vsize = (data[2] & 7) + 1;
+	int color = data[1] & 0x000f;
+	int tiles = hsize * vsize;
+	UINT16 temp = 0;
+	int i;
+
+	for (i = 0; i < tiles; i++)
+		temp |= usage[code++];
+	colormap[color] |= temp;
+}
+
+
+
+/*************************************
+ *
+ *	Motion object rendering
+ *
+ *************************************/
+
+static void mo_render_callback(const UINT16 *data, const struct rectangle *clip, void *param)
+{
+	const struct GfxElement *gfx = Machine->gfx[0];
+	const unsigned int *usage = gfx->pen_usage;
+	unsigned int total_usage = 0;
+	struct osd_bitmap *bitmap = param;
+	struct rectangle pf_clip;
+	int x, y, sx, sy;
+
+	/* extract data from the various words */
+	int code = (data[0] & 0x7fff) ^ 0x800;
+	int color = data[1] & 0x000f;
+	int ypos = -pf_state.vscroll - (data[2] >> 7);
+	int hflip = data[2] & 0x0040;
+	int hsize = ((data[2] >> 3) & 7) + 1;
+	int vsize = (data[2] & 7) + 1;
+	int xpos = -pf_state.hscroll + (data[1] >> 7);
+	int xadv;
+
+	/* adjust for height */
+	ypos -= vsize * 8;
+
+	/* adjust the final coordinates */
+	xpos &= 0x1ff;
+	ypos &= 0x1ff;
+	if (xpos >= XDIM) xpos -= 0x200;
+	if (ypos >= YDIM) ypos -= 0x200;
+
+	/* determine the bounding box */
+	atarigen_mo_compute_clip_8x8(pf_clip, xpos, ypos, hsize, vsize, clip);
+
+	/* adjust for h flip */
+	if (hflip)
+		xpos += (hsize - 1) * 8, xadv = -8;
+	else
+		xadv = 8;
+
+	/* loop over the height */
+	for (y = 0, sy = ypos; y < vsize; y++, sy += 8)
+	{
+		/* clip the Y coordinate */
+		if (sy <= clip->min_y - 8)
+		{
+			code += hsize;
+			continue;
+		}
+		else if (sy > clip->max_y)
+			break;
+
+		/* loop over the width */
+		for (x = 0, sx = xpos; x < hsize; x++, sx += xadv, code++)
+		{
+			/* clip the X coordinate */
+			if (sx <= -8 || sx >= XDIM)
+				continue;
+
+			/* draw the sprite */
+			drawgfx(bitmap, gfx, code, color, hflip, 0, sx, sy, clip, TRANSPARENCY_PEN, 0);
+			total_usage |= usage[code];
+		}
+	}
+
+	/* overrender the playfield */
+	if (total_usage & 0x0002)
+	{
+		struct mo_data modata;
+		modata.bitmap = bitmap;
+		modata.color_xor = (color == 0 && vindctr2_screen_refresh) ? 0 : 8;
+		atarigen_pf_process(pf_overrender_callback, &modata, &pf_clip);
 	}
 }

@@ -30,20 +30,20 @@ write:
 6090      write command to sound CPU
 7000      watchdog reset
 7100      NMI interrupt acknowledge/enable
-7200      ?
+7200      flip screen
 
 Interrupts: VBlank -> NMI.
 			IRQ -> send sound commands to sound cpu. Runs in interrupt mode 1
 
 SOUND CPU:
 0000-1fff ROM
-2000-23ff RAM (?)
+2000-23ff RAM
 
 read:
 6000      read command from main CPU
 
 write:
-4000      ? watchdog ?
+4000      NMI enable
 6000      write command back to main CPU
 
 Interrupts: IRQs are triggered by writes to the sound_command location 0x6000 - im 1
@@ -60,29 +60,41 @@ B ?
 
 #include "driver.h"
 #include "vidhrdw/generic.h"
+#include "cpu/z80/z80.h"
 
 
-
-void espial_init_machine(void);
-void espial_interrupt_enable_w(int offset,int data);
-int espial_interrupt(void);
 
 extern unsigned char *espial_attributeram;
 extern unsigned char *espial_column_scroll;
-void espial_attributeram_w(int offset,int data);
-void espial_vh_convert_color_prom(unsigned char *palette, unsigned char *colortable,const unsigned char *color_prom);
-void espial_vh_screenrefresh(struct osd_bitmap *bitmap);
-
-int espial_sh_interrupt(void);
+WRITE_HANDLER( espial_attributeram_w );
+void espial_vh_convert_color_prom(unsigned char *palette, unsigned short *colortable,const unsigned char *color_prom);
+void espial_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh);
 
 
-
-/* Send sound data to the sound cpu and cause an irq */
-void espial_sound_command_w (int offset, int data)
+void espial_init_machine(void)
 {
-	/* The sound cpu runs in interrupt mode 1 */
-	soundlatch_w(0,data);
-	cpu_cause_interrupt(1,0xff);
+	/* we must start with NMI interrupts disabled */
+	//interrupt_enable = 0;
+	interrupt_enable_w(0, 0);
+}
+
+
+WRITE_HANDLER( zodiac_master_interrupt_enable_w )
+{
+	interrupt_enable_w(offset, data ^ 1);
+}
+
+
+int zodiac_master_interrupt(void)
+{
+	return (cpu_getiloops() == 0) ? nmi_interrupt() : interrupt();
+}
+
+
+WRITE_HANDLER( zodiac_master_soundlatch_w )
+{
+	soundlatch_w(offset, data);
+	cpu_cause_interrupt(1, Z80_IRQ_INT);
 }
 
 
@@ -94,15 +106,14 @@ static struct MemoryReadAddress readmem[] =
 	{ 0x7000, 0x7000, MRA_RAM },	/* ?? */
 	{ 0x8000, 0x803f, MRA_RAM },
 	{ 0x8400, 0x87ff, MRA_RAM },
-	{ 0x8c00, 0x8fff, MRA_RAM },
-	{ 0x9000, 0x903f, MRA_RAM },
+	{ 0x8c00, 0x903f, MRA_RAM },
 	{ 0x9400, 0x97ff, MRA_RAM },
-	{ 0xc000, 0xcfff, MRA_ROM },
 	{ 0x6081, 0x6081, input_port_0_r },	/* IN0 */
 	{ 0x6082, 0x6082, input_port_1_r },	/* IN1 */
 	{ 0x6083, 0x6083, input_port_2_r },	/* IN2 */
 	{ 0x6084, 0x6084, input_port_3_r },	/* IN3 */
-	{ 0x6090, 0x6090, soundlatch_r },	/* the main CPU reads the command back from the slave? */
+	{ 0x6090, 0x6090, soundlatch_r },	/* the main CPU reads the command back from the slave */
+	{ 0xc000, 0xcfff, MRA_ROM },
 	{ -1 }	/* end of table */
 };
 
@@ -110,9 +121,9 @@ static struct MemoryWriteAddress writemem[] =
 {
 	{ 0x0000, 0x4fff, MWA_ROM },
 	{ 0x5800, 0x5fff, MWA_RAM },
-	{ 0x6090, 0x6090, espial_sound_command_w },
-	{ 0x7000, 0x7000, MWA_RAM }, /* watchdog reset */
-	{ 0x7100, 0x7100, espial_interrupt_enable_w },
+	{ 0x6090, 0x6090, zodiac_master_soundlatch_w },
+	{ 0x7000, 0x7000, watchdog_reset_w },
+	{ 0x7100, 0x7100, zodiac_master_interrupt_enable_w },
 	{ 0x8000, 0x801f, MWA_RAM, &spriteram, &spriteram_size },
 	{ 0x8400, 0x87ff, videoram_w, &videoram, &videoram_size },
 	{ 0x8800, 0x880f, MWA_RAM, &spriteram_3 },
@@ -137,7 +148,7 @@ static struct MemoryWriteAddress sound_writemem[] =
 {
 	{ 0x0000, 0x1fff, MWA_ROM },
 	{ 0x2000, 0x23ff, MWA_RAM },
-	{ 0x4000, 0x4000, MWA_NOP },
+	{ 0x4000, 0x4000, interrupt_enable_w },
 	{ 0x6000, 0x6000, soundlatch_w },
 	{ -1 }	/* end of table */
 };
@@ -150,10 +161,14 @@ static struct IOWritePort sound_writeport[] =
 };
 
 
-INPUT_PORTS_START( espial_input_ports )
+INPUT_PORTS_START( espial )
 	PORT_START	/* IN0 */
-	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_UNKNOWN )
-	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_UNKNOWN )
+	PORT_DIPNAME( 0x01, 0x00, "Fire Buttons" )
+	PORT_DIPSETTING(    0x01, "1" )
+	PORT_DIPSETTING(    0x00, "2" )
+	PORT_DIPNAME( 0x02, 0x02, "CounterAttack" )	/* you can shoot bullets */
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x02, DEF_STR( On ) )
 	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_UNKNOWN )
@@ -162,32 +177,49 @@ INPUT_PORTS_START( espial_input_ports )
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 
 	PORT_START	/* IN1 */
-	PORT_DIPNAME( 0x03, 0x00, "Lives", IP_KEY_NONE )
+	PORT_DIPNAME( 0x03, 0x00, DEF_STR( Lives ) )
 	PORT_DIPSETTING(    0x00, "3" )
 	PORT_DIPSETTING(    0x01, "4" )
 	PORT_DIPSETTING(    0x02, "5" )
 	PORT_DIPSETTING(    0x03, "6" )
-	PORT_BIT( 0xfc, IP_ACTIVE_HIGH, IPT_UNKNOWN )
+	PORT_DIPNAME( 0x1c, 0x00, DEF_STR( Coin_A ) )
+	PORT_DIPSETTING(    0x14, DEF_STR( 2C_1C ) )
+	PORT_DIPSETTING(    0x18, DEF_STR( 3C_2C ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( 1C_1C ) )
+	PORT_DIPSETTING(    0x04, DEF_STR( 1C_2C ) )
+	PORT_DIPSETTING(    0x08, DEF_STR( 1C_3C ) )
+	PORT_DIPSETTING(    0x0c, DEF_STR( 1C_4C ) )
+	PORT_DIPSETTING(    0x10, DEF_STR( 1C_6C ) )
+	PORT_DIPSETTING(    0x1c, DEF_STR( Free_Play ) )
+	PORT_DIPNAME( 0x20, 0x00, DEF_STR( Bonus_Life ) )
+	PORT_DIPSETTING(	0x00, "20k and every 70k" )
+	PORT_DIPSETTING(	0x20, "50k and every 100k" )
+	PORT_DIPNAME( 0x40, 0x40, DEF_STR( Cabinet ) )
+	PORT_DIPSETTING(	0x40, DEF_STR( Upright ) )
+	PORT_DIPSETTING(	0x00, DEF_STR( Cocktail ) )
+	PORT_DIPNAME( 0x80, 0x00, "Test Mode" )	/* ??? */
+	PORT_DIPSETTING(	0x00, "Normal" )
+	PORT_DIPSETTING(	0x80, "Test" )
 
 	PORT_START	/* IN2 */
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_START1 )
 	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_START2 )
-	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_UNKNOWN )
-	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_UNKNOWN )
-	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_UNKNOWN )
-	PORT_BIT( 0x20, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN | IPF_8WAY )
-	PORT_BIT( 0x40, IP_ACTIVE_HIGH, IPT_UNKNOWN )
-	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_UNKNOWN )
+	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT  | IPF_8WAY | IPF_PLAYER2 )
+	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT | IPF_8WAY | IPF_PLAYER2 )
+	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP    | IPF_8WAY | IPF_PLAYER2 )
+	PORT_BIT( 0x20, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN  | IPF_8WAY )
+	PORT_BIT( 0x40, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN  | IPF_8WAY | IPF_PLAYER2 )
+	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_BUTTON1 | IPF_PLAYER2 )
 
 	PORT_START	/* IN3 */
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_COIN1 )
 	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_UNKNOWN )
 	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT | IPF_8WAY )
-	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP | IPF_8WAY )
-	PORT_BIT( 0x20, IP_ACTIVE_HIGH, IPT_UNKNOWN )
+	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP    | IPF_8WAY )
+	PORT_BIT( 0x20, IP_ACTIVE_HIGH, IPT_BUTTON2 | IPF_PLAYER2 )
 	PORT_BIT( 0x40, IP_ACTIVE_HIGH, IPT_BUTTON2 )
-	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT | IPF_8WAY )
+	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT  | IPF_8WAY )
 INPUT_PORTS_END
 
 
@@ -219,49 +251,9 @@ static struct GfxLayout spritelayout =
 
 static struct GfxDecodeInfo gfxdecodeinfo[] =
 {
-	{ 1, 0x0000, &charlayout,    0, 64 },
-	{ 1, 0x3000, &spritelayout,  0, 64 },
+	{ REGION_GFX1, 0, &charlayout,    0, 64 },
+	{ REGION_GFX2, 0, &spritelayout,  0, 64 },
 	{ -1 } /* end of array */
-};
-
-
-
-static unsigned char color_prom[] =
-{
-	/* 1f - palette low 4 bits */
-	0x00,0x00,0x06,0x00,0x03,0x00,0x06,0x00,0x00,0x00,0x07,0x00,0x00,0x08,0x08,0x05,
-	0x00,0x0D,0x08,0x0A,0x00,0x00,0x00,0x00,0x00,0x0E,0x06,0x0F,0x00,0x00,0x00,0x00,
-	0x00,0x0F,0x08,0x07,0x00,0x06,0x0F,0x0C,0x00,0x06,0x00,0x09,0x00,0x06,0x06,0x07,
-	0x00,0x00,0x00,0x0F,0x00,0x00,0x00,0x06,0x00,0x00,0x00,0x07,0x00,0x00,0x00,0x0F,
-	0x00,0x06,0x07,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x0F,0x05,0x0B,0x00,0x00,0x00,0x00,0x00,0x0F,0x07,0x06,0x00,0x0E,0x03,0x06,
-	0x00,0x00,0x00,0x00,0x00,0x05,0x08,0x08,0x0D,0x02,0x06,0x00,0x0D,0x05,0x06,0x00,
-	0x0D,0x07,0x06,0x00,0x00,0x07,0x06,0x0F,0x04,0x0F,0x07,0x06,0x0D,0x0F,0x07,0x06,
-	0x04,0x00,0x00,0x06,0x04,0x09,0x00,0x06,0x04,0x06,0x03,0x02,0x00,0x07,0x06,0x00,
-	0x00,0x00,0x06,0x04,0x04,0x00,0x06,0x00,0x00,0x04,0x02,0x05,0x0D,0x08,0x08,0x08,
-	0x04,0x0D,0x03,0x0B,0x04,0x0B,0x03,0x0D,0x04,0x0D,0x03,0x00,0x04,0x0B,0x03,0x00,
-	0x02,0x00,0x03,0x08,0x05,0x00,0x03,0x08,0x07,0x00,0x03,0x08,0x0D,0x05,0x06,0x04,
-	0x00,0x08,0x03,0x08,0x0D,0x0D,0x00,0x02,0x00,0x0D,0x0C,0x02,0x00,0x00,0x00,0x00,
-	0x0D,0x00,0x00,0x00,0x0D,0x00,0x06,0x00,0x00,0x0C,0x0E,0x02,0x00,0x02,0x03,0x08,
-	0x00,0x0C,0x0E,0x02,0x00,0x0C,0x0D,0x08,0x0D,0x0B,0x02,0x03,0x0D,0x02,0x0B,0x0B,
-	0x00,0x05,0x07,0x04,0x00,0x03,0x0C,0x08,0x0D,0x0A,0x06,0x00,0x0D,0x0A,0x06,0x00,
-	/* 1h - palette high 4 bits */
-	0x00,0x08,0x0F,0x0F,0x08,0x00,0x0F,0x00,0x00,0x00,0x00,0x00,0x00,0x0C,0x0E,0x0F,
-	0x00,0x0F,0x0A,0x05,0x00,0x00,0x00,0x00,0x00,0x07,0x0F,0x0E,0x00,0x00,0x00,0x00,
-	0x00,0x0F,0x07,0x07,0x00,0x0F,0x0E,0x0F,0x00,0x0F,0x0D,0x0E,0x00,0x0F,0x07,0x06,
-	0x00,0x00,0x00,0x0E,0x00,0x00,0x00,0x0F,0x00,0x00,0x00,0x0F,0x00,0x00,0x00,0x01,
-	0x00,0x0F,0x03,0x0C,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x0F,0x0E,0x08,0x00,0x00,0x00,0x00,0x00,0x03,0x01,0x0F,0x00,0x03,0x0A,0x0F,
-	0x00,0x00,0x00,0x00,0x00,0x0F,0x0E,0x0C,0x0E,0x01,0x0F,0x0F,0x0E,0x01,0x0F,0x0F,
-	0x0E,0x04,0x0F,0x0F,0x00,0x01,0x0F,0x03,0x0A,0x02,0x01,0x0F,0x01,0x02,0x01,0x0F,
-	0x0A,0x00,0x0F,0x0F,0x0A,0x09,0x00,0x0F,0x0A,0x0F,0x04,0x04,0x00,0x04,0x0F,0x0F,
-	0x00,0x08,0x0F,0x0A,0x0A,0x08,0x0F,0x0F,0x00,0x0A,0x0A,0x0E,0x01,0x06,0x0B,0x01,
-	0x0A,0x0E,0x0A,0x0E,0x0A,0x0E,0x0A,0x0E,0x0A,0x0E,0x0A,0x00,0x0A,0x0E,0x0A,0x00,
-	0x01,0x0A,0x0F,0x05,0x01,0x0A,0x0F,0x05,0x01,0x0A,0x0F,0x05,0x01,0x0E,0x0F,0x0C,
-	0x00,0x0E,0x0F,0x09,0x01,0x05,0x04,0x0E,0x04,0x05,0x01,0x0E,0x00,0x00,0x00,0x00,
-	0x01,0x00,0x00,0x00,0x01,0x04,0x0F,0x00,0x00,0x0A,0x0F,0x0A,0x00,0x0E,0x0F,0x09,
-	0x00,0x0A,0x0F,0x0A,0x00,0x0A,0x0F,0x05,0x01,0x08,0x04,0x05,0x01,0x04,0x08,0x05,
-	0x00,0x0A,0x0F,0x04,0x00,0x0A,0x0F,0x09,0x01,0x00,0x02,0x00,0x01,0x00,0x02,0x00
 };
 
 
@@ -270,7 +262,7 @@ static struct AY8910interface ay8910_interface =
 {
 	1,	/* 1 chip */
 	1500000,	/* 1.5 MHZ?????? */
-	{ 255 },
+	{ 50 },
 	{ 0 },
 	{ 0 },
 	{ 0 },
@@ -279,26 +271,24 @@ static struct AY8910interface ay8910_interface =
 
 
 
-static struct MachineDriver machine_driver =
+static struct MachineDriver machine_driver_espial =
 {
 	/* basic machine hardware */
 	{
 		{
 			CPU_Z80,
 			3072000,	/* 3.072 Mhz */
-			0,
 			readmem,writemem,0,0,
-			espial_interrupt,2
+			zodiac_master_interrupt,2
 		},
 		{
-			CPU_Z80 | CPU_AUDIO_CPU,
+			CPU_Z80,
 			3072000,	/* 2 Mhz?????? */
-			2,	/* memory region #2 */
 			sound_readmem,sound_writemem,0,sound_writeport,
-			espial_sh_interrupt,4
+			nmi_interrupt,4
 		}
 	},
-	60, DEFAULT_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
+	60, DEFAULT_REAL_60HZ_VBLANK_DURATION,	/* frames per second, vblank duration */
 	1,	/* 1 CPU slice per frame - interleaving is forced when a sound command is written */
 	espial_init_machine,
 
@@ -332,124 +322,55 @@ static struct MachineDriver machine_driver =
 
 ***************************************************************************/
 
-ROM_START( espial_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "espial.3", 0x0000, 0x2000, 0x0317ae6d )
-	ROM_LOAD( "espial.4", 0x2000, 0x2000, 0xd76ccd4e )
-	ROM_LOAD( "espial.6", 0x4000, 0x1000, 0x472e9fd4 )
-	ROM_LOAD( "espial.5", 0xc000, 0x1000, 0xa295f697 )
+ROM_START( espial )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "espial.3",     0x0000, 0x2000, 0x10f1da30 )
+	ROM_LOAD( "espial.4",     0x2000, 0x2000, 0xd2adbe39 )
+	ROM_LOAD( "espial.6",     0x4000, 0x1000, 0xbaa60bc1 )
+	ROM_LOAD( "espial.5",     0xc000, 0x1000, 0x6d7bbfc1 )
 
-	ROM_REGION(0x5000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "espial.8",  0x0000, 0x2000, 0xc2dfd8e7 )
-	ROM_LOAD( "espial.7",  0x2000, 0x1000, 0x868c222c )
-	ROM_LOAD( "espial.10", 0x3000, 0x1000, 0x43808b36 )
-	ROM_LOAD( "espial.9",  0x4000, 0x1000, 0x04efcefb )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "espial.1",     0x0000, 0x1000, 0x1e5ec20b )
+	ROM_LOAD( "espial.2",     0x1000, 0x1000, 0x3431bb97 )
 
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "espial.1", 0x0000, 0x1000, 0xb3acb1b0 )
-	ROM_LOAD( "espial.2", 0x1000, 0x1000, 0xeec42d68 )
+	ROM_REGION( 0x3000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "espial.8",     0x0000, 0x2000, 0x2f43036f )
+	ROM_LOAD( "espial.7",     0x2000, 0x1000, 0xebfef046 )
+
+	ROM_REGION( 0x2000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "espial.10",    0x0000, 0x1000, 0xde80fbc1 )
+	ROM_LOAD( "espial.9",     0x1000, 0x1000, 0x48c258a0 )
+
+	ROM_REGION( 0x0200, REGION_PROMS )
+	ROM_LOAD( "espial.1f",    0x0000, 0x0100, 0xd12de557 ) /* palette low 4 bits */
+	ROM_LOAD( "espial.1h",    0x0100, 0x0100, 0x4c84fe70 ) /* palette high 4 bits */
 ROM_END
 
-ROM_START( espiale_rom )
-	ROM_REGION(0x10000)	/* 64k for code */
-	ROM_LOAD( "2764.3", 0x0000, 0x2000, 0xf57f05b9 )
-	ROM_LOAD( "2764.4", 0x2000, 0x2000, 0x2fc1446b )
-	ROM_LOAD( "2732.6", 0x4000, 0x1000, 0x147f9035 )
-	ROM_LOAD( "2732.5", 0xc000, 0x1000, 0x25bff16d )
+ROM_START( espiale )
+	ROM_REGION( 0x10000, REGION_CPU1 )	/* 64k for code */
+	ROM_LOAD( "2764.3",       0x0000, 0x2000, 0x0973c8a4 )
+	ROM_LOAD( "2764.4",       0x2000, 0x2000, 0x6034d7e5 )
+	ROM_LOAD( "2732.6",       0x4000, 0x1000, 0x357025b4 )
+	ROM_LOAD( "2732.5",       0xc000, 0x1000, 0xd03a2fc4 )
 
-	ROM_REGION(0x5000)	/* temporary space for graphics (disposed after conversion) */
-	ROM_LOAD( "2764.8",  0x0000, 0x2000, 0xc2dfd8e7 )
-	ROM_LOAD( "2732.7",  0x2000, 0x1000, 0x868c222c )
-	ROM_LOAD( "2732.10", 0x3000, 0x1000, 0x43808b36 )
-	ROM_LOAD( "2732.9",  0x4000, 0x1000, 0x04efcefb )
+	ROM_REGION( 0x10000, REGION_CPU2 )	/* 64k for the audio CPU */
+	ROM_LOAD( "2732.1",       0x0000, 0x1000, 0xfc7729e9 )
+	ROM_LOAD( "2732.2",       0x1000, 0x1000, 0xe4e256da )
 
-	ROM_REGION(0x10000)	/* 64k for the audio CPU */
-	ROM_LOAD( "2732.1", 0x0000, 0x1000, 0x13b5696d )
-	ROM_LOAD( "2732.2", 0x1000, 0x1000, 0xd690636c )
+	ROM_REGION( 0x3000, REGION_GFX1 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "espial.8",     0x0000, 0x2000, 0x2f43036f )
+	ROM_LOAD( "espial.7",     0x2000, 0x1000, 0xebfef046 )
+
+	ROM_REGION( 0x2000, REGION_GFX2 | REGIONFLAG_DISPOSE )
+	ROM_LOAD( "espial.10",    0x0000, 0x1000, 0xde80fbc1 )
+	ROM_LOAD( "espial.9",     0x1000, 0x1000, 0x48c258a0 )
+
+	ROM_REGION( 0x0200, REGION_PROMS )
+	ROM_LOAD( "espial.1f",    0x0000, 0x0100, 0xd12de557 ) /* palette low 4 bits */
+	ROM_LOAD( "espial.1h",    0x0100, 0x0100, 0x4c84fe70 ) /* palette high 4 bits */
 ROM_END
 
 
 
-static int hiload(void)
-{
-	/* get RAM pointer (this game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
-
-
-	/* check if the hi score table has already been initialized */
-        if (memcmp(&RAM[0x584c],"\x81\x00\x13",3) == 0 &&
-			memcmp(&RAM[0x58B7],"\x0d\x0a\x27",3) == 0)
-	{
-		void *f;
-
-
-		if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,0)) != 0)
-		{
-			osd_fread(f,&RAM[0x584c],5*22);
-			osd_fclose(f);
-		}
-
-		return 1;
-	}
-	else return 0;	/* we can't load the hi scores yet */
-}
-
-
-
-static void hisave(void)
-{
-	void *f;
-	/* get RAM pointer (this game is multiCPU, we can't assume the global */
-	/* RAM pointer is pointing to the right place) */
-	unsigned char *RAM = Machine->memory_region[0];
-
-
-	if ((f = osd_fopen(Machine->gamedrv->name,0,OSD_FILETYPE_HIGHSCORE,1)) != 0)
-	{
-		osd_fwrite(f,&RAM[0x584c],5*22);
-		osd_fclose(f);
-	}
-}
-
-
-
-struct GameDriver espial_driver =
-{
-	"Espial",
-	"espial",
-	"Brad Oliver\nNicola Salmoria\nTim Lindquist (color info)\nJuan Carlos Lorente (high score save)",
-	&machine_driver,
-
-	espial_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	espial_input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	hiload, hisave
-};
-
-struct GameDriver espiale_driver =
-{
-	"Espial (European version)",
-	"espiale",
-	"Brad Oliver\nNicola Salmoria\nTim Lindquist (color info)\nJuan Carlos Lorente (high score save)",
-	&machine_driver,
-
-	espiale_rom,
-	0, 0,
-	0,
-	0,	/* sound_prom */
-
-	espial_input_ports,
-
-	color_prom, 0, 0,
-	ORIENTATION_DEFAULT,
-
-	hiload, hisave
-};
+GAMEX( 1983, espial,  0,      espial, espial, 0, ROT0, "[Orca] Thunderbolt", "Espial (US?)", GAME_NO_COCKTAIL )
+GAMEX( 1983, espiale, espial, espial, espial, 0, ROT0, "[Orca] Thunderbolt", "Espial (Europe)", GAME_NO_COCKTAIL )

@@ -9,7 +9,6 @@
 #include "driver.h"
 #include "vidhrdw/generic.h"
 
-static char *rawbitmap;
 
 static int x,y,screen_width;
 static int last_command;
@@ -18,20 +17,19 @@ static int last_command;
 // walks on the rainbow, he'd leave a trail behind him
 static int pending, pending_x, pending_y, pending_color;
 
-void leprechn_graphics_command_w(int offset,int data)
+WRITE_HANDLER( leprechn_graphics_command_w )
 {
     last_command = data;
 }
 
-void leprechn_graphics_data_w(int offset,int data)
+WRITE_HANDLER( leprechn_graphics_data_w )
 {
     int direction;
 
     if (pending)
     {
-        tmpbitmap->line[pending_y][pending_x] = Machine->pens[pending_color];
-        rawbitmap[pending_y * screen_width + pending_x] = pending_color;
-        osd_mark_dirty(pending_x,pending_y,pending_x,pending_y,0);
+		plot_pixel(Machine->scrbitmap, pending_x, pending_y, Machine->pens[pending_color]);
+        videoram[pending_y * screen_width + pending_x] = pending_color;
 
         pending = 0;
     }
@@ -112,20 +110,20 @@ void leprechn_graphics_data_w(int offset,int data)
 
     // Clear Bitmap
     case 0x18:
-        fillbitmap(tmpbitmap,Machine->pens[data],0);
-        memset(rawbitmap, data, screen_width * Machine->drv->screen_height);
+        fillbitmap(Machine->scrbitmap,Machine->pens[data],0);
+        memset(videoram, data, screen_width * Machine->drv->screen_height);
         osd_mark_dirty(0,0,screen_width-1,Machine->drv->screen_height-1,0);
         return;
     }
 
     // Just a precaution. Doesn't seem to happen.
-    if (errorlog) fprintf(errorlog, "Unknown Graphics Command #%2X at %04X\n", last_command, cpu_getpc());
+    logerror("Unknown Graphics Command #%2X at %04X\n", last_command, cpu_get_pc());
 }
 
 
-int leprechn_graphics_data_r(int offset)
+READ_HANDLER( leprechn_graphics_data_r )
 {
-    return rawbitmap[y * screen_width + x];
+    return videoram[y * screen_width + x];
 }
 
 
@@ -138,14 +136,8 @@ int leprechn_vh_start(void)
 {
     screen_width = Machine->drv->screen_width;
 
-    if ((rawbitmap = malloc(screen_width*Machine->drv->screen_height)) == 0)
+    if ((videoram = malloc(screen_width*Machine->drv->screen_height)) == 0)
     {
-        return 1;
-    }
-
-    if ((tmpbitmap = osd_new_bitmap(screen_width,Machine->drv->screen_height,Machine->scrbitmap->depth)) == 0)
-    {
-        free(rawbitmap);
         return 1;
     }
 
@@ -161,8 +153,7 @@ int leprechn_vh_start(void)
 ***************************************************************************/
 void leprechn_vh_stop(void)
 {
-    free(rawbitmap);
-    osd_free_bitmap(tmpbitmap);
+    free(videoram);
 }
 
 
@@ -173,7 +164,20 @@ void leprechn_vh_stop(void)
   the main emulation engine.
 
 ***************************************************************************/
-void leprechn_vh_screenrefresh(struct osd_bitmap *bitmap)
+void leprechn_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
 {
-    copybitmap(bitmap,tmpbitmap,0,0,0,0,&Machine->drv->visible_area,TRANSPARENCY_NONE,0);
+	if (full_refresh)
+	{
+		int sx, sy;
+
+		/* redraw bitmap */
+
+		for (sx = 0; sx < screen_width; sx++)
+		{
+			for (sy = 0; sy < Machine->drv->screen_height; sy++)
+			{
+				plot_pixel(Machine->scrbitmap, sx, sy, Machine->pens[videoram[sy * screen_width + sx]]);
+			}
+		}
+	}
 }
