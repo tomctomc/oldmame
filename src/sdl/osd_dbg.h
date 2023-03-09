@@ -12,11 +12,11 @@
 #endif
 
 #ifndef TRUE
-#define TRUE	1
+#define TRUE    1
 #endif
 
 #ifndef FALSE
-#define FALSE	0
+#define FALSE    0
 #endif
 
 #ifndef INVALID
@@ -78,17 +78,17 @@ static void osd_get_screen_size (unsigned *width, unsigned *height);
 
 static void osd_screen_update(void)
 {
-	/* nothing to do */
+    /* nothing to do */
 }
 
 static void osd_put_screen_char(int ch, int attr, int x, int y)
 {
-	ScreenPutChar(ch,attr,x,y);
+    ScreenPutChar(ch,attr,x,y);
 }
 
 static void osd_set_screen_curpos(int x, int y)
 {
-	ScreenSetCursor(y,x);
+    ScreenSetCursor(y,x);
 }
 
 /* DJGPPs conio.h text_info structure */
@@ -114,5 +114,5 @@ static void osd_get_screen_size( unsigned *width, unsigned *height )
 
 #endif  /* MAME_DEBUG */
 
-#endif	/* _OSD_DBG_H */
+#endif    /* _OSD_DBG_H */
 

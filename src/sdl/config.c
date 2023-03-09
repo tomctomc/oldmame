@@ -258,161 +258,161 @@ void get_rom_sample_path (int argc, char **argv, int game_index)
 
 void parse_cmdline (int argc, char **argv, int game_index)
 {
-	static float f_beam, f_flicker;
-	char *resolution;
-	char *vesamode;
-	char *joyname;
-	char tmpres[10];
-	int i;
-	char *tmpstr;
-	char *monitorname;
+    static float f_beam, f_flicker;
+    char *resolution;
+    char *vesamode;
+    char *joyname;
+    char tmpres[10];
+    int i;
+    char *tmpstr;
+    char *monitorname;
 
-	mame_argc = argc;
-	mame_argv = argv;
-	game = game_index;
-
-
-	/* force third mouse button emulation to "no" otherwise Allegro will default to "yes" */
-	set_config_string(0,"emulate_three","no");
-
-	/* read graphic configuration */
-	scanlines   = get_bool   ("config", "scanlines",    NULL,  1);
-	stretch     = get_bool   ("config", "stretch",		NULL,  1);
-	video_sync  = get_bool   ("config", "vsync",        NULL,  0);
-	use_dirty	= get_bool	 ("config", "dirty",	NULL,	-1);
-	options.antialias   = get_bool   ("config", "antialias",    NULL,  1);
-	options.translucency = get_bool    ("config", "translucency", NULL, 1);
-
-	tmpstr             = get_string ("config", "depth", NULL, "auto");
-	options.color_depth = atoi(tmpstr);
-	if (options.color_depth != 8 && options.color_depth != 16) options.color_depth = 0;	/* auto */
-
-	f_beam      = get_float  ("config", "beam",         NULL, 1.0);
-	if (f_beam < 1.0) f_beam = 1.0;
-	if (f_beam > 16.0) f_beam = 16.0;
-	f_flicker   = get_float  ("config", "flicker",      NULL, 0.0);
-	if (f_flicker < 0.0) f_flicker = 0.0;
-	if (f_flicker > 100.0) f_flicker = 100.0;
-	osd_gamma_correction = get_float ("config", "gamma",   NULL, 1.0);
-	if (osd_gamma_correction < 0.5) osd_gamma_correction = 0.5;
-	if (osd_gamma_correction > 2.0) osd_gamma_correction = 2.0;
-
-	tmpstr             = get_string ("config", "frameskip", "fs", "auto");
-	if (!stricmp(tmpstr,"auto"))
-	{
-		frameskip = 0;
-		autoframeskip = 1;
-	}
-	else
-	{
-		frameskip = atoi(tmpstr);
-		autoframeskip = 0;
-	}
-	options.norotate  = get_bool ("config", "norotate",  NULL, 0);
-	options.ror       = get_bool ("config", "ror",       NULL, 0);
-	options.rol       = get_bool ("config", "rol",       NULL, 0);
-	options.flipx     = get_bool ("config", "flipx",     NULL, 0);
-	options.flipy     = get_bool ("config", "flipy",     NULL, 0);
-
-	/* read sound configuration */
-	options.use_emulated_ym3812 = !get_bool ("config", "ym3812opl",  NULL,  0);
-	options.samplerate = get_int  ("config", "samplerate", "sr", 22050);
-	if (options.samplerate < 5000) options.samplerate = 5000;
-	if (options.samplerate > 50000) options.samplerate = 50000;
-	attenuation         = get_int  ("config", "volume",  NULL,  0);
-	if (attenuation < -32) attenuation = -32;
-	if (attenuation > 0) attenuation = 0;
-
-	/* read input configuration */
-	use_mouse = get_bool   ("config", "mouse",   NULL,  1);
-	joyname   = get_string ("config", "joystick", "joy", "none");
-
-	/* misc configuration */
-	options.cheat      = get_bool ("config", "cheat", NULL, 0);
-	options.mame_debug = get_bool ("config", "debug", NULL, 0);
-
-	#ifndef MESS
-	cheatfile  = get_string ("config", "cheatfile", "cf", "CHEAT.DAT");
-	#else
-	tmpstr  = get_string ("config", "cheatfile", "cf", "CHEAT.CDB");
-	/* I assume that CHEAT.DAT (in old MESS.CFG files) and CHEAT.CDB are default filenames */
-	if ((!stricmp(tmpstr,"cheat.dat")) || (!stricmp(tmpstr,"cheat.cdb")))
-		sprintf(cheatfile,"%s.cdb",drivers[game_index]->name);
-	else
-		sprintf(cheatfile,"%s",tmpstr);
-	#endif
+    mame_argc = argc;
+    mame_argv = argv;
+    game = game_index;
 
 
- 	#ifndef MESS
- 	history_filename  = get_string ("config", "historyfile", NULL, "HISTORY.DAT");    /* JCK 980917 */
- 	#else
- 	history_filename  = get_string ("config", "historyfile", NULL, "SYSINFO.DAT");
- 	#endif
+    /* force third mouse button emulation to "no" otherwise Allegro will default to "yes" */
+    set_config_string(0,"emulate_three","no");
 
-	mameinfo_filename  = get_string ("config", "mameinfofile", NULL, "MAMEINFO.DAT");    /* JCK 980917 */
+    /* read graphic configuration */
+    scanlines   = get_bool   ("config", "scanlines",    NULL,  1);
+    stretch     = get_bool   ("config", "stretch",        NULL,  1);
+    video_sync  = get_bool   ("config", "vsync",        NULL,  0);
+    use_dirty    = get_bool     ("config", "dirty",    NULL,    -1);
+    options.antialias   = get_bool   ("config", "antialias",    NULL,  1);
+    options.translucency = get_bool    ("config", "translucency", NULL, 1);
 
-	/* get resolution */
-	resolution  = get_string ("config", "resolution", NULL, "auto");
+    tmpstr             = get_string ("config", "depth", NULL, "auto");
+    options.color_depth = atoi(tmpstr);
+    if (options.color_depth != 8 && options.color_depth != 16) options.color_depth = 0;    /* auto */
 
-	/* set default subdirectories */
-	nvdir      = get_string ("directory", "nvram",   NULL, "NVRAM");
-	hidir      = get_string ("directory", "hi",      NULL, "HI");
-	cfgdir     = get_string ("directory", "cfg",     NULL, "CFG");
-	screenshotdir = get_string ("directory", "snap",     NULL, "SNAP");
-	memcarddir = get_string ("directory", "memcard", NULL, "MEMCARD");
-	stadir     = get_string ("directory", "sta",     NULL, "STA");
-	artworkdir = get_string ("directory", "artwork", NULL, "ARTWORK");
+    f_beam      = get_float  ("config", "beam",         NULL, 1.0);
+    if (f_beam < 1.0) f_beam = 1.0;
+    if (f_beam > 16.0) f_beam = 16.0;
+    f_flicker   = get_float  ("config", "flicker",      NULL, 0.0);
+    if (f_flicker < 0.0) f_flicker = 0.0;
+    if (f_flicker > 100.0) f_flicker = 100.0;
+    osd_gamma_correction = get_float ("config", "gamma",   NULL, 1.0);
+    if (osd_gamma_correction < 0.5) osd_gamma_correction = 0.5;
+    if (osd_gamma_correction > 2.0) osd_gamma_correction = 2.0;
 
- 	#ifndef MESS
-		cheatdir = get_string ("directory", "cheat", NULL, ".");
- 	#else
-		crcdir = get_string ("directory", "crc", NULL, "CRC");
-		cheatdir = get_string ("directory", "cheat", NULL, "CHEAT");
- 	#endif
+    tmpstr             = get_string ("config", "frameskip", "fs", "auto");
+    if (!stricmp(tmpstr,"auto"))
+    {
+        frameskip = 0;
+        autoframeskip = 1;
+    }
+    else
+    {
+        frameskip = atoi(tmpstr);
+        autoframeskip = 0;
+    }
+    options.norotate  = get_bool ("config", "norotate",  NULL, 0);
+    options.ror       = get_bool ("config", "ror",       NULL, 0);
+    options.rol       = get_bool ("config", "rol",       NULL, 0);
+    options.flipx     = get_bool ("config", "flipx",     NULL, 0);
+    options.flipy     = get_bool ("config", "flipy",     NULL, 0);
 
-	logerror("cheatfile = %s - cheatdir = %s\n",cheatfile,cheatdir);
+    /* read sound configuration */
+    options.use_emulated_ym3812 = !get_bool ("config", "ym3812opl",  NULL,  0);
+    options.samplerate = get_int  ("config", "samplerate", "sr", 22050);
+    if (options.samplerate < 5000) options.samplerate = 5000;
+    if (options.samplerate > 50000) options.samplerate = 50000;
+    attenuation         = get_int  ("config", "volume",  NULL,  0);
+    if (attenuation < -32) attenuation = -32;
+    if (attenuation > 0) attenuation = 0;
 
-	tmpstr = get_string ("config", "language", NULL, "english");
-	options.language_file = osd_fopen(0,tmpstr,OSD_FILETYPE_LANGUAGE,0);
+    /* read input configuration */
+    use_mouse = get_bool   ("config", "mouse",   NULL,  1);
+    joyname   = get_string ("config", "joystick", "joy", "none");
 
-	/* this is handled externally cause the audit stuff needs it, too */
-	get_rom_sample_path (argc, argv, game_index);
+    /* misc configuration */
+    options.cheat      = get_bool ("config", "cheat", NULL, 0);
+    options.mame_debug = get_bool ("config", "debug", NULL, 0);
 
-	/* process some parameters */
-	options.beam = (int)(f_beam * 0x00010000);
-	if (options.beam < 0x00010000)
-		options.beam = 0x00010000;
-	if (options.beam > 0x00100000)
-		options.beam = 0x00100000;
+    #ifndef MESS
+    cheatfile  = get_string ("config", "cheatfile", "cf", "CHEAT.DAT");
+    #else
+    tmpstr  = get_string ("config", "cheatfile", "cf", "CHEAT.CDB");
+    /* I assume that CHEAT.DAT (in old MESS.CFG files) and CHEAT.CDB are default filenames */
+    if ((!stricmp(tmpstr,"cheat.dat")) || (!stricmp(tmpstr,"cheat.cdb")))
+        sprintf(cheatfile,"%s.cdb",drivers[game_index]->name);
+    else
+        sprintf(cheatfile,"%s",tmpstr);
+    #endif
 
-	options.flicker = (int)(f_flicker * 2.55);
-	if (options.flicker < 0)
-		options.flicker = 0;
-	if (options.flicker > 255)
-		options.flicker = 255;
 
-	/* any option that starts with a digit is taken as a resolution option */
-	/* this is to handle the old "-wxh" commandline option. */
-	for (i = 1; i < argc; i++)
-	{
-		if (argv[i][0] == '-' && isdigit(argv[i][1]) &&
-				(strstr(argv[i],"x") || strstr(argv[i],"X")))
-			resolution = &argv[i][1];
-	}
+     #ifndef MESS
+     history_filename  = get_string ("config", "historyfile", NULL, "HISTORY.DAT");    /* JCK 980917 */
+     #else
+     history_filename  = get_string ("config", "historyfile", NULL, "SYSINFO.DAT");
+     #endif
 
-	/* break up resolution into gfx_width and gfx_height */
-	gfx_height = gfx_width = 0;
-	if (stricmp (resolution, "auto") != 0)
-	{
-		char *tmp;
-		strncpy (tmpres, resolution, 10);
-		tmp = strtok (tmpres, "xX");
-		gfx_width = atoi (tmp);
-		tmp = strtok (0, "xX");
-		if (tmp)
-			gfx_height = atoi (tmp);
+    mameinfo_filename  = get_string ("config", "mameinfofile", NULL, "MAMEINFO.DAT");    /* JCK 980917 */
 
-		options.vector_width = gfx_width;
-		options.vector_height = gfx_height;
-	}
+    /* get resolution */
+    resolution  = get_string ("config", "resolution", NULL, "auto");
+
+    /* set default subdirectories */
+    nvdir      = get_string ("directory", "nvram",   NULL, "NVRAM");
+    hidir      = get_string ("directory", "hi",      NULL, "HI");
+    cfgdir     = get_string ("directory", "cfg",     NULL, "CFG");
+    screenshotdir = get_string ("directory", "snap",     NULL, "SNAP");
+    memcarddir = get_string ("directory", "memcard", NULL, "MEMCARD");
+    stadir     = get_string ("directory", "sta",     NULL, "STA");
+    artworkdir = get_string ("directory", "artwork", NULL, "ARTWORK");
+
+     #ifndef MESS
+        cheatdir = get_string ("directory", "cheat", NULL, ".");
+     #else
+        crcdir = get_string ("directory", "crc", NULL, "CRC");
+        cheatdir = get_string ("directory", "cheat", NULL, "CHEAT");
+     #endif
+
+    logerror("cheatfile = %s - cheatdir = %s\n",cheatfile,cheatdir);
+
+    tmpstr = get_string ("config", "language", NULL, "english");
+    options.language_file = osd_fopen(0,tmpstr,OSD_FILETYPE_LANGUAGE,0);
+
+    /* this is handled externally cause the audit stuff needs it, too */
+    get_rom_sample_path (argc, argv, game_index);
+
+    /* process some parameters */
+    options.beam = (int)(f_beam * 0x00010000);
+    if (options.beam < 0x00010000)
+        options.beam = 0x00010000;
+    if (options.beam > 0x00100000)
+        options.beam = 0x00100000;
+
+    options.flicker = (int)(f_flicker * 2.55);
+    if (options.flicker < 0)
+        options.flicker = 0;
+    if (options.flicker > 255)
+        options.flicker = 255;
+
+    /* any option that starts with a digit is taken as a resolution option */
+    /* this is to handle the old "-wxh" commandline option. */
+    for (i = 1; i < argc; i++)
+    {
+        if (argv[i][0] == '-' && isdigit(argv[i][1]) &&
+                (strstr(argv[i],"x") || strstr(argv[i],"X")))
+            resolution = &argv[i][1];
+    }
+
+    /* break up resolution into gfx_width and gfx_height */
+    gfx_height = gfx_width = 0;
+    if (stricmp (resolution, "auto") != 0)
+    {
+        char *tmp;
+        strncpy (tmpres, resolution, 10);
+        tmp = strtok (tmpres, "xX");
+        gfx_width = atoi (tmp);
+        tmp = strtok (0, "xX");
+        if (tmp)
+            gfx_height = atoi (tmp);
+
+        options.vector_width = gfx_width;
+        options.vector_height = gfx_height;
+    }
 }

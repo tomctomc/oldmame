@@ -114,12 +114,12 @@ void osd_sound_enable(int enable_it)
 
 void osd_opl_control(int chip,int reg)
 {
-	printf( "TOMCXXX: osd_opl_control(%d,%d)\n", chip, reg);
+    printf( "TOMCXXX: osd_opl_control(%d,%d)\n", chip, reg);
 }
 
 void osd_opl_write(int chip,int data)
 {
-	printf( "TOMCXXX: osd_opl_write(%d,%d)\n", chip, data);
+    printf( "TOMCXXX: osd_opl_write(%d,%d)\n", chip, data);
 }
 
 void free_audio_channel_stream(AudioChannel *audioChannel)
@@ -139,14 +139,14 @@ void audioCallback(void *userdata, Uint8 *stream, int len)
         int avail = SDL_AudioStreamAvailable(audioChannel->audioStream);
         if( avail >= len && len > 0) {
             // we have enough data to fill the rest
-			while( len > 0 ) {
-				int actual = SDL_AudioStreamGet(audioChannel->audioStream, stream, len);
-				// actual should be len, but isn't always
-				len -= actual;
-				if( len > 0 ) {
-					fprintf(stderr,"TOMCXXX: SDL_AudioStreamGet() actual=%d  remaining=%d\n", actual, len );
-				}
-			}
+            while( len > 0 ) {
+                int actual = SDL_AudioStreamGet(audioChannel->audioStream, stream, len);
+                // actual should be len, but isn't always
+                len -= actual;
+                if( len > 0 ) {
+                    fprintf(stderr,"TOMCXXX: SDL_AudioStreamGet() actual=%d  remaining=%d\n", actual, len );
+                }
+            }
         }
         // else do nothing?
     }

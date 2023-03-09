@@ -65,16 +65,16 @@ int osd_init(void)
     frame_count       = 0;
     play_sound        = 1;
     displayScale      = 3; // default fairly big
-	attenuation = 0;
-	throttle = 1; /* toggled by F10 */
-	osd_gamma_correction = 1;
-	dirtycolor = NULL;
-	current_palette = NULL;
-	palette_16bit_lookup = NULL;
+    attenuation = 0;
+    throttle = 1; /* toggled by F10 */
+    osd_gamma_correction = 1;
+    dirtycolor = NULL;
+    current_palette = NULL;
+    palette_16bit_lookup = NULL;
 
     init_keymap();
 
-	init_sound();
+    init_sound();
 
     return 0;
 }
@@ -100,11 +100,11 @@ void osd_profiler(int type)
 
 void CLIB_DECL logerror(const char *text,...)
 {
-	va_list arg;
-	va_start(arg,text);
-	if (errorlog)
-		vfprintf(errorlog,text,arg);
-	va_end(arg);
+    va_list arg;
+    va_start(arg,text);
+    if (errorlog)
+        vfprintf(errorlog,text,arg);
+    va_end(arg);
 }
 
 unsigned int osd_cycles(void)
@@ -117,13 +117,13 @@ int main( int argc, char **argv )
     int res, j, game_index;
     char *playbackname = NULL;
 
-	memset(&options,0,sizeof(options));
+    memset(&options,0,sizeof(options));
 
     /* these two are not available in mame.cfg */
     ignorecfg = 0;
     errorlog = 0;
 
-	game_index = -1;
+    game_index = -1;
 
     for( int i = 1; i < argc; i++) /* V.V_121997 */
     {

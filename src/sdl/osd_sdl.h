@@ -29,8 +29,8 @@
 
 #define FRAMESKIP_LEVELS 12
 
-#define NUM_BUFFERS 3	/* raising this number should improve performance with frameskip, */
-						/* but also increases the latency. */
+#define NUM_BUFFERS 3    /* raising this number should improve performance with frameskip, */
+                         /* but also increases the latency. */
 
 extern void keep_alive(void);
 extern void poll_events(void);

@@ -11,28 +11,28 @@ static int keysdown[__code_max+1];               // which keys are currently pre
 
 void set_keymap( int keylistindex, int scancode, const char *name, int keycode )
 {
-	struct KeyboardInfo  info;
+    struct KeyboardInfo  info;
 
-	info.code         = scancode;
-	info.standardcode = keycode;
-	info.name         = name;
+    info.code         = scancode;
+    info.standardcode = keycode;
+    info.name         = name;
 
 
-	keymap_by_keycode[ keycode     ] =  info;
-	keymap_by_scancode[scancode    ] =  info;
+    keymap_by_keycode[ keycode     ] =  info;
+    keymap_by_scancode[scancode    ] =  info;
 
-	// mame keylist order (and code values) *must* stay fixed
-	info.code = keylistindex;
-	keylist[keylistindex] = info;
+    // mame keylist order (and code values) *must* stay fixed
+    info.code = keylistindex;
+    keylist[keylistindex] = info;
 }
 
 void init_keymap()
 {
     // we just use a giant array to map SDL_SCANCODE_XXX to KEY_XXX
 
-	int index = 0;
+    int index = 0;
 
-	// order here is critical
+    // order here is critical
     set_keymap( index++, SDL_SCANCODE_A,              "A",         KEYCODE_A          );
     set_keymap( index++, SDL_SCANCODE_B,              "B",         KEYCODE_B          );
     set_keymap( index++, SDL_SCANCODE_C,              "C",         KEYCODE_C          );
@@ -132,11 +132,11 @@ void init_keymap()
     set_keymap( index++, SDL_SCANCODE_RCTRL,          "RCTRL",     KEYCODE_RCONTROL   );
     set_keymap( index++, SDL_SCANCODE_LALT,           "ALT",       KEYCODE_LALT       );
     set_keymap( index++, SDL_SCANCODE_RALT,           "ALTGR",     KEYCODE_RALT       );
-	/*
+    /*
     set_keymap( index++, SDL_SCANCODE_LGUI,           "LWIN",      KEYCODE_OTHER      );
     set_keymap( index++, SDL_SCANCODE_RGUI,           "RWIN",      KEYCODE_OTHER      );
     set_keymap( index++, SDL_SCANCODE_MENU,           "MENU",      KEYCODE_OTHER      );
-	*/
+    */
     set_keymap( index++, SDL_SCANCODE_SCROLLLOCK,     "SCRLOCK",   KEYCODE_SCRLOCK    );
     set_keymap( index++, SDL_SCANCODE_NUMLOCKCLEAR,   "NUMLOCK",   KEYCODE_NUMLOCK    );
     set_keymap( index++, SDL_SCANCODE_CAPSLOCK,       "CAPSLOCK",  KEYCODE_CAPSLOCK   );
@@ -238,12 +238,12 @@ int osd_wait_keypress(void)
 
 int osd_readkey_unicode(int flush)
 {
-	struct KeyboardInfo *key = &keymap_by_keycode[osd_wait_keypress()];
-	int unicode = 0;
-	if( key->name ) {
-		unicode = key->name[0]; // TOMCXXXX this is inadequate
-	}
-	return unicode;
+    struct KeyboardInfo *key = &keymap_by_keycode[osd_wait_keypress()];
+    int unicode = 0;
+    if( key->name ) {
+        unicode = key->name[0]; // TOMCXXXX this is inadequate
+    }
+    return unicode;
 }
 
 #define MAX_JOY 256
@@ -251,18 +251,18 @@ int osd_readkey_unicode(int flush)
 
 static struct JoystickInfo joylist[MAX_JOY] =
 {
-	/* will be filled later */
-	{ 0, 0, 0 }	/* end of table */
+    /* will be filled later */
+    { 0, 0, 0 }    /* end of table */
 };
 
 const struct JoystickInfo *osd_get_joy_list(void)
 {
-	return joylist;
+    return joylist;
 }
 
 int osd_is_joy_pressed(int joycode)
 {
-	return 0;
+    return 0;
 }
 
 void osd_poll_joysticks(void)
