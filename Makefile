@@ -91,7 +91,9 @@ LIBS   = -lSDL2 -lSDL2_mixer -lm -lz
 
 #if obj subdirectory doesn't exist, create the tree before proceeding
 ifeq ($(wildcard $(OBJ)),)
-noobj: maketree all
+noobj:
+	${MAKE} maketree
+	${MAKE} all
 endif
 
 all:	$(EMULATOR) extra
